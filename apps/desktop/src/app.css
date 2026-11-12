@@ -1,5 +1,7 @@
+/* Thème jour (par défaut). Le thème actif est porté par
+   <html data-theme="day|night">, piloté par l'application. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   font-family:
     system-ui,
     -apple-system,
@@ -7,23 +9,37 @@
     Roboto,
     sans-serif;
   line-height: 1.5;
-  --bg: #f5f7fa;
+  --bg: #dfe9ee;
   --fg: #12202f;
   --muted: #5b6b7c;
+  --panel-bg: rgba(255, 255, 255, 0.92);
+  --button-bg: #f2f5f8;
+  --border: #b8c4cf;
   --warn-bg: #fff4d6;
   --warn-fg: #6b4b00;
+  --sim-bg: #ffe0b2;
+  --sim-fg: #7a3e00;
+  --alert-bg: #ffcdd2;
+  --alert-fg: #8e0000;
   --error-fg: #b00020;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0b1622;
-    --fg: #e3ebf3;
-    --muted: #93a4b5;
-    --warn-bg: #3a2e0a;
-    --warn-fg: #ffd98a;
-    --error-fg: #ff8a8a;
-  }
+/* Thème nuit : faible luminosité pour préserver la vision nocturne. */
+:root[data-theme='night'] {
+  color-scheme: dark;
+  --bg: #05080c;
+  --fg: #c9a9a0;
+  --muted: #7d6a64;
+  --panel-bg: rgba(10, 8, 8, 0.9);
+  --button-bg: #1a1212;
+  --border: #3d2b28;
+  --warn-bg: #2a1a08;
+  --warn-fg: #c79a5a;
+  --sim-bg: #3a2306;
+  --sim-fg: #e0a050;
+  --alert-bg: #4a0d0d;
+  --alert-fg: #ff8a80;
+  --error-fg: #ff6e6e;
 }
 
 html,
@@ -36,4 +52,11 @@ body {
 
 #app {
   height: 100%;
+}
+
+/* Contrôles MapLibre en mode nuit. */
+:root[data-theme='night'] .maplibregl-ctrl-group,
+:root[data-theme='night'] .maplibregl-ctrl-attrib,
+:root[data-theme='night'] .maplibregl-ctrl-scale {
+  filter: invert(0.85) sepia(0.6) hue-rotate(-30deg) brightness(0.6);
 }

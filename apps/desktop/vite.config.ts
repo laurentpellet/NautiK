@@ -18,6 +18,8 @@ export default defineConfig({
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: {
     target: 'es2022',
+    // MapLibre (~1 Mo) est servi localement, en chunk séparé chargé à la demande.
+    chunkSizeWarningLimit: 1200,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     minify: !process.env.TAURI_ENV_DEBUG,
   },

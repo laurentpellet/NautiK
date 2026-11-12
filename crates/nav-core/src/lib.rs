@@ -14,6 +14,11 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod position;
+pub mod simulation;
+
+pub use position::{GeoPosition, PositionError, PositionFix, SourceKind};
+
 /// Version du moteur NautiK (version du workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

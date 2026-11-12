@@ -37,21 +37,37 @@ Critères :
 
 ## Phase 1 — Cartographie
 
-- [ ] Installer MapLibre GL JS.
-- [ ] Créer ChartView.svelte.
-- [ ] Créer nav-charts.
-- [ ] Lire les métadonnées MBTiles.
-- [ ] Servir les tuiles raster.
-- [ ] Charger plusieurs cartes.
-- [ ] Ajouter zoom et rotation.
-- [ ] Ajouter le mode Nord en haut.
-- [ ] Ajouter le mode sombre.
-- [ ] Afficher une position simulée.
+- [x] Installer MapLibre GL JS.
+- [x] Créer ChartView.svelte.
+- [x] Créer nav-charts.
+- [x] Lire les métadonnées MBTiles.
+- [x] Servir les tuiles raster.
+- [x] Charger plusieurs cartes.
+- [x] Ajouter zoom et rotation.
+- [x] Ajouter le mode Nord en haut.
+- [x] Ajouter le mode sombre.
+- [x] Afficher une position simulée.
 
 Critères :
-- Carte affichée sans Internet.
-- Zoom fluide.
-- Position simulée visible.
+- [x] Carte affichée sans Internet.
+- [x] Zoom fluide.
+- [x] Position simulée visible.
+
+État (2026-11-12) : phase 1 terminée.
+- Rust : fmt, clippy (`-D warnings`), 74 tests (dont 8 tests
+  d'intégration MBTiles : fichiers corrompus, vides, vectoriels,
+  sans tables, cartes multiples, lecture seule).
+- Frontend : lint, svelte-check, 70 tests Vitest, build.
+- Recette visuelle sous Windows 11 avec deux cartes de test
+  générées (`make_test_chart`, voir `fixtures/README.md`) et une
+  carte raster réelle de Polynésie (~1 Go, chargée en 0,15 s).
+- Tuiles servies par le protocole local `nautik-tiles` ; CSP
+  limitée aux sources locales.
+- Position simulée fixe dans la passe de Tiputa (Rangiroa) ;
+  déplacement simulé après nav-geodesy.
+- Niveau de zoom affiché sur la carte.
+- Seuil « position obsolète » (5 s) provisoirement côté
+  interface ; à porter dans le moteur en phase 3.
 
 ## Phase 2 — Navigation
 

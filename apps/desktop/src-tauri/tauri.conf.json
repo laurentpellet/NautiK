@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: nautik-tiles: http://nautik-tiles.localhost; font-src 'self'; connect-src ipc: http://ipc.localhost nautik-tiles: http://nautik-tiles.localhost; worker-src 'self' blob:; child-src blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
       "freezePrototype": true
     }
   },

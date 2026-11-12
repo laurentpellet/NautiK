@@ -14,7 +14,8 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.12.4"
+    "@tauri-apps/api": "^2.12.4",
+    "maplibre-gl": "^6.18.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
