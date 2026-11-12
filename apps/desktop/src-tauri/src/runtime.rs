@@ -1,8 +1,9 @@
-//! État partagé de l'application, boucle périodique et flux Signal K.
+//! État partagé de l'application, boucle périodique et connecteurs
+//! d'acquisition (Signal K, NMEA 0183).
 //!
 //! La boucle appelle [`Engine::tick`] chaque seconde et diffuse
-//! l'instantané des instruments. Les relevés (simulés ou Signal K)
-//! passent par [`publish_update`] : navigation diffusée, points de trace
+//! l'instantané des instruments. Les relevés (simulés ou reçus) passent
+//! par [`publish_update`] : navigation diffusée, points de trace
 //! persistés.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,9 +11,12 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use chrono::Utc;
+use nav_core::{ConnectionState, Sample};
+use nav_nmea0183::{NmeaEvent, Transport};
 use nav_routing::NavigationStatus;
-use nav_signalk::{ClientOptions, ConnectionState, Sample, SignalKConfig, SignalKEvent};
+use nav_signalk::{SignalKConfig, SignalKEvent};
 use nav_storage::{Db, StorageError};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, watch};
 
@@ -27,20 +31,34 @@ pub const INSTRUMENTS_EVENT: &str = "instruments";
 /// navigation est désactivée.
 pub const NAVIGATION_EVENT: &str = "navigation-status";
 
-/// Événement portant l'état de la connexion Signal K (ou `null` en mode
-/// simulateur).
-pub const SIGNALK_STATUS_EVENT: &str = "signalk-status";
+/// Événement portant l'état de la liaison d'acquisition (ou `null` en
+/// mode simulateur).
+pub const SOURCE_STATUS_EVENT: &str = "source-status";
+
+/// Événement portant les données rejetées ([`Rejections`]).
+pub const SOURCE_REJECTIONS_EVENT: &str = "source-rejections";
 
 /// Période de la boucle moteur.
 const TICK_PERIOD: Duration = Duration::from_secs(1);
 
-/// Capacité du canal d'événements Signal K.
-const SIGNALK_CHANNEL: usize = 256;
+/// Capacité du canal d'événements d'un connecteur.
+const SOURCE_CHANNEL: usize = 256;
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     // Un verrou empoisonné est récupéré : chaque opération protégée est
     // atomique en mémoire et laisse l'état cohérent.
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Données rejetées par le connecteur courant (phrases invalides,
+/// valeurs hors bornes, flux excessif).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rejections {
+    /// Nombre de rejets depuis le démarrage du connecteur.
+    pub count: u64,
+    /// Cause du dernier rejet.
+    pub last_reason: Option<String>,
 }
 
 /// État partagé, géré par Tauri.
@@ -51,10 +69,11 @@ pub struct AppState {
     pub secrets: Arc<dyn SecretStore>,
     engine: Mutex<Engine>,
     connection: Mutex<Option<ConnectionState>>,
-    signalk_stop: Mutex<Option<watch::Sender<bool>>>,
-    /// Génération de la session Signal K : les événements d'une session
-    /// remplacée sont ignorés.
-    signalk_generation: AtomicU64,
+    rejections: Mutex<Rejections>,
+    source_stop: Mutex<Option<watch::Sender<bool>>>,
+    /// Génération du connecteur : les événements d'un connecteur
+    /// remplacé sont ignorés.
+    source_generation: AtomicU64,
 }
 
 impl AppState {
@@ -66,8 +85,9 @@ impl AppState {
             secrets,
             engine: Mutex::new(engine),
             connection: Mutex::new(None),
-            signalk_stop: Mutex::new(None),
-            signalk_generation: AtomicU64::new(0),
+            rejections: Mutex::new(Rejections::default()),
+            source_stop: Mutex::new(None),
+            source_generation: AtomicU64::new(0),
         }
     }
 
@@ -77,29 +97,36 @@ impl AppState {
         lock(&self.engine)
     }
 
-    /// Dernier état connu de la connexion Signal K.
+    /// Dernier état connu de la liaison.
     #[must_use]
     pub fn connection(&self) -> Option<ConnectionState> {
         lock(&self.connection).clone()
     }
 
-    fn is_current(&self, generation: u64) -> bool {
-        self.signalk_generation.load(Ordering::SeqCst) == generation
+    /// Rejets du connecteur courant.
+    #[must_use]
+    pub fn rejections(&self) -> Rejections {
+        lock(&self.rejections).clone()
     }
 
-    /// Arrête le client Signal K éventuel et invalide ses événements.
-    /// Retourne la génération de la prochaine session.
-    pub fn stop_signalk(&self) -> u64 {
-        let generation = self.signalk_generation.fetch_add(1, Ordering::SeqCst) + 1;
-        if let Some(stop) = lock(&self.signalk_stop).take() {
+    fn is_current(&self, generation: u64) -> bool {
+        self.source_generation.load(Ordering::SeqCst) == generation
+    }
+
+    /// Arrête le connecteur éventuel et invalide ses événements.
+    /// Retourne la génération du prochain connecteur.
+    pub fn stop_source(&self) -> u64 {
+        let generation = self.source_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(stop) = lock(&self.source_stop).take() {
             let _ = stop.send(true);
         }
         *lock(&self.connection) = None;
+        *lock(&self.rejections) = Rejections::default();
         generation
     }
 
-    fn set_signalk_stop(&self, stop: watch::Sender<bool>) {
-        *lock(&self.signalk_stop) = Some(stop);
+    fn set_source_stop(&self, stop: watch::Sender<bool>) {
+        *lock(&self.source_stop) = Some(stop);
     }
 }
 
@@ -110,10 +137,17 @@ pub fn emit_navigation(app: &AppHandle, status: Option<&NavigationStatus>) {
     }
 }
 
-/// Diffuse l'état de connexion Signal K (ou `null`).
+/// Diffuse l'état de la liaison (ou `null`).
 pub fn emit_connection(app: &AppHandle, state: Option<&ConnectionState>) {
-    if let Err(error) = app.emit(SIGNALK_STATUS_EVENT, state) {
-        tracing::warn!(error = %error, "émission de l'état Signal K impossible");
+    if let Err(error) = app.emit(SOURCE_STATUS_EVENT, state) {
+        tracing::warn!(error = %error, "émission de l'état de la source impossible");
+    }
+}
+
+/// Diffuse les rejets.
+pub fn emit_rejections(app: &AppHandle, rejections: &Rejections) {
+    if let Err(error) = app.emit(SOURCE_REJECTIONS_EVENT, rejections) {
+        tracing::warn!(error = %error, "émission des rejets impossible");
     }
 }
 
@@ -139,6 +173,7 @@ pub async fn publish_update(app: &AppHandle, state: &AppState, update: FixUpdate
 pub fn spawn_engine_loop(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(TICK_PERIOD);
+        let mut published = Rejections::default();
         loop {
             interval.tick().await;
             let Some(state) = app.try_state::<AppState>() else {
@@ -152,55 +187,116 @@ pub fn spawn_engine_loop(app: AppHandle) {
             if let Err(error) = app.emit(INSTRUMENTS_EVENT, &tick.snapshot) {
                 tracing::warn!(error = %error, "émission des instruments impossible");
             }
+            // Rejets : diffusés au plus une fois par seconde, s'ils ont
+            // changé.
+            let rejections = state.rejections();
+            if rejections != published {
+                emit_rejections(&app, &rejections);
+                published = rejections;
+            }
         }
     });
 }
 
+/// Événement d'un connecteur, quelle que soit sa nature.
+enum SourceEvent {
+    State(ConnectionState),
+    Sample(Sample),
+    Rejected(String),
+}
+
+impl From<SignalKEvent> for SourceEvent {
+    fn from(event: SignalKEvent) -> Self {
+        match event {
+            SignalKEvent::State(s) => Self::State(s),
+            SignalKEvent::Sample(s) => Self::Sample(s),
+            SignalKEvent::Rejected(r) => Self::Rejected(r),
+        }
+    }
+}
+
+impl From<NmeaEvent> for SourceEvent {
+    fn from(event: NmeaEvent) -> Self {
+        match event {
+            NmeaEvent::State(s) => Self::State(s),
+            NmeaEvent::Sample(s) => Self::Sample(s),
+            NmeaEvent::Rejected(r) => Self::Rejected(r),
+        }
+    }
+}
+
 /// Démarre un client Signal K et le traitement de ses événements.
 pub fn spawn_signalk(app: AppHandle, state: &AppState, config: SignalKConfig, generation: u64) {
-    let (tx, mut rx) = mpsc::channel(SIGNALK_CHANNEL);
+    let (tx, rx) = mpsc::channel(SOURCE_CHANNEL);
     let (stop, stop_rx) = watch::channel(false);
-    state.set_signalk_stop(stop);
+    state.set_source_stop(stop);
     tracing::info!(url = %config.display_url(), "démarrage du client Signal K");
     tauri::async_runtime::spawn(nav_signalk::run(
         config,
-        ClientOptions::default(),
+        nav_signalk::ClientOptions::default(),
         tx,
         stop_rx,
     ));
+    spawn_consumer(app, SourceMode::SignalK, generation, rx);
+}
+
+/// Démarre une liaison NMEA 0183 et le traitement de ses événements.
+pub fn spawn_nmea(app: AppHandle, state: &AppState, transport: Transport, generation: u64) {
+    let (tx, rx) = mpsc::channel(SOURCE_CHANNEL);
+    let (stop, stop_rx) = watch::channel(false);
+    state.set_source_stop(stop);
+    tracing::info!(link = %transport.describe(), "démarrage de la liaison NMEA 0183");
+    tauri::async_runtime::spawn(nav_nmea0183::run(
+        transport,
+        nav_nmea0183::ClientOptions::default(),
+        tx,
+        stop_rx,
+    ));
+    spawn_consumer(app, SourceMode::Nmea0183, generation, rx);
+}
+
+fn spawn_consumer<E>(app: AppHandle, mode: SourceMode, generation: u64, mut rx: mpsc::Receiver<E>)
+where
+    E: Into<SourceEvent> + Send + 'static,
+{
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             let Some(state) = app.try_state::<AppState>() else {
                 return;
             };
             if !state.is_current(generation) {
-                // Session remplacée : ses données ne doivent pas se mêler
-                // à celles de la nouvelle source.
+                // Connecteur remplacé : ses données ne doivent pas se
+                // mêler à celles de la nouvelle source.
                 continue;
             }
-            match event {
-                SignalKEvent::State(connection) => {
+            match event.into() {
+                SourceEvent::State(connection) => {
                     *lock(&state.connection) = Some(connection.clone());
                     emit_connection(&app, Some(&connection));
                 }
-                SignalKEvent::Sample(Sample::Position(fix)) => {
+                SourceEvent::Sample(Sample::Position(fix)) => {
                     let update = {
                         let mut engine = state.engine();
-                        if engine.mode() != SourceMode::SignalK {
+                        if engine.mode() != mode {
                             continue;
                         }
                         engine.on_fix(fix)
                     };
-                    publish_update(&app, &state, update).await;
+                    if let Some(update) = update {
+                        publish_update(&app, &state, update).await;
+                    }
                 }
-                SignalKEvent::Sample(Sample::Measurement(measurement)) => {
+                SourceEvent::Sample(Sample::Measurement(measurement)) => {
                     let mut engine = state.engine();
-                    if engine.mode() == SourceMode::SignalK {
+                    if engine.mode() == mode {
                         engine.on_measurement(measurement);
                     }
                 }
-                SignalKEvent::Rejected(reason) => {
-                    tracing::debug!(%reason, "donnée Signal K rejetée");
+                SourceEvent::Rejected(reason) => {
+                    tracing::debug!(%reason, "donnée rejetée");
+                    let mut r = lock(&state.rejections);
+                    r.count = r.count.saturating_add(1);
+                    r.last_reason = Some(reason);
                 }
             }
         }

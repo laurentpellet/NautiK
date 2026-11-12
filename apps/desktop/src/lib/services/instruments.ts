@@ -1,8 +1,9 @@
 /**
- * Instruments, état de la connexion Signal K et choix de la source.
+ * Instruments, état de la liaison d'acquisition et choix de la source.
  *
- * La fraîcheur (`ageMs`, `stale`) est calculée par le moteur : l'interface
- * l'affiche sans la recalculer. Toutes les données reçues sont validées.
+ * La fraîcheur (`ageMs`, `stale`) et l'arbitrage des sources sont
+ * calculés par le moteur : l'interface les affiche sans les recalculer.
+ * Toutes les données reçues sont validées.
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -29,8 +30,11 @@ import {
 /** Instantané périodique du moteur (`INSTRUMENTS_EVENT`). */
 export const INSTRUMENTS_EVENT = 'instruments';
 
-/** État de la connexion Signal K (`SIGNALK_STATUS_EVENT`). */
-export const SIGNALK_STATUS_EVENT = 'signalk-status';
+/** État de la liaison d'acquisition (`SOURCE_STATUS_EVENT`). */
+export const SOURCE_STATUS_EVENT = 'source-status';
+
+/** Données rejetées par la liaison (`SOURCE_REJECTIONS_EVENT`). */
+export const SOURCE_REJECTIONS_EVENT = 'source-rejections';
 
 /** Grandeurs mesurées (miroir de `nav_core::Quantity`), en unités SI. */
 export const QUANTITIES = [
@@ -54,6 +58,8 @@ export interface PositionStatus {
   fix: PositionFix;
   ageMs: number;
   stale: boolean;
+  /** Nombre de sources de position fraîches (arbitrage). */
+  freshSources: number;
 }
 
 export interface Reading {
@@ -65,6 +71,8 @@ export interface Reading {
   measuredAt: number;
   ageMs: number;
   stale: boolean;
+  /** Nombre de sources fraîches pour cette grandeur. */
+  freshSources: number;
 }
 
 export interface InstrumentsSnapshot {
@@ -73,18 +81,19 @@ export interface InstrumentsSnapshot {
   readings: Reading[];
 }
 
-const MAX_AGE_MS = Number.MAX_SAFE_INTEGER;
+const MAX_COUNT = Number.MAX_SAFE_INTEGER;
 
-function parseAge(value: unknown, what: string): number {
-  return expectInteger(value, what, 0, MAX_AGE_MS);
+function parseCount(value: unknown, what: string): number {
+  return expectInteger(value, what, 0, MAX_COUNT);
 }
 
 function parsePositionStatus(value: unknown): PositionStatus {
   const r = expectRecord(value, 'position');
   return {
     fix: parsePositionFix(r.fix),
-    ageMs: parseAge(r.ageMs, 'position.ageMs'),
+    ageMs: parseCount(r.ageMs, 'position.ageMs'),
     stale: expectBoolean(r.stale, 'position.stale'),
+    freshSources: parseCount(r.freshSources, 'position.freshSources'),
   };
 }
 
@@ -104,8 +113,9 @@ function parseReading(value: unknown): Reading {
     source,
     sourceId: expectString(r.sourceId, 'sourceId'),
     measuredAt: expectTimestamp(r.measuredAt, 'measuredAt'),
-    ageMs: parseAge(r.ageMs, 'ageMs'),
+    ageMs: parseCount(r.ageMs, 'ageMs'),
     stale: expectBoolean(r.stale, 'stale'),
+    freshSources: parseCount(r.freshSources, 'freshSources'),
   };
 }
 
@@ -119,7 +129,7 @@ export function parseInstrumentsSnapshot(value: unknown): InstrumentsSnapshot {
   };
 }
 
-/** État de la connexion Signal K (miroir de `nav_signalk::ConnectionState`). */
+/** État de la liaison (miroir de `nav_core::ConnectionState`). */
 export type ConnectionState =
   | { state: 'connecting'; attempt: number }
   | { state: 'connected'; serverName: string | null; serverVersion: string | null }
@@ -144,7 +154,7 @@ export function parseConnectionState(value: unknown): ConnectionState {
       return {
         state,
         reason: expectString(r.reason, 'reason'),
-        retryInMs: parseAge(r.retryInMs, 'retryInMs'),
+        retryInMs: parseCount(r.retryInMs, 'retryInMs'),
       };
     case 'stopped':
       return { state };
@@ -153,33 +163,100 @@ export function parseConnectionState(value: unknown): ConnectionState {
   }
 }
 
-export type SourceMode = 'simulator' | 'signalK';
+/** Données rejetées par la liaison courante. */
+export interface Rejections {
+  count: number;
+  lastReason: string | null;
+}
+
+export function parseRejections(value: unknown): Rejections {
+  const r = expectRecord(value, 'rejets');
+  return {
+    count: parseCount(r.count, 'count'),
+    lastReason: optional(r.lastReason, (v) => expectString(v, 'lastReason')),
+  };
+}
+
+export type SourceMode = 'simulator' | 'signalK' | 'nmea0183';
+
+const SOURCE_MODES: readonly string[] = ['simulator', 'signalK', 'nmea0183'];
+
+function isSourceMode(value: string): value is SourceMode {
+  return SOURCE_MODES.includes(value);
+}
+
+/** Débits série acceptés par le moteur. */
+export const BAUD_RATES = [4800, 9600, 19200, 38400, 57600, 115200] as const;
+
+/** Port TCP/UDP NMEA usuel. */
+export const DEFAULT_NMEA_PORT = 10110;
+
+/** Liaison NMEA 0183 (miroir de `NmeaSettings`). */
+export type NmeaSettings =
+  | { kind: 'tcp'; host: string; port: number }
+  | { kind: 'udp'; port: number }
+  | { kind: 'serial'; path: string; baudRate: number }
+  | { kind: 'replay'; path: string };
+
+function parsePort(value: unknown): number {
+  return expectInteger(value, 'port', 1, 65535);
+}
+
+export function parseNmeaSettings(value: unknown): NmeaSettings {
+  const r = expectRecord(value, 'nmea');
+  const kind = expectString(r.kind, 'kind');
+  switch (kind) {
+    case 'tcp':
+      return { kind, host: expectString(r.host, 'host'), port: parsePort(r.port) };
+    case 'udp':
+      return { kind, port: parsePort(r.port) };
+    case 'serial':
+      return {
+        kind,
+        path: expectString(r.path, 'path'),
+        baudRate: expectInteger(r.baudRate, 'baudRate', 1, 10_000_000),
+      };
+    case 'replay':
+      return { kind, path: expectString(r.path, 'path') };
+    default:
+      throw new EngineProtocolError(`liaison NMEA inconnue : ${kind}`);
+  }
+}
 
 export interface SourcesView {
   mode: SourceMode;
   signalkUrl: string | null;
+  nmea: NmeaSettings | null;
+  /** Priorités des sources (identifiants ou préfixes). */
+  priorities: string[];
   /** Un jeton est enregistré (sa valeur n'est jamais transmise). */
   tokenStored: boolean;
   connection: ConnectionState | null;
+  rejections: Rejections;
 }
 
 export function parseSourcesView(value: unknown): SourcesView {
   const r = expectRecord(value, 'sources');
   const mode = expectString(r.mode, 'mode');
-  if (mode !== 'simulator' && mode !== 'signalK') {
+  if (!isSourceMode(mode)) {
     throw new EngineProtocolError(`mode de source inconnu : ${mode}`);
   }
   return {
     mode,
     signalkUrl: optional(r.signalkUrl, (v) => expectString(v, 'signalkUrl')),
+    nmea: optional(r.nmea, parseNmeaSettings),
+    priorities: expectArray(r.priorities, 'priorities', (v) => expectString(v, 'priorité')),
     tokenStored: expectBoolean(r.tokenStored, 'tokenStored'),
     connection: optional(r.connection, parseConnectionState),
+    rejections: parseRejections(r.rejections),
   };
 }
 
 export interface SourcesRequest {
   mode: SourceMode;
   signalkUrl: string | null;
+  nmea: NmeaSettings | null;
+  priorities: string[];
   /** Nouveau jeton ; `null` = inchangé. */
   token: string | null;
   clearToken: boolean;
@@ -196,11 +273,29 @@ export class SourcesApi {
   async set(request: SourcesRequest): Promise<SourcesView> {
     return parseSourcesView(
       await this.invokeFn('set_sources', {
-        mode: request.mode,
-        signalkUrl: request.signalkUrl,
-        token: request.token,
-        clearToken: request.clearToken,
+        request: {
+          mode: request.mode,
+          signalkUrl: request.signalkUrl,
+          nmea: request.nmea,
+          priorities: request.priorities,
+          token: request.token,
+          clearToken: request.clearToken,
+        },
       }),
+    );
+  }
+
+  /** Ports série présents sur la machine. */
+  async serialPorts(): Promise<string[]> {
+    return expectArray(await this.invokeFn('list_serial_ports'), 'ports', (v) =>
+      expectString(v, 'port'),
+    );
+  }
+
+  /** Choix d'un enregistrement à rejouer (dialogue du système). */
+  async chooseRecording(): Promise<string | null> {
+    return optional(await this.invokeFn('choose_nmea_recording'), (v) =>
+      expectString(v, 'fichier'),
     );
   }
 }
@@ -230,17 +325,26 @@ export function subscribeInstruments(
   return subscribe(INSTRUMENTS_EVENT, parseInstrumentsSnapshot, onSnapshot, onError, listenFn);
 }
 
-/** S'abonne à l'état Signal K (`null` hors mode Signal K). */
+/** S'abonne à l'état de la liaison (`null` en mode simulateur). */
 export function subscribeConnection(
   onState: (state: ConnectionState | null) => void,
   onError: (error: Error) => void,
   listenFn: ListenFn = listen,
 ): Promise<UnlistenFn> {
   return subscribe(
-    SIGNALK_STATUS_EVENT,
+    SOURCE_STATUS_EVENT,
     (v) => optional(v, parseConnectionState),
     onState,
     onError,
     listenFn,
   );
+}
+
+/** S'abonne aux rejets de la liaison. */
+export function subscribeRejections(
+  onRejections: (rejections: Rejections) => void,
+  onError: (error: Error) => void,
+  listenFn: ListenFn = listen,
+): Promise<UnlistenFn> {
+  return subscribe(SOURCE_REJECTIONS_EVENT, parseRejections, onRejections, onError, listenFn);
 }

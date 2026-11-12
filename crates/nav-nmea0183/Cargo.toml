@@ -8,7 +8,17 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+chrono.workspace = true
 nav-core.workspace = true
+nav-geodesy.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+# Lecture des ports série (USB/RS-422) en asynchrone.
+tokio-serial.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

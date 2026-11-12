@@ -6,6 +6,7 @@
 //! l'AIS.
 
 use chrono::{DateTime, Utc};
+pub use nav_core::link::Sample;
 use nav_core::{GeoPosition, Measurement, PositionFix, Quantity, SourceKind};
 use serde::Deserialize;
 use serde_json::Value;
@@ -64,15 +65,6 @@ pub enum DeltaError {
     /// JSON invalide.
     #[error("JSON invalide : {0}")]
     Json(String),
-}
-
-/// Échantillon normalisé extrait d'un delta.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Sample {
-    /// Position du bateau.
-    Position(PositionFix),
-    /// Mesure d'instrument.
-    Measurement(Measurement),
 }
 
 /// Informations du message `hello`.

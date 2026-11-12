@@ -103,13 +103,17 @@ pub enum SourceKind {
     Nmea2000,
     /// Serveur Signal K.
     SignalK,
+    /// Rejeu d'un enregistrement : données réelles mais passées. Ne doit
+    /// jamais être présentée comme la position actuelle.
+    Replay,
 }
 
 impl SourceKind {
-    /// Indique si la source produit des données simulées.
+    /// Indique si la source produit des données qui ne décrivent pas la
+    /// situation réelle actuelle (simulation ou rejeu).
     #[must_use]
     pub fn is_simulated(self) -> bool {
-        matches!(self, Self::Simulator)
+        matches!(self, Self::Simulator | Self::Replay)
     }
 }
 

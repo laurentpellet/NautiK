@@ -21,6 +21,7 @@ keyring = { version = "3", features = ["apple-native", "linux-native", "windows-
 chrono.workspace = true
 nav-charts.workspace = true
 nav-core.workspace = true
+nav-nmea0183.workspace = true
 nav-routing.workspace = true
 nav-signalk.workspace = true
 nav-storage.workspace = true

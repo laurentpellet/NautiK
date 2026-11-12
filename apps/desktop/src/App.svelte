@@ -15,12 +15,15 @@
     SourcesApi,
     subscribeConnection,
     subscribeInstruments,
+    subscribeRejections,
     type ConnectionState,
     type InstrumentsSnapshot,
+    type Rejections,
   } from './lib/services/instruments';
   import type { ListenFn } from './lib/services/position';
   import { NavigationController } from './lib/navigation.svelte';
   import { RoutingApi, subscribeNavigation } from './lib/services/routing';
+  import { holdSubscription } from './lib/subscription';
   import { loadTheme, saveTheme } from './lib/theme';
 
   interface Props {
@@ -42,6 +45,7 @@
   let snapshotError = $state<string | null>(null);
   let connection = $state<ConnectionState | null | undefined>(undefined);
   let connectionError = $state<string | null>(null);
+  let rejections = $state<Rejections | undefined>(undefined);
   let now = $state(Date.now());
   let theme = $state<Theme>(loadTheme());
   let northUp = $state(true);
@@ -77,77 +81,71 @@
       .catch((e: unknown) => (catalogError = message(e)));
   });
 
-  $effect(() => {
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
-    subscribeInstruments(
-      (s) => {
-        snapshot = s;
-        snapshotAt = Date.now();
-        now = snapshotAt;
-        snapshotError = null;
-      },
-      (e) => (snapshotError = e.message),
-      listenFn,
-    )
-      .then((u) => {
-        if (disposed) u();
-        else unlisten = u;
-      })
-      .catch((e: unknown) => (snapshotError = message(e)));
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  });
+  $effect(() =>
+    holdSubscription(
+      () =>
+        subscribeInstruments(
+          (s) => {
+            snapshot = s;
+            snapshotAt = Date.now();
+            now = snapshotAt;
+            snapshotError = null;
+          },
+          (e) => (snapshotError = e.message),
+          listenFn,
+        ),
+      (e) => (snapshotError = message(e)),
+    ),
+  );
 
-  $effect(() => {
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
-    subscribeConnection(
-      (c) => {
-        connection = c;
-        connectionError = null;
-      },
-      (e) => (connectionError = e.message),
-      listenFn,
-    )
-      .then((u) => {
-        if (disposed) u();
-        else unlisten = u;
-      })
-      .catch((e: unknown) => (connectionError = message(e)));
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  });
+  $effect(() =>
+    holdSubscription(
+      () =>
+        subscribeConnection(
+          (c) => {
+            connection = c;
+            connectionError = null;
+          },
+          (e) => (connectionError = e.message),
+          listenFn,
+        ),
+      (e) => (connectionError = message(e)),
+    ),
+  );
+
+  $effect(() =>
+    holdSubscription(
+      () =>
+        subscribeRejections(
+          (r) => {
+            rejections = r;
+            connectionError = null;
+          },
+          (e) => (connectionError = e.message),
+          listenFn,
+        ),
+      (e) => (connectionError = message(e)),
+    ),
+  );
 
   $effect(() => {
     void nav.refresh();
   });
 
-  $effect(() => {
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
-    subscribeNavigation(
-      (status) => {
-        nav.onStatus(status);
-        navEventError = null;
-      },
-      (e) => (navEventError = e.message),
-      listenFn,
-    )
-      .then((u) => {
-        if (disposed) u();
-        else unlisten = u;
-      })
-      .catch((e: unknown) => (navEventError = message(e)));
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  });
+  $effect(() =>
+    holdSubscription(
+      () =>
+        subscribeNavigation(
+          (status) => {
+            nav.onStatus(status);
+            navEventError = null;
+          },
+          (e) => (navEventError = e.message),
+          listenFn,
+        ),
+      (e) => (navEventError = message(e)),
+    ),
+  );
 
   // Affichage en direct de la trace en cours d'enregistrement.
   $effect(() => {
@@ -234,9 +232,9 @@
       <p class="notice" role="status">{nav.notice}</p>
     {/if}
 
-    <SourcePanel api={sources} {connection} />
+    <SourcePanel api={sources} {connection} {rejections} />
     {#if connectionError}
-      <p class="error" role="alert">État Signal K rejeté : {connectionError}</p>
+      <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
     {/if}
 
     <RoutesPanel {nav} />

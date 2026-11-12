@@ -22,6 +22,8 @@
   {#if position}
     {#if position.fix.source === 'simulator'}
       <p class="badge simulated" role="status">POSITION SIMULÉE</p>
+    {:else if position.fix.source === 'replay'}
+      <p class="badge simulated" role="status">REJEU — POSITION NON ACTUELLE</p>
     {/if}
     {#if position.stale}
       <p class="badge stale" role="alert">
@@ -32,7 +34,12 @@
       <span>{formatLatitude(position.fix.latitudeDeg)}</span>
       <span>{formatLongitude(position.fix.longitudeDeg)}</span>
     </p>
-    <p class="meta">Source : {position.fix.sourceId} — il y a {formatAge(position.ageMs)}</p>
+    <p class="meta">
+      Source : {position.fix.sourceId} — il y a {formatAge(position.ageMs)}
+      {#if position.freshSources > 1}
+        <span data-testid="position-sources">({position.freshSources} sources disponibles)</span>
+      {/if}
+    </p>
   {:else}
     <p class="badge stale" role="alert">Aucune position</p>
   {/if}

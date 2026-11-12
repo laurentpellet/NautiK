@@ -144,6 +144,8 @@ pub fn run() -> anyhow::Result<()> {
             gpx_io::export_track_gpx,
             sources::get_sources,
             sources::set_sources,
+            sources::list_serial_ports,
+            sources::choose_nmea_recording,
         ])
         .run(tauri::generate_context!())
         .context("exécution de l'application Tauri")

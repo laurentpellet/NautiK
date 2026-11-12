@@ -28,6 +28,7 @@ publish = false
 nav-core = { path = "crates/nav-core" }
 nav-charts = { path = "crates/nav-charts" }
 nav-geodesy = { path = "crates/nav-geodesy" }
+nav-nmea0183 = { path = "crates/nav-nmea0183" }
 nav-routing = { path = "crates/nav-routing" }
 nav-signalk = { path = "crates/nav-signalk" }
 nav-storage = { path = "crates/nav-storage" }
@@ -44,8 +45,10 @@ serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
 tempfile = "3"
 thiserror = "2"
-tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
+# Port série (sans libudev : énumération des ports par sysfs sous Linux).
+tokio-serial = { version = "5.4", default-features = false }
 url = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

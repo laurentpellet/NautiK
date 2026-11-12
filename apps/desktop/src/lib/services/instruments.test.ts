@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   INSTRUMENTS_EVENT,
-  SIGNALK_STATUS_EVENT,
+  SOURCE_REJECTIONS_EVENT,
+  SOURCE_STATUS_EVENT,
   SourcesApi,
   parseConnectionState,
   parseInstrumentsSnapshot,
   parseSourcesView,
   subscribeConnection,
   subscribeInstruments,
+  subscribeRejections,
 } from './instruments';
 import { EngineProtocolError } from './validate';
 
@@ -29,11 +31,12 @@ const reading = {
   measuredAt: '2026-11-12T10:00:00Z',
   ageMs: 1200,
   stale: false,
+  freshSources: 1,
 };
 
 const snapshot = {
   computedAt: '2026-11-12T10:00:01Z',
-  position: { fix, ageMs: 1000, stale: false },
+  position: { fix, ageMs: 1000, stale: false, freshSources: 2 },
   readings: [reading],
 };
 
@@ -98,38 +101,78 @@ describe('parseConnectionState', () => {
   });
 });
 
+const view = {
+  mode: 'nmea0183',
+  signalkUrl: 'http://boat.local:3000',
+  nmea: { kind: 'serial', path: 'COM3', baudRate: 4800 },
+  priorities: ['nmea0183.GP'],
+  tokenStored: true,
+  connection: { state: 'stopped' },
+  rejections: { count: 3, lastReason: 'somme de contrôle fausse' },
+};
+
 describe('parseSourcesView', () => {
   it('accepte la vue des réglages', () => {
-    const v = {
-      mode: 'signalK',
-      signalkUrl: 'http://boat.local:3000',
-      tokenStored: true,
-      connection: { state: 'stopped' },
-    };
-    expect(parseSourcesView(v)).toEqual(v);
+    expect(parseSourcesView(view)).toEqual(view);
   });
 
-  it('rejette un mode inconnu', () => {
-    expect(() =>
-      parseSourcesView({ mode: 'nmea', signalkUrl: null, tokenStored: false, connection: null }),
-    ).toThrow(EngineProtocolError);
+  it.each([
+    ['mode inconnu', { mode: 'nmea' }],
+    ['liaison inconnue', { nmea: { kind: 'can' } }],
+    ['port hors bornes', { nmea: { kind: 'udp', port: 70000 } }],
+    ['priorités absentes', { priorities: undefined }],
+    ['rejets invalides', { rejections: { count: -1, lastReason: null } }],
+  ])('rejette : %s', (_label, patch) => {
+    expect(() => parseSourcesView({ ...view, ...patch })).toThrow(EngineProtocolError);
+  });
+
+  it.each([
+    [{ kind: 'tcp', host: 'h', port: 10110 }],
+    [{ kind: 'udp', port: 2000 }],
+    [{ kind: 'replay', path: 'C:\\logs\\a.nmea' }],
+  ])('accepte la liaison %o', (nmea) => {
+    expect(parseSourcesView({ ...view, nmea }).nmea).toEqual(nmea);
   });
 });
 
 describe('SourcesApi', () => {
   it('transmet les arguments de set_sources', async () => {
-    const view = { mode: 'simulator', signalkUrl: null, tokenStored: false, connection: null };
     const invokeFn = vi.fn(() => Promise.resolve(view));
     const api = new SourcesApi(invokeFn);
-    await api.set({ mode: 'simulator', signalkUrl: null, token: 'abc', clearToken: false });
-    expect(invokeFn).toHaveBeenCalledWith('set_sources', {
-      mode: 'simulator',
+    await api.set({
+      mode: 'nmea0183',
       signalkUrl: null,
+      nmea: { kind: 'udp', port: 10110 },
+      priorities: ['nmea0183.GN'],
       token: 'abc',
       clearToken: false,
     });
+    expect(invokeFn).toHaveBeenCalledWith('set_sources', {
+      request: {
+        mode: 'nmea0183',
+        signalkUrl: null,
+        nmea: { kind: 'udp', port: 10110 },
+        priorities: ['nmea0183.GN'],
+        token: 'abc',
+        clearToken: false,
+      },
+    });
     expect(await api.get()).toEqual(view);
     expect(invokeFn).toHaveBeenLastCalledWith('get_sources');
+  });
+
+  it('liste les ports série et choisit un enregistrement', async () => {
+    const responses: Record<string, unknown> = {
+      list_serial_ports: ['COM3', 'COM4'],
+      choose_nmea_recording: null,
+    };
+    const api = new SourcesApi((command: string) => Promise.resolve(responses[command]));
+    expect(await api.serialPorts()).toEqual(['COM3', 'COM4']);
+    expect(await api.chooseRecording()).toBeNull();
+    responses.choose_nmea_recording = 'C:\\a.nmea';
+    expect(await api.chooseRecording()).toBe('C:\\a.nmea');
+    responses.list_serial_ports = [3];
+    await expect(api.serialPorts()).rejects.toThrow(EngineProtocolError);
   });
 
   it('rejette une réponse invalide', async () => {
@@ -168,12 +211,24 @@ describe('abonnements', () => {
     const onValue = vi.fn();
     const onError = vi.fn();
     await subscribeConnection(onValue, onError, l.listenFn);
-    expect(l.listenFn).toHaveBeenCalledWith(SIGNALK_STATUS_EVENT, expect.any(Function));
+    expect(l.listenFn).toHaveBeenCalledWith(SOURCE_STATUS_EVENT, expect.any(Function));
     l.emit({ state: 'connecting', attempt: 1 });
     l.emit(null);
     l.emit({ state: '?' });
     expect(onValue).toHaveBeenNthCalledWith(1, { state: 'connecting', attempt: 1 });
     expect(onValue).toHaveBeenNthCalledWith(2, null);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('transmet les rejets', async () => {
+    const l = fakeListen();
+    const onValue = vi.fn();
+    const onError = vi.fn();
+    await subscribeRejections(onValue, onError, l.listenFn);
+    expect(l.listenFn).toHaveBeenCalledWith(SOURCE_REJECTIONS_EVENT, expect.any(Function));
+    l.emit({ count: 2, lastReason: 'bruit' });
+    l.emit({ count: 'deux' });
+    expect(onValue).toHaveBeenCalledWith({ count: 2, lastReason: 'bruit' });
     expect(onError).toHaveBeenCalledTimes(1);
   });
 });

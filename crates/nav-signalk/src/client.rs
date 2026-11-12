@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
@@ -23,6 +23,8 @@ use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use url::Url;
+
+pub use nav_core::link::ConnectionState;
 
 use crate::config::SignalKConfig;
 use crate::delta::{decode, subscription_message, Decoded, Sample, MAX_MESSAGE_BYTES};
@@ -72,44 +74,6 @@ impl ClientOptions {
             .saturating_mul(factor)
             .min(self.max_backoff)
     }
-}
-
-/// État de la connexion, diffusé aux interfaces.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(
-    tag = "state",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum ConnectionState {
-    /// Tentative de connexion en cours.
-    Connecting {
-        /// Numéro de tentative.
-        attempt: u32,
-    },
-    /// Connecté et abonné.
-    Connected {
-        /// Nom du serveur.
-        server_name: Option<String>,
-        /// Version du serveur.
-        server_version: Option<String>,
-    },
-    /// Connexion perdue ou impossible ; nouvelle tentative programmée.
-    Disconnected {
-        /// Cause.
-        reason: String,
-        /// Délai avant la prochaine tentative (ms).
-        retry_in_ms: u64,
-    },
-    /// Authentification refusée (jeton absent, expiré ou révoqué).
-    Unauthorized {
-        /// Cause.
-        reason: String,
-        /// Délai avant la prochaine tentative (ms).
-        retry_in_ms: u64,
-    },
-    /// Client arrêté.
-    Stopped,
 }
 
 /// Événement produit par le client.

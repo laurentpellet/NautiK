@@ -7,7 +7,7 @@ import {
   optional,
 } from './validate';
 
-export type SourceKind = 'simulator' | 'nmea0183' | 'nmea2000' | 'signalK';
+export type SourceKind = 'simulator' | 'nmea0183' | 'nmea2000' | 'signalK' | 'replay';
 
 /** Relevé de position (miroir de `nav_core::PositionFix`). */
 export interface PositionFix {
@@ -21,7 +21,7 @@ export interface PositionFix {
   measuredAt: number;
 }
 
-const SOURCES: readonly string[] = ['simulator', 'nmea0183', 'nmea2000', 'signalK'];
+const SOURCES: readonly string[] = ['simulator', 'nmea0183', 'nmea2000', 'signalK', 'replay'];
 
 export function isSourceKind(value: string): value is SourceKind {
   return SOURCES.includes(value);

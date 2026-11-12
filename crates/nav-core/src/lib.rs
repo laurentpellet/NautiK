@@ -14,14 +14,16 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod link;
 pub mod measurement;
 pub mod position;
 pub mod simulation;
 pub mod vessel;
 
+pub use link::{ConnectionState, Sample};
 pub use measurement::{Measurement, MeasurementError, Quantity};
 pub use position::{GeoPosition, PositionError, PositionFix, SourceKind};
-pub use vessel::{InstrumentsSnapshot, VesselState};
+pub use vessel::{InstrumentsSnapshot, Priorities, VesselState};
 
 /// Version du moteur NautiK (version du workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -108,12 +108,12 @@ export function formatEta(eta: number | null, now: number): string {
 /** Gravité d'un état de connexion, pour l'affichage. */
 export type ConnectionLevel = 'ok' | 'pending' | 'alert';
 
-/** Libellé d'un état de connexion Signal K (`null` : pas encore d'état). */
+/** Libellé d'un état de liaison (`null` : pas encore d'état). */
 export function describeConnection(state: ConnectionState | null): {
   label: string;
   level: ConnectionLevel;
 } {
-  if (state === null) return { label: 'En attente du client Signal K', level: 'pending' };
+  if (state === null) return { label: 'En attente de la liaison', level: 'pending' };
   switch (state.state) {
     case 'connecting':
       return { label: `Connexion en cours (tentative ${state.attempt})`, level: 'pending' };
@@ -132,6 +132,6 @@ export function describeConnection(state: ConnectionState | null): {
         level: 'alert',
       };
     case 'stopped':
-      return { label: 'Client Signal K arrêté', level: 'alert' };
+      return { label: 'Liaison arrêtée', level: 'alert' };
   }
 }

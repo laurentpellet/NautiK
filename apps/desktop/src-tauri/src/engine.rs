@@ -6,15 +6,23 @@
 //! (`runtime`) l'alimente et se charge des événements et de la
 //! persistance.
 //!
-//! Deux modes de source, exclusifs :
+//! Modes de source, exclusifs :
 //! - **simulateur** : un bateau simulé suit la route active ; chaque
 //!   relevé est marqué simulé ;
-//! - **Signal K** : les relevés viennent du serveur. En cas de perte du
-//!   flux, aucune position n'est inventée : la dernière position connue
-//!   devient obsolète et le reste jusqu'au retour des données.
+//! - **Signal K** / **NMEA 0183** : les relevés viennent des
+//!   équipements. En cas de perte du flux, aucune position n'est
+//!   inventée : la dernière position connue devient obsolète et le reste
+//!   jusqu'au retour des données. Un rejeu NMEA est traité comme une
+//!   simulation (traces préfixées, navigation marquée simulée).
+//!
+//! Lorsque plusieurs équipements fournissent une position, seule la
+//! source retenue par l'arbitrage (`VesselState`) alimente la
+//! navigation et la trace.
 
 use chrono::{DateTime, Utc};
-use nav_core::{GeoPosition, InstrumentsSnapshot, Measurement, PositionFix, VesselState};
+use nav_core::{
+    GeoPosition, InstrumentsSnapshot, Measurement, PositionFix, Priorities, VesselState,
+};
 use nav_routing::navigation::{NavigationError, DEFAULT_ARRIVAL_RADIUS_M};
 use nav_routing::recorder::RecorderError;
 use nav_routing::{
@@ -48,6 +56,8 @@ pub enum SourceMode {
     Simulator,
     /// Serveur Signal K.
     SignalK,
+    /// Liaison NMEA 0183 (TCP, UDP, série ou rejeu).
+    Nmea0183,
 }
 
 /// Conséquences du traitement d'un relevé de position.
@@ -80,6 +90,8 @@ struct Recording {
 #[derive(Debug, Clone)]
 pub struct Engine {
     mode: SourceMode,
+    /// La source réelle est un rejeu d'enregistrement.
+    replay: bool,
     simulator: RouteSimulator,
     vessel: VesselState,
     navigation: Option<ActiveNavigation>,
@@ -92,6 +104,7 @@ impl Engine {
     pub fn new(start: GeoPosition, simulated_speed_mps: f64) -> Self {
         Self {
             mode: SourceMode::Simulator,
+            replay: false,
             simulator: RouteSimulator::new(start, simulated_speed_mps),
             vessel: VesselState::new(),
             navigation: None,
@@ -105,19 +118,23 @@ impl Engine {
         self.mode
     }
 
-    /// Change de source. Les valeurs de l'ancienne source sont oubliées
-    /// (aucun mélange de données simulées et réelles).
-    pub fn set_mode(&mut self, mode: SourceMode) {
-        if mode == self.mode {
-            return;
-        }
+    /// Change de source. Les valeurs de l'ancienne source sont toujours
+    /// oubliées (aucun mélange de données simulées, rejouées et réelles,
+    /// ni de deux configurations successives).
+    pub fn set_mode(&mut self, mode: SourceMode, replay: bool) {
         self.mode = mode;
+        self.replay = replay && mode == SourceMode::Nmea0183;
         self.vessel.clear();
         let route = match mode {
             SourceMode::Simulator => self.navigation.as_ref().map(ActiveNavigation::route),
-            SourceMode::SignalK => None,
+            SourceMode::SignalK | SourceMode::Nmea0183 => None,
         };
         self.simulator.follow(route);
+    }
+
+    /// Définit les priorités des sources (arbitrage).
+    pub fn set_priorities(&mut self, priorities: Priorities) {
+        self.vessel.set_priorities(priorities);
     }
 
     /// Active une route. En mode simulateur, le bateau simulé la suit.
@@ -176,22 +193,24 @@ impl Engine {
     /// traces.)
     #[must_use]
     pub fn is_simulated(&self) -> bool {
-        self.mode == SourceMode::Simulator
+        self.mode == SourceMode::Simulator || self.replay
     }
 
-    /// Traite un relevé de position : état du bateau, navigation, trace.
-    pub fn on_fix(&mut self, fix: PositionFix) -> FixUpdate {
-        let fix = self.vessel.update_position(fix);
+    /// Traite un relevé de position : état du bateau puis, si sa source
+    /// est la source retenue, navigation et trace. Retourne `None` pour
+    /// le relevé d'une source secondaire ou un relevé périmé.
+    pub fn on_fix(&mut self, fix: PositionFix) -> Option<FixUpdate> {
+        let fix = self.vessel.update_position(fix)?;
         let navigation = self.navigation.as_mut().map(|n| n.update(&fix));
         let track_point = self
             .recording
             .as_mut()
             .and_then(|r| r.recorder.observe(&fix).map(|p| (r.track_id, p)));
-        FixUpdate {
+        Some(FixUpdate {
             fix,
             navigation,
             track_point,
-        }
+        })
     }
 
     /// Enregistre une mesure d'instrument. Retourne `false` si elle est
@@ -206,9 +225,9 @@ impl Engine {
         let update = match self.mode {
             SourceMode::Simulator => {
                 let fix = self.simulator.step(now);
-                Some(self.on_fix(fix))
+                self.on_fix(fix)
             }
-            SourceMode::SignalK => None,
+            SourceMode::SignalK | SourceMode::Nmea0183 => None,
         };
         Tick {
             update,
@@ -317,7 +336,7 @@ mod tests {
     fn signalk_mode_never_invents_positions() {
         let mut engine = Engine::new(p(0.0, 0.0), 5.0);
         engine.tick(t(0));
-        engine.set_mode(SourceMode::SignalK);
+        engine.set_mode(SourceMode::SignalK, false);
         assert!(!engine.is_simulated());
         let tick = engine.tick(t(1));
         assert!(tick.update.is_none(), "pas de relevé simulé");
@@ -326,7 +345,7 @@ mod tests {
             "données simulées oubliées"
         );
 
-        engine.on_fix(signalk_fix(2, -14.9));
+        assert!(engine.on_fix(signalk_fix(2, -14.9)).is_some());
         assert!(!engine.tick(t(3)).snapshot.position.expect("pos").stale);
         // Plus de données : la dernière position devient obsolète.
         let later = engine.tick(t(10)).snapshot.position.expect("pos");
@@ -337,7 +356,7 @@ mod tests {
     #[test]
     fn signalk_fixes_drive_navigation_and_recording() {
         let mut engine = Engine::new(p(0.0, 0.0), 5.0);
-        engine.set_mode(SourceMode::SignalK);
+        engine.set_mode(SourceMode::SignalK, false);
         engine.activate(route()).expect("activate");
         engine.start_recording(Uuid::new_v4()).expect("rec");
         let sog = Measurement::new(
@@ -350,7 +369,7 @@ mod tests {
         )
         .expect("m");
         assert!(engine.on_measurement(sog));
-        let update = engine.on_fix(signalk_fix(0, 0.0));
+        let update = engine.on_fix(signalk_fix(0, 0.0)).expect("source retenue");
         assert_eq!(update.fix.sog_mps, Some(3.0), "complété par la SOG fraîche");
         let status = update.navigation.expect("navigation");
         assert!(!status.simulated);
@@ -361,11 +380,46 @@ mod tests {
     }
 
     #[test]
+    fn only_selected_source_drives_navigation_and_track() {
+        let mut engine = Engine::new(p(0.0, 0.0), 5.0);
+        engine.set_mode(SourceMode::Nmea0183, false);
+        engine.activate(route()).expect("activate");
+        engine.start_recording(Uuid::new_v4()).expect("rec");
+        assert!(engine.on_fix(signalk_fix(0, 0.0)).is_some());
+        let mut second = signalk_fix(1, 0.001);
+        second.source_id = "nmea0183.GN".to_owned();
+        assert!(engine.on_fix(second).is_none(), "source secondaire ignorée");
+        assert!(engine.on_fix(signalk_fix(2, 0.0)).is_some());
+    }
+
+    #[test]
+    fn replay_is_treated_as_simulation() {
+        let mut engine = Engine::new(p(0.0, 0.0), 5.0);
+        engine.set_mode(SourceMode::Nmea0183, true);
+        assert!(engine.is_simulated(), "traces préfixées SIMULATION");
+        assert!(engine.tick(t(0)).update.is_none(), "pas de bateau simulé");
+        engine.set_mode(SourceMode::Nmea0183, false);
+        assert!(!engine.is_simulated());
+        // Le drapeau de rejeu n'a de sens qu'en NMEA.
+        engine.set_mode(SourceMode::SignalK, true);
+        assert!(!engine.is_simulated());
+    }
+
+    #[test]
+    fn changing_source_configuration_forgets_values() {
+        let mut engine = Engine::new(p(0.0, 0.0), 5.0);
+        engine.set_mode(SourceMode::Nmea0183, false);
+        engine.on_fix(signalk_fix(0, 0.0));
+        engine.set_mode(SourceMode::Nmea0183, false);
+        assert!(engine.tick(t(1)).snapshot.position.is_none());
+    }
+
+    #[test]
     fn returning_to_simulator_resumes_active_route() {
         let mut engine = Engine::new(p(0.0, 0.0), 5.0);
-        engine.set_mode(SourceMode::SignalK);
+        engine.set_mode(SourceMode::SignalK, false);
         engine.activate(route()).expect("activate");
-        engine.set_mode(SourceMode::Simulator);
+        engine.set_mode(SourceMode::Simulator, false);
         engine.tick(t(0));
         let fix = engine.tick(t(10)).update.expect("relevé").fix;
         assert_eq!(fix.sog_mps, Some(5.0));

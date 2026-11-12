@@ -154,21 +154,47 @@ Signal K Server et ses données NMEA 0183 d'exemple).
 
 ## Phase 4 — NMEA
 
-- [ ] Créer nav-nmea0183.
-- [ ] Lecture TCP.
-- [ ] Lecture UDP.
-- [ ] Lecture série.
-- [ ] Validation checksum.
-- [ ] Parser RMC/GGA/VTG.
-- [ ] Parser HDT/HDG.
-- [ ] Parser DPT/DBT.
-- [ ] Parser MWV.
-- [ ] Arbitrage des sources.
+- [x] Créer nav-nmea0183.
+- [x] Lecture TCP.
+- [x] Lecture UDP.
+- [x] Lecture série.
+- [x] Validation checksum.
+- [x] Parser RMC/GGA/VTG.
+- [x] Parser HDT/HDG.
+- [x] Parser DPT/DBT.
+- [x] Parser MWV.
+- [x] Arbitrage des sources.
 
 Critères :
-- Lecture de flux enregistrés.
-- Gestion des erreurs.
-- Position NMEA affichée.
+- [x] Lecture de flux enregistrés.
+- [x] Gestion des erreurs.
+- [x] Position NMEA affichée.
+
+État (2026-11-12) : phase 4 terminée (recette sous Windows 11).
+- nav-nmea0183 (lecture seule, aucune phrase émise) :
+  - phrases : somme de contrôle obligatoire, longueur bornée
+    (100 caractères), bloc d'étiquettes IEC 61162-450 ignoré ;
+  - décodage RMC, GGA, GLL, VTG, HDT, HDG, HDM, VHW, DPT, DBT, MWV
+    vers WGS84/SI/UTC ; aucune position si l'équipement la déclare
+    invalide, estimée, manuelle ou simulée ; angles hors [0, 360]°
+    et valeurs hors bornes rejetés ; vent vrai et variation
+    magnétique non appliqués ; AIS ignoré (phase 5) ;
+  - liaisons TCP, UDP, série (`tokio-serial`, sans libudev) et rejeu
+    de fichier au rythme enregistré ; lignes bornées (512 octets),
+    débit écrêté (200 phrases/s), silence > 15 s signalé, reconnexion
+    à délai exponentiel (1 s → 30 s).
+- nav-core : types `Sample` et `ConnectionState` communs aux
+  connecteurs ; arbitrage des sources dans `VesselState` (source
+  fraîche, puis priorité configurée, puis la plus récente ; source
+  retenue conservée tant qu'elle reste fraîche ; 16 sources au plus
+  par donnée) ; seule la source de position retenue alimente la
+  navigation et la trace ; source `replay` jamais présentée comme
+  réelle.
+- Desktop : mode NMEA 0183 (TCP, UDP, série, rejeu), priorités des
+  sources, rejets comptés et affichés, fichier de rejeu choisi par le
+  dialogue du système ; un rejeu est traité comme une simulation.
+- Rust : fmt, clippy (`-D warnings`), 268 tests. Frontend : lint,
+  svelte-check, 160 tests Vitest, build.
 
 ## Phase 5 — AIS
 

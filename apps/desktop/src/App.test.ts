@@ -28,9 +28,22 @@ const routingDefaults: Record<string, () => Promise<unknown>> = {
   list_routes: () => Promise.resolve([]),
   list_tracks: () => Promise.resolve([]),
   get_navigation_state: () => Promise.resolve({ activeRouteId: null, recordingTrackId: null }),
-  get_sources: () =>
-    Promise.resolve({ mode: 'simulator', signalkUrl: null, tokenStored: false, connection: null }),
+  get_sources: () => Promise.resolve(sourcesView()),
+  list_serial_ports: () => Promise.resolve(['COM3']),
 };
+
+function sourcesView(patch: Record<string, unknown> = {}) {
+  return {
+    mode: 'simulator',
+    signalkUrl: null,
+    nmea: null,
+    priorities: [],
+    tokenStored: false,
+    connection: null,
+    rejections: { count: 0, lastReason: null },
+    ...patch,
+  };
+}
 
 function fakeIpc(responses: Record<string, () => Promise<unknown>>) {
   const all = { ...routingDefaults, ...responses };
@@ -57,6 +70,7 @@ function snapshotWith(fix: Record<string, unknown>, stale = false, readings: unk
       fix: { cogRad: null, sogMps: 0, measuredAt: now, receivedAt: now, ...fix },
       ageMs: stale ? 12_000 : 400,
       stale,
+      freshSources: 1,
     },
     readings,
   };
@@ -166,6 +180,7 @@ describe('App', () => {
             measuredAt: now,
             ageMs: 500,
             stale: false,
+            freshSources: 1,
           },
           {
             quantity: 'speedOverGround',
@@ -175,6 +190,7 @@ describe('App', () => {
             measuredAt: now,
             ageMs: 9000,
             stale: true,
+            freshSources: 0,
           },
         ],
       ),
@@ -196,32 +212,34 @@ describe('App', () => {
         get_engine_info: () => Promise.resolve(engine),
         get_chart_catalog: () => Promise.reject(new Error('x')),
         get_sources: () =>
-          Promise.resolve({
-            mode: 'signalK',
-            signalkUrl: 'http://boat.local:3000',
-            tokenStored: true,
-            connection: { state: 'connecting', attempt: 1 },
-          }),
+          Promise.resolve(
+            sourcesView({
+              mode: 'signalK',
+              signalkUrl: 'http://boat.local:3000',
+              tokenStored: true,
+              connection: { state: 'connecting', attempt: 1 },
+            }),
+          ),
       }),
       listen: events.listen,
     });
     expect((await screen.findByTestId('source-mode')).textContent).toContain('boat.local');
-    expect(screen.getByTestId('signalk-status').textContent).toContain('tentative 1');
+    expect(screen.getByTestId('source-status').textContent).toContain('tentative 1');
 
     events.emit(
       { state: 'connected', serverName: 'signalk-server', serverVersion: '2.8.0' },
-      'signalk-status',
+      'source-status',
     );
     await vi.waitFor(() =>
-      expect(screen.getByTestId('signalk-status').textContent).toContain('Connecté'),
+      expect(screen.getByTestId('source-status').textContent).toContain('Connecté'),
     );
 
     events.emit(
       { state: 'disconnected', reason: 'connexion fermée', retryInMs: 2000 },
-      'signalk-status',
+      'source-status',
     );
     await vi.waitFor(() => {
-      const status = screen.getByTestId('signalk-status');
+      const status = screen.getByTestId('source-status');
       expect(status.textContent).toContain('Déconnecté : connexion fermée');
       expect(status.getAttribute('role')).toBe('alert');
     });
@@ -235,13 +253,10 @@ describe('App', () => {
     });
     const invoke = (command: string, args?: Record<string, unknown>) => {
       if (command === 'set_sources') {
-        calls.push(args);
-        return Promise.resolve({
-          mode: 'signalK',
-          signalkUrl: 'http://boat.local:3000',
-          tokenStored: true,
-          connection: null,
-        });
+        calls.push(args?.request);
+        return Promise.resolve(
+          sourcesView({ mode: 'signalK', signalkUrl: 'http://boat.local:3000', tokenStored: true }),
+        );
       }
       return base(command);
     };
@@ -257,10 +272,12 @@ describe('App', () => {
     expect(calls[0]).toEqual({
       mode: 'signalK',
       signalkUrl: 'http://boat.local:3000',
+      nmea: null,
+      priorities: [],
       token: 'secret-token',
       clearToken: false,
     });
-    expect((await screen.findByTestId('signalk-status')).textContent).toContain('En attente');
+    expect((await screen.findByTestId('source-status')).textContent).toContain('En attente');
     expect(screen.queryByLabelText(/Jeton/)).toBeNull();
   });
 
@@ -274,8 +291,92 @@ describe('App', () => {
       listen: events.listen,
     });
     await screen.findByText('Aucune position');
-    events.emit({ state: 'flying' }, 'signalk-status');
-    expect((await screen.findByText(/État Signal K rejeté/)).textContent).toContain('flying');
+    events.emit({ state: 'flying' }, 'source-status');
+    expect((await screen.findByText(/État de la source rejeté/)).textContent).toContain('flying');
+  });
+
+  it('configure une liaison NMEA série et affiche les rejets', async () => {
+    const events = fakeListen();
+    const calls: unknown[] = [];
+    const base = fakeIpc({
+      get_engine_info: () => Promise.resolve(engine),
+      get_chart_catalog: () => Promise.reject(new Error('x')),
+    });
+    const invoke = (command: string, args?: Record<string, unknown>) => {
+      if (command === 'set_sources') {
+        const request = args?.request as Record<string, unknown>;
+        calls.push(request);
+        return Promise.resolve(
+          sourcesView({ mode: 'nmea0183', nmea: request.nmea, priorities: request.priorities }),
+        );
+      }
+      return base(command);
+    };
+    render(App, { invoke, listen: events.listen });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Modifier la source' }));
+    await fireEvent.click(screen.getByLabelText('NMEA 0183'));
+    await fireEvent.change(screen.getByLabelText('Liaison'), { target: { value: 'serial' } });
+    await fireEvent.input(await screen.findByLabelText('Port série'), {
+      target: { value: 'COM3' },
+    });
+    await fireEvent.change(screen.getByLabelText('Débit'), { target: { value: '38400' } });
+    await fireEvent.input(screen.getByLabelText(/Priorités/), {
+      target: { value: 'nmea0183.GP\nnmea0183.GN' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Appliquer' }));
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toMatchObject({
+      mode: 'nmea0183',
+      nmea: { kind: 'serial', path: 'COM3', baudRate: 38400 },
+      priorities: ['nmea0183.GP', 'nmea0183.GN'],
+    });
+    expect((await screen.findByTestId('source-mode')).textContent).toContain(
+      'NMEA 0183 — série COM3 (38400 Bd)',
+    );
+
+    events.emit({ count: 4, lastReason: 'somme de contrôle fausse' }, 'source-rejections');
+    expect((await screen.findByTestId('source-rejections')).textContent).toContain(
+      '4 données rejetées — dernière : somme de contrôle fausse',
+    );
+  });
+
+  it('refuse une liaison NMEA incomplète sans appeler le moteur', async () => {
+    const calls: string[] = [];
+    const base = fakeIpc({
+      get_engine_info: () => Promise.resolve(engine),
+      get_chart_catalog: () => Promise.reject(new Error('x')),
+    });
+    const invoke = (command: string) => {
+      calls.push(command);
+      return base(command);
+    };
+    render(App, { invoke, listen: fakeListen().listen });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Modifier la source' }));
+    await fireEvent.click(screen.getByLabelText('NMEA 0183'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Appliquer' }));
+    expect(await screen.findByText("adresse de l'équipement requise")).toBeTruthy();
+    expect(calls).not.toContain('set_sources');
+  });
+
+  it('signale un rejeu comme position non actuelle', async () => {
+    const events = fakeListen();
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+      }),
+      listen: events.listen,
+    });
+    await screen.findByText('Aucune position');
+    const s = snapshotWith({
+      position: { latitudeDeg: -14.968, longitudeDeg: -147.638 },
+      source: 'replay',
+      sourceId: 'replay.GP',
+    });
+    s.position.freshSources = 2;
+    events.emit(s);
+    expect(await screen.findByText('REJEU — POSITION NON ACTUELLE')).toBeTruthy();
+    expect(screen.getByTestId('position-sources').textContent).toContain('2 sources');
   });
 
   it('rejette visiblement une position invalide', async () => {
