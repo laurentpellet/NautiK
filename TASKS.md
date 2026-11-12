@@ -140,7 +140,7 @@ Critères :
 
 ## Phase 7 — Service embarqué
 
-- [ ] Créer marineplotterd.
+- [ ] Développer le service nautikd (apps/daemon).
 - [ ] Créer API Axum.
 - [ ] Ajouter WebSocket.
 - [ ] Authentifier les clients.
