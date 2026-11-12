@@ -8,6 +8,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Port Rust de GeographicLib (Karney) : géodésiques WGS84 exactes, y compris
+# près des antipodes où la méthode de Vincenty ne converge pas.
+geographiclib-rs = "0.2"
 nav-core.workspace = true
 
 [lints]

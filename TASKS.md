@@ -71,38 +71,86 @@ Critères :
 
 ## Phase 2 — Navigation
 
-- [ ] Créer nav-geodesy.
-- [ ] Calculer distances et relèvements.
-- [ ] Créer le modèle Waypoint.
-- [ ] Créer le modèle Route.
-- [ ] Créer le modèle Track.
-- [ ] Ajouter SQLite.
-- [ ] Créer les migrations.
-- [ ] Ajouter import/export GPX.
-- [ ] Ajouter le suivi de route.
+- [x] Créer nav-geodesy.
+- [x] Calculer distances et relèvements.
+- [x] Créer le modèle Waypoint.
+- [x] Créer le modèle Route.
+- [x] Créer le modèle Track.
+- [x] Ajouter SQLite.
+- [x] Créer les migrations.
+- [x] Ajouter import/export GPX.
+- [x] Ajouter le suivi de route.
 
 Critères :
-- Route créée graphiquement.
-- Route persistée.
-- Trace enregistrée.
-- GPX importé et exporté.
+- [x] Route créée graphiquement.
+- [x] Route persistée.
+- [x] Trace enregistrée.
+- [x] GPX importé et exporté.
+
+État (2026-11-12) : phase 2 terminée (recette visuelle validée sous Windows 11).
+- nav-geodesy : géodésiques de Karney (`geographiclib-rs`) :
+  distance, relèvements, point de destination, écart de route ;
+  conversions d'unités (NM, nœuds).
+- nav-routing : modèles Waypoint/Route/Track validés, édition de
+  route, navigation active (DTW, BTW, XTE, distance restante, ETA,
+  passage de waypoint à 0,1 NM), enregistreur de trace (≥ 5 s et
+  ≥ 10 m), simulateur suivant la route active (8 nœuds), GPX 1.1
+  (import strict : coordonnée invalide = fichier refusé, traces sans
+  horodatage écartées, aucune entité externe résolue).
+- nav-storage : SQLx, migration initiale (schéma DATA_MODEL.md),
+  clés étrangères, WAL, transactions (import GPX atomique),
+  enregistrements interrompus clôturés au démarrage sans inventer
+  d'heure.
+- Desktop : base `nautik.db` dans le répertoire local de
+  l'application ; boucle moteur indépendante de Tauri ; dialogues
+  GPX ouverts côté Rust (aucun chemin transmis par le frontend) ;
+  traces simulées préfixées « SIMULATION — ».
+- Frontend : tracé de route au clic, routes et traces sur la
+  carte, panneaux routes / traces / navigation.
+- Rust : fmt, clippy (`-D warnings`), 170 tests. Frontend : lint,
+  svelte-check, 98 tests Vitest, build.
 
 ## Phase 3 — Signal K
 
-- [ ] Créer nav-signalk.
-- [ ] Connexion HTTP.
-- [ ] Connexion WebSocket.
-- [ ] Authentification.
-- [ ] Abonnement aux données.
-- [ ] Reconnexion automatique.
-- [ ] Normalisation des unités.
-- [ ] Affichage des instruments.
-- [ ] Détection des données obsolètes.
+- [x] Créer nav-signalk.
+- [x] Connexion HTTP.
+- [x] Connexion WebSocket.
+- [x] Authentification.
+- [x] Abonnement aux données.
+- [x] Reconnexion automatique.
+- [x] Normalisation des unités.
+- [x] Affichage des instruments.
+- [x] Détection des données obsolètes.
 
 Critères :
-- Position reçue de Signal K.
-- Instruments actualisés.
-- Reconnexion automatique.
+- [x] Position reçue de Signal K.
+- [x] Instruments actualisés.
+- [x] Reconnexion automatique (tests d'intégration sur serveur
+  simulé : coupure, refus d'accès, inactivité).
+
+État (2026-11-12) : phase 3 terminée (recette sous Windows 11 avec
+Signal K Server et ses données NMEA 0183 d'exemple).
+- nav-core : grandeurs SI normalisées et bornées (`Quantity`,
+  `Measurement`), état du navire (`VesselState`) calculant la
+  fraîcheur à l'horloge de réception (position 5 s, fond et vent
+  10 s, autres 5 s).
+- nav-signalk : découverte HTTP `/signalk` (sans redirection,
+  réponse bornée), WebSocket `subscribe=none` puis abonnement
+  explicite, jeton `Bearer` jamais envoyé à un autre hôte ni
+  journalisé, contexte limité au navire propre, messages bornés,
+  ping et délai d'inactivité, reconnexion à délai exponentiel
+  (1 s → 30 s), 401/403 signalés comme accès refusé. TLS rustls
+  (ring).
+- nav-storage : réglages clé/valeur JSON.
+- Desktop : modes exclusifs simulateur / Signal K (aucun repli
+  silencieux), jeton dans le coffre du système (Gestionnaire
+  d'identification Windows), instantané des instruments diffusé
+  chaque seconde, événements d'une session remplacée ignorés.
+- Frontend : panneaux Instruments et Source, état de connexion
+  toujours visible en mode Signal K, alerte si le moteur se tait
+  plus de 3 s.
+- Rust : fmt, clippy (`-D warnings`), 208 tests. Frontend : lint,
+  svelte-check, 132 tests Vitest, build.
 
 ## Phase 4 — NMEA
 

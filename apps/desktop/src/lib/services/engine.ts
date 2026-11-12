@@ -15,7 +15,7 @@ export interface EngineInfo {
 export const SUPPORTED_PROTOCOL_VERSION = 1;
 
 /** Signature minimale de la fonction d'appel IPC, injectable pour les tests. */
-export type InvokeFn = (command: string) => Promise<unknown>;
+export type InvokeFn = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 /** Valide une réponse brute du moteur. Aucune donnée n'est supposée valide sans contrôle. */
 export function parseEngineInfo(raw: unknown): EngineInfo {

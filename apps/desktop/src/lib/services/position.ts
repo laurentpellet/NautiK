@@ -1,4 +1,4 @@
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { UnlistenFn } from '@tauri-apps/api/event';
 import {
   EngineProtocolError,
   expectNumber,
@@ -6,9 +6,6 @@ import {
   expectString,
   optional,
 } from './validate';
-
-/** Nom de l'événement émis par le moteur (`POSITION_EVENT`). */
-export const POSITION_EVENT = 'position-fix';
 
 export type SourceKind = 'simulator' | 'nmea0183' | 'nmea2000' | 'signalK';
 
@@ -26,7 +23,7 @@ export interface PositionFix {
 
 const SOURCES: readonly string[] = ['simulator', 'nmea0183', 'nmea2000', 'signalK'];
 
-function isSourceKind(value: string): value is SourceKind {
+export function isSourceKind(value: string): value is SourceKind {
   return SOURCES.includes(value);
 }
 
@@ -66,21 +63,3 @@ export type ListenFn = (
   event: string,
   handler: (event: { payload: unknown }) => void,
 ) => Promise<UnlistenFn>;
-
-/**
- * S'abonne aux relevés de position. Les relevés invalides sont signalés
- * via `onError` et ignorés.
- */
-export function subscribePosition(
-  onFix: (fix: PositionFix) => void,
-  onError: (error: Error) => void,
-  listenFn: ListenFn = listen,
-): Promise<UnlistenFn> {
-  return listenFn(POSITION_EVENT, (event) => {
-    try {
-      onFix(parsePositionFix(event.payload));
-    } catch (e) {
-      onError(e instanceof Error ? e : new Error(String(e)));
-    }
-  });
-}

@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { POSITION_EVENT, parsePositionFix, subscribePosition } from './position';
+import { describe, expect, it } from 'vitest';
+import { parsePositionFix } from './position';
 import { EngineProtocolError } from './validate';
 
 const validFix = {
@@ -36,29 +36,5 @@ describe('parsePositionFix', () => {
     ['vitesse non finie', { sogMps: 'NaN' }],
   ])('rejette : %s', (_label, patch) => {
     expect(() => parsePositionFix({ ...validFix, ...patch })).toThrow(EngineProtocolError);
-  });
-});
-
-describe('subscribePosition', () => {
-  it('transmet les relevés valides et signale les invalides', async () => {
-    let handler: ((event: { payload: unknown }) => void) | undefined;
-    const unlisten = vi.fn();
-    const listenFn = vi.fn((_event: string, h: (event: { payload: unknown }) => void) => {
-      handler = h;
-      return Promise.resolve(unlisten);
-    });
-    const onFix = vi.fn();
-    const onError = vi.fn();
-
-    const result = await subscribePosition(onFix, onError, listenFn);
-    expect(listenFn).toHaveBeenCalledWith(POSITION_EVENT, expect.any(Function));
-
-    handler?.({ payload: validFix });
-    handler?.({ payload: { ...validFix, position: { latitudeDeg: 100, longitudeDeg: 0 } } });
-    expect(onFix).toHaveBeenCalledTimes(1);
-    expect(onError).toHaveBeenCalledTimes(1);
-
-    result();
-    expect(unlisten).toHaveBeenCalled();
   });
 });

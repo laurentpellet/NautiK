@@ -1,12 +1,26 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import InstrumentsPanel from './lib/components/InstrumentsPanel.svelte';
+  import NavigationPanel from './lib/components/NavigationPanel.svelte';
   import PositionPanel from './lib/components/PositionPanel.svelte';
-  import { isStale } from './lib/format';
+  import RoutesPanel from './lib/components/RoutesPanel.svelte';
+  import SourcePanel from './lib/components/SourcePanel.svelte';
+  import TracksPanel from './lib/components/TracksPanel.svelte';
+  import { isEngineSilent } from './lib/format';
   import type { Theme } from './lib/map/style';
   import { fetchChartCatalog, type ChartCatalog } from './lib/services/charts';
   import { fetchEngineInfo, type EngineInfo, type InvokeFn } from './lib/services/engine';
-  import { subscribePosition, type ListenFn, type PositionFix } from './lib/services/position';
+  import {
+    SourcesApi,
+    subscribeConnection,
+    subscribeInstruments,
+    type ConnectionState,
+    type InstrumentsSnapshot,
+  } from './lib/services/instruments';
+  import type { ListenFn } from './lib/services/position';
+  import { NavigationController } from './lib/navigation.svelte';
+  import { RoutingApi, subscribeNavigation } from './lib/services/routing';
   import { loadTheme, saveTheme } from './lib/theme';
 
   interface Props {
@@ -22,14 +36,35 @@
   let engineError = $state<string | null>(null);
   let catalog = $state<ChartCatalog | null>(null);
   let catalogError = $state<string | null>(null);
-  let fix = $state<PositionFix | null>(null);
-  let fixError = $state<string | null>(null);
+  let snapshot = $state<InstrumentsSnapshot | null>(null);
+  /** Réception du dernier instantané (horloge locale). */
+  let snapshotAt = $state<number | null>(null);
+  let snapshotError = $state<string | null>(null);
+  let connection = $state<ConnectionState | null | undefined>(undefined);
+  let connectionError = $state<string | null>(null);
   let now = $state(Date.now());
   let theme = $state<Theme>(loadTheme());
   let northUp = $state(true);
   let chartView = $state<{ recenter: () => void } | null>(null);
 
-  const stale = $derived(fix !== null && isStale(fix.measuredAt, now));
+  // Fermetures : les appels utilisent toujours la fonction IPC courante.
+  const sources = new SourcesApi((command, args) => invokeFn(command, args));
+  const nav = new NavigationController(new RoutingApi((command, args) => invokeFn(command, args)));
+  let navEventError = $state<string | null>(null);
+
+  /** Période de rafraîchissement de la trace en cours d'enregistrement. */
+  const RECORDING_REFRESH_MS = 5_000;
+  /** Durée d'affichage des messages d'information. */
+  const NOTICE_MS = 6_000;
+
+  // Fraîcheur calculée par le moteur ; le silence du moteur lui-même est
+  // détecté ici pour qu'un arrêt du flux reste visible.
+  // Avant le premier instantané, le délai court depuis le démarrage.
+  const startedAt = Date.now();
+  const silent = $derived(isEngineSilent(snapshotAt ?? startedAt, now));
+  const position = $derived(snapshot?.position ?? null);
+  const fix = $derived(position?.fix ?? null);
+  const stale = $derived(fix !== null && (silent || (position?.stale ?? false)));
 
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -45,23 +80,86 @@
   $effect(() => {
     let unlisten: (() => void) | null = null;
     let disposed = false;
-    subscribePosition(
-      (f) => {
-        fix = f;
-        fixError = null;
+    subscribeInstruments(
+      (s) => {
+        snapshot = s;
+        snapshotAt = Date.now();
+        now = snapshotAt;
+        snapshotError = null;
       },
-      (e) => (fixError = e.message),
+      (e) => (snapshotError = e.message),
       listenFn,
     )
       .then((u) => {
         if (disposed) u();
         else unlisten = u;
       })
-      .catch((e: unknown) => (fixError = message(e)));
+      .catch((e: unknown) => (snapshotError = message(e)));
     return () => {
       disposed = true;
       unlisten?.();
     };
+  });
+
+  $effect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    subscribeConnection(
+      (c) => {
+        connection = c;
+        connectionError = null;
+      },
+      (e) => (connectionError = e.message),
+      listenFn,
+    )
+      .then((u) => {
+        if (disposed) u();
+        else unlisten = u;
+      })
+      .catch((e: unknown) => (connectionError = message(e)));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  });
+
+  $effect(() => {
+    void nav.refresh();
+  });
+
+  $effect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    subscribeNavigation(
+      (status) => {
+        nav.onStatus(status);
+        navEventError = null;
+      },
+      (e) => (navEventError = e.message),
+      listenFn,
+    )
+      .then((u) => {
+        if (disposed) u();
+        else unlisten = u;
+      })
+      .catch((e: unknown) => (navEventError = message(e)));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  });
+
+  // Affichage en direct de la trace en cours d'enregistrement.
+  $effect(() => {
+    if (!nav.recordingId) return;
+    const timer = setInterval(() => void nav.refreshRecording(), RECORDING_REFRESH_MS);
+    return () => clearInterval(timer);
+  });
+
+  $effect(() => {
+    if (!nav.notice) return;
+    const timer = setTimeout(() => (nav.notice = null), NOTICE_MS);
+    return () => clearTimeout(timer);
   });
 
   // Horloge d'affichage de l'âge des données.
@@ -79,7 +177,20 @@
 <div class="app">
   {#if catalog}
     {#await import('./lib/components/ChartView.svelte') then { default: ChartView }}
-      <ChartView bind:this={chartView} {catalog} {fix} {stale} {theme} {northUp} />
+      <ChartView
+        bind:this={chartView}
+        {catalog}
+        {fix}
+        {stale}
+        {theme}
+        {northUp}
+        routes={nav.routes}
+        targetIndex={nav.status?.targetIndex ?? null}
+        draft={nav.draft}
+        tracks={nav.displayedTracks}
+        drawing={nav.drawing}
+        onmapclick={(p) => nav.addPoint(p)}
+      />
     {/await}
   {/if}
 
@@ -97,7 +208,8 @@
       <p class="error" role="alert">Moteur indisponible : {engineError}</p>
     {/if}
 
-    <PositionPanel {fix} {stale} {now} error={fixError} />
+    <PositionPanel {position} {silent} error={snapshotError} />
+    <InstrumentsPanel readings={snapshot?.readings ?? []} {silent} />
 
     <div class="toolbar">
       <button type="button" aria-pressed={northUp} onclick={() => (northUp = !northUp)}>
@@ -109,7 +221,29 @@
       <button type="button" disabled={!fix} onclick={() => chartView?.recenter()}> Centrer </button>
     </div>
 
+    {#if nav.status}
+      <NavigationPanel status={nav.status} {now} ondeactivate={() => nav.deactivate()} />
+    {/if}
+    {#if navEventError}
+      <p class="error" role="alert">État de navigation rejeté : {navEventError}</p>
+    {/if}
+    {#if nav.error}
+      <p class="error" role="alert">{nav.error}</p>
+    {/if}
+    {#if nav.notice}
+      <p class="notice" role="status">{nav.notice}</p>
+    {/if}
+
+    <SourcePanel api={sources} {connection} />
+    {#if connectionError}
+      <p class="error" role="alert">État Signal K rejeté : {connectionError}</p>
+    {/if}
+
+    <RoutesPanel {nav} />
+    <TracksPanel {nav} />
+
     <section class="charts" aria-label="Cartes">
+      <h2>Cartes</h2>
       {#if catalogError}
         <p class="error" role="alert">Catalogue indisponible : {catalogError}</p>
       {:else if catalog}
@@ -229,6 +363,20 @@
 
   .warn {
     color: var(--alert-fg);
+  }
+
+  h2 {
+    margin: 0.75rem 0 0.25rem;
+    font-size: 1rem;
+  }
+
+  .notice {
+    margin: 0.25rem 0;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+    background: var(--warn-bg);
+    color: var(--warn-fg);
+    font-size: 0.85rem;
   }
 
   .error {

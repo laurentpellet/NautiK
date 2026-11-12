@@ -8,7 +8,22 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+chrono.workspace = true
+# Flux WebSocket (envoi de l'abonnement, lecture des deltas).
+futures-util.workspace = true
 nav-core.workspace = true
+# Découverte HTTP (`/signalk`) et vérification du jeton.
+reqwest.workspace = true
+# TLS (https/wss) avec le fournisseur `ring` : compilable sans outils
+# supplémentaires (le fournisseur par défaut aws-lc exige CMake/NASM).
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true

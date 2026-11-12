@@ -1,9 +1,27 @@
 //! # nav-storage
 //!
-//! Persistance SQLite : migrations, repositories et transactions. Seul point d'accès à la base.
+//! Persistance SQLite : migrations, repositories et transactions. Seul
+//! point d'accès à la base.
 //!
-//! Crate initialisée en phase 0 ; l'implémentation arrive dans une
-//! phase ultérieure (voir `TASKS.md`).
+//! Conventions de stockage :
+//! - identifiants : UUID texte ;
+//! - coordonnées : degrés WGS84 ;
+//! - horodatages : RFC 3339 UTC à 9 décimales, de sorte que l'ordre
+//!   lexicographique soit l'ordre chronologique ;
+//! - unités SI (m, m/s, rad).
+
+mod codec;
+mod db;
+mod error;
+mod import;
+mod routes;
+mod settings;
+mod tracks;
+mod waypoints;
+
+pub use db::Db;
+pub use error::StorageError;
+pub use tracks::TrackSummary;
 
 /// Nom du composant, utilisé comme identifiant de source dans les logs.
 pub const COMPONENT: &str = "nav-storage";

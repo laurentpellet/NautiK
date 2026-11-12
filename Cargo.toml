@@ -27,18 +27,29 @@ publish = false
 # Crates internes
 nav-core = { path = "crates/nav-core" }
 nav-charts = { path = "crates/nav-charts" }
+nav-geodesy = { path = "crates/nav-geodesy" }
+nav-routing = { path = "crates/nav-routing" }
+nav-signalk = { path = "crates/nav-signalk" }
+nav-storage = { path = "crates/nav-storage" }
 
 # Dépendances communes
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+quick-xml = "0.42"
 serde = { version = "1", features = ["derive"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
 tempfile = "3"
 thiserror = "2"
-tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
+url = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["serde", "v4"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

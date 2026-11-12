@@ -16,8 +16,20 @@
   } from 'maplibre-gl';
   import 'maplibre-gl/dist/maplibre-gl.css';
   import { untrack } from 'svelte';
+  import type { GeoJSONSource } from 'maplibre-gl';
   import type { ChartCatalog } from '../services/charts';
   import type { PositionFix } from '../services/position';
+  import type { LatLon, Route } from '../services/routing';
+  import {
+    DRAFT_SOURCE,
+    ROUTES_SOURCE,
+    TRACKS_SOURCE,
+    draftData,
+    emptyCollection,
+    overlayLayers,
+    routesData,
+    tracksData,
+  } from '../map/overlays';
   import {
     BACKGROUND_COLOR,
     BACKGROUND_LAYER_ID,
@@ -35,9 +47,32 @@
     stale: boolean;
     theme: Theme;
     northUp: boolean;
+    /** Routes enregistrées à dessiner. */
+    routes?: Route[];
+    /** Index du waypoint visé sur la route active. */
+    targetIndex?: number | null;
+    /** Points de la route en cours de tracé. */
+    draft?: LatLon[];
+    /** Traces à dessiner. */
+    tracks?: { id: string; points: LatLon[]; recording: boolean }[];
+    /** Mode tracé : un clic sur la carte ajoute un point. */
+    drawing?: boolean;
+    onmapclick?: (position: LatLon) => void;
   }
 
-  let { catalog, fix, stale, theme, northUp }: Props = $props();
+  let {
+    catalog,
+    fix,
+    stale,
+    theme,
+    northUp,
+    routes = [],
+    targetIndex = null,
+    draft = [],
+    tracks = [],
+    drawing = false,
+    onmapclick,
+  }: Props = $props();
 
   let container: HTMLDivElement;
   let map = $state.raw<MapLibreMap | null>(null);
@@ -69,7 +104,19 @@
     m.addControl(new AttributionControl({ compact: true }), 'bottom-right');
     m.touchPitch.disable();
     m.on('load', () => {
+      for (const source of [ROUTES_SOURCE, DRAFT_SOURCE, TRACKS_SOURCE]) {
+        m.addSource(source, { type: 'geojson', data: emptyCollection() });
+      }
+      for (const layer of overlayLayers()) {
+        m.addLayer(layer);
+      }
       loaded = true;
+    });
+    m.on('click', (event) => {
+      if (drawing) {
+        const { lat, lng } = event.lngLat.wrap();
+        onmapclick?.({ latitudeDeg: lat, longitudeDeg: lng });
+      }
     });
     zoom = m.getZoom();
     m.on('zoom', () => {
@@ -97,6 +144,36 @@
         m.setPaintProperty(chartLayerId(chart), property, paint[property]);
       }
     }
+  });
+
+  // Surimpressions : mises à jour ciblées des sources GeoJSON.
+  function setData(id: string, data: ReturnType<typeof emptyCollection>): void {
+    const source = map?.getSource<GeoJSONSource>(id);
+    source?.setData(data);
+  }
+
+  $effect(() => {
+    const data = routesData(routes, targetIndex);
+    if (map && loaded) setData(ROUTES_SOURCE, data);
+  });
+
+  $effect(() => {
+    const data = draftData(draft);
+    if (map && loaded) setData(DRAFT_SOURCE, data);
+  });
+
+  $effect(() => {
+    const data = tracksData(tracks);
+    if (map && loaded) setData(TRACKS_SOURCE, data);
+  });
+
+  $effect(() => {
+    const m = map;
+    if (!m) return;
+    m.getCanvas().style.cursor = drawing ? 'crosshair' : '';
+    // Pas de zoom au double-clic pendant le tracé (double point).
+    if (drawing) m.doubleClickZoom.disable();
+    else m.doubleClickZoom.enable();
   });
 
   // Mode Nord en haut : cap carte bloqué à 0.

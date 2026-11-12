@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import App from './App.svelte';
 
 // MapLibre requiert WebGL, absent de jsdom.
@@ -24,19 +24,62 @@ const emptyCatalog = {
 
 type Handler = (event: { payload: unknown }) => void;
 
+const routingDefaults: Record<string, () => Promise<unknown>> = {
+  list_routes: () => Promise.resolve([]),
+  list_tracks: () => Promise.resolve([]),
+  get_navigation_state: () => Promise.resolve({ activeRouteId: null, recordingTrackId: null }),
+  get_sources: () =>
+    Promise.resolve({ mode: 'simulator', signalkUrl: null, tokenStored: false, connection: null }),
+};
+
 function fakeIpc(responses: Record<string, () => Promise<unknown>>) {
+  const all = { ...routingDefaults, ...responses };
   return (command: string) =>
-    responses[command]?.() ?? Promise.reject(new Error(`commande inattendue ${command}`));
+    all[command]?.() ?? Promise.reject(new Error(`commande inattendue ${command}`));
 }
 
 function fakeListen() {
-  const handlers: Handler[] = [];
-  const listen = (_event: string, handler: Handler) => {
-    handlers.push(handler);
+  const handlers = new Map<string, Handler[]>();
+  const listen = (event: string, handler: Handler) => {
+    handlers.set(event, [...(handlers.get(event) ?? []), handler]);
     return Promise.resolve(() => {});
   };
-  return { listen, emit: (payload: unknown) => handlers.forEach((h) => h({ payload })) };
+  const emit = (payload: unknown, event = 'instruments') =>
+    (handlers.get(event) ?? []).forEach((h) => h({ payload }));
+  return { listen, emit };
 }
+
+function snapshotWith(fix: Record<string, unknown>, stale = false, readings: unknown[] = []) {
+  const now = new Date().toISOString();
+  return {
+    computedAt: now,
+    position: {
+      fix: { cogRad: null, sogMps: 0, measuredAt: now, receivedAt: now, ...fix },
+      ageMs: stale ? 12_000 : 400,
+      stale,
+    },
+    readings,
+  };
+}
+
+const navigationStatus = {
+  routeId: 'r1',
+  routeName: 'Tiputa → Avatoru',
+  targetIndex: 0,
+  waypointCount: 2,
+  targetName: 'WP001',
+  targetPosition: { latitudeDeg: -14.968, longitudeDeg: -147.638 },
+  distanceToTargetM: 1852,
+  bearingToTargetRad: Math.PI,
+  crossTrackM: -92.6,
+  remainingDistanceM: 18520,
+  etaTarget: null,
+  etaEnd: null,
+  reachedWaypoint: null,
+  finished: false,
+  simulated: true,
+  computedAt: new Date().toISOString(),
+};
 
 describe('App', () => {
   it("affiche la version du moteur et l'avertissement de sûreté", async () => {
@@ -83,17 +126,156 @@ describe('App', () => {
     });
     expect(await screen.findByText('Aucune position')).toBeTruthy();
 
-    events.emit({
-      position: { latitudeDeg: -17.535, longitudeDeg: -149.569 },
-      cogRad: null,
-      sogMps: 0,
-      source: 'simulator',
-      sourceId: 'simulator',
-      measuredAt: new Date().toISOString(),
-      receivedAt: new Date().toISOString(),
-    });
+    events.emit(
+      snapshotWith({
+        position: { latitudeDeg: -17.535, longitudeDeg: -149.569 },
+        source: 'simulator',
+        sourceId: 'simulator',
+      }),
+    );
     expect((await screen.findByTestId('position')).textContent).toContain('17°32.100′ S');
     expect(screen.getByText('POSITION SIMULÉE')).toBeTruthy();
+    expect(screen.queryByText(/Position obsolète/)).toBeNull();
+  });
+
+  it('signale une position Signal K obsolète et affiche les instruments', async () => {
+    const events = fakeListen();
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+      }),
+      listen: events.listen,
+    });
+    await screen.findByText('Aucune position');
+    const now = new Date().toISOString();
+    events.emit(
+      snapshotWith(
+        {
+          position: { latitudeDeg: -14.968, longitudeDeg: -147.638 },
+          source: 'signalK',
+          sourceId: 'gps.1',
+        },
+        true,
+        [
+          {
+            quantity: 'depthBelowTransducer',
+            value: 12.46,
+            source: 'signalK',
+            sourceId: 'sounder',
+            measuredAt: now,
+            ageMs: 500,
+            stale: false,
+          },
+          {
+            quantity: 'speedOverGround',
+            value: 4.115,
+            source: 'signalK',
+            sourceId: 'gps.1',
+            measuredAt: now,
+            ageMs: 9000,
+            stale: true,
+          },
+        ],
+      ),
+    );
+    expect((await screen.findByText(/Position obsolète/)).textContent).toContain('12 s');
+    expect(screen.queryByText('POSITION SIMULÉE')).toBeNull();
+    const instruments = screen.getByTestId('instruments');
+    expect(instruments.textContent).toContain('12.5 m');
+    expect(instruments.textContent).toContain('8.0 kn');
+    const sog = instruments.querySelector('[data-quantity="speedOverGround"]');
+    expect(sog?.classList.contains('stale')).toBe(true);
+    expect(screen.getByLabelText('donnée obsolète')).toBeTruthy();
+  });
+
+  it("affiche l'état de la connexion Signal K et sa perte", async () => {
+    const events = fakeListen();
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+        get_sources: () =>
+          Promise.resolve({
+            mode: 'signalK',
+            signalkUrl: 'http://boat.local:3000',
+            tokenStored: true,
+            connection: { state: 'connecting', attempt: 1 },
+          }),
+      }),
+      listen: events.listen,
+    });
+    expect((await screen.findByTestId('source-mode')).textContent).toContain('boat.local');
+    expect(screen.getByTestId('signalk-status').textContent).toContain('tentative 1');
+
+    events.emit(
+      { state: 'connected', serverName: 'signalk-server', serverVersion: '2.8.0' },
+      'signalk-status',
+    );
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('signalk-status').textContent).toContain('Connecté'),
+    );
+
+    events.emit(
+      { state: 'disconnected', reason: 'connexion fermée', retryInMs: 2000 },
+      'signalk-status',
+    );
+    await vi.waitFor(() => {
+      const status = screen.getByTestId('signalk-status');
+      expect(status.textContent).toContain('Déconnecté : connexion fermée');
+      expect(status.getAttribute('role')).toBe('alert');
+    });
+  });
+
+  it('enregistre une source Signal K sans conserver le jeton saisi', async () => {
+    const calls: unknown[] = [];
+    const base = fakeIpc({
+      get_engine_info: () => Promise.resolve(engine),
+      get_chart_catalog: () => Promise.reject(new Error('x')),
+    });
+    const invoke = (command: string, args?: Record<string, unknown>) => {
+      if (command === 'set_sources') {
+        calls.push(args);
+        return Promise.resolve({
+          mode: 'signalK',
+          signalkUrl: 'http://boat.local:3000',
+          tokenStored: true,
+          connection: null,
+        });
+      }
+      return base(command);
+    };
+    render(App, { invoke, listen: fakeListen().listen });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Modifier la source' }));
+    await fireEvent.click(screen.getByLabelText('Signal K'));
+    await fireEvent.input(screen.getByLabelText(/Adresse du serveur/), {
+      target: { value: 'http://boat.local:3000' },
+    });
+    await fireEvent.input(screen.getByLabelText(/Jeton/), { target: { value: 'secret-token' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Appliquer' }));
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toEqual({
+      mode: 'signalK',
+      signalkUrl: 'http://boat.local:3000',
+      token: 'secret-token',
+      clearToken: false,
+    });
+    expect((await screen.findByTestId('signalk-status')).textContent).toContain('En attente');
+    expect(screen.queryByLabelText(/Jeton/)).toBeNull();
+  });
+
+  it('rejette visiblement un état Signal K invalide', async () => {
+    const events = fakeListen();
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+      }),
+      listen: events.listen,
+    });
+    await screen.findByText('Aucune position');
+    events.emit({ state: 'flying' }, 'signalk-status');
+    expect((await screen.findByText(/État Signal K rejeté/)).textContent).toContain('flying');
   });
 
   it('rejette visiblement une position invalide', async () => {
@@ -106,8 +288,14 @@ describe('App', () => {
       listen: events.listen,
     });
     await screen.findByText('Aucune position');
-    events.emit({ position: { latitudeDeg: 95, longitudeDeg: 0 } });
-    expect((await screen.findByText(/Relevé rejeté/)).textContent).toContain('WGS84');
+    events.emit(
+      snapshotWith({
+        position: { latitudeDeg: 95, longitudeDeg: 0 },
+        source: 'simulator',
+        sourceId: 'simulator',
+      }),
+    );
+    expect((await screen.findByText(/Données rejetées/)).textContent).toContain('WGS84');
   });
 
   it('indique le répertoire des cartes lorsque le catalogue est vide', async () => {
@@ -152,6 +340,91 @@ describe('App', () => {
     });
     expect(await screen.findByText(/Tahiti \(test\)/)).toBeTruthy();
     expect(screen.getByText(/Carte ignorée bad.mbtiles : base corrompue/)).toBeTruthy();
+  });
+
+  it('affiche les routes enregistrées', async () => {
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+        list_routes: () =>
+          Promise.resolve([
+            {
+              id: 'r1',
+              name: 'Tiputa → Avatoru',
+              description: null,
+              waypoints: [
+                {
+                  id: 'a',
+                  name: 'WP001',
+                  position: { latitudeDeg: -14.968, longitudeDeg: -147.638 },
+                  description: null,
+                },
+                {
+                  id: 'b',
+                  name: 'WP002',
+                  position: { latitudeDeg: -14.95, longitudeDeg: -147.7 },
+                  description: null,
+                },
+              ],
+              totalDistanceM: 18520,
+              active: false,
+            },
+          ]),
+      }),
+      listen: fakeListen().listen,
+    });
+    expect(await screen.findByText('Tiputa → Avatoru')).toBeTruthy();
+    expect(screen.getByText(/10\.0 NM — 2 WP/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Naviguer' })).toBeTruthy();
+  });
+
+  it("affiche l'état de navigation reçu du moteur puis sa désactivation", async () => {
+    const events = fakeListen();
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+      }),
+      listen: events.listen,
+    });
+    await screen.findByText('Aucune position');
+    events.emit(navigationStatus, 'navigation-status');
+    const data = await screen.findByTestId('navigation-data');
+    expect(data.textContent).toContain('1.0 NM');
+    expect(data.textContent).toContain('180°');
+    expect(data.textContent).toContain('0.05 NM G');
+    expect(screen.getByText('SIMULATION')).toBeTruthy();
+
+    events.emit(null, 'navigation-status');
+    await vi.waitFor(() => expect(screen.queryByTestId('navigation-data')).toBeNull());
+  });
+
+  it('rejette visiblement un état de navigation invalide', async () => {
+    const events = fakeListen();
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+      }),
+      listen: events.listen,
+    });
+    await screen.findByText('Aucune position');
+    events.emit({ ...navigationStatus, distanceToTargetM: 'loin' }, 'navigation-status');
+    expect(await screen.findByText(/État de navigation rejeté/)).toBeTruthy();
+    expect(screen.queryByTestId('navigation-data')).toBeNull();
+  });
+
+  it('signale une erreur de chargement des routes', async () => {
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+        list_routes: () => Promise.reject(new Error('base verrouillée')),
+      }),
+      listen: fakeListen().listen,
+    });
+    expect(await screen.findByText('base verrouillée')).toBeTruthy();
   });
 
   it('signale un répertoire de cartes inaccessible', async () => {

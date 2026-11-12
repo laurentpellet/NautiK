@@ -1,37 +1,43 @@
 <script lang="ts">
   import { formatAge, formatLatitude, formatLongitude } from '../format';
-  import type { PositionFix } from '../services/position';
+  import type { PositionStatus } from '../services/instruments';
 
   interface Props {
-    fix: PositionFix | null;
-    stale: boolean;
-    now: number;
+    /** Position et fraîcheur calculée par le moteur. */
+    position: PositionStatus | null;
+    /** Le moteur ne diffuse plus : les valeurs affichées ne sont plus garanties. */
+    silent: boolean;
     error: string | null;
   }
 
-  let { fix, stale, now, error }: Props = $props();
+  let { position, silent, error }: Props = $props();
+
+  const stale = $derived(silent || (position?.stale ?? false));
 </script>
 
 <section class="position" aria-label="Position">
-  {#if fix}
-    {#if fix.source === 'simulator'}
+  {#if silent}
+    <p class="badge stale" role="alert">Moteur muet : données non actualisées</p>
+  {/if}
+  {#if position}
+    {#if position.fix.source === 'simulator'}
       <p class="badge simulated" role="status">POSITION SIMULÉE</p>
     {/if}
-    {#if stale}
+    {#if position.stale}
       <p class="badge stale" role="alert">
-        Position obsolète ({formatAge(now - fix.measuredAt)})
+        Position obsolète ({formatAge(position.ageMs)})
       </p>
     {/if}
     <p class="coords" class:dimmed={stale} data-testid="position">
-      <span>{formatLatitude(fix.latitudeDeg)}</span>
-      <span>{formatLongitude(fix.longitudeDeg)}</span>
+      <span>{formatLatitude(position.fix.latitudeDeg)}</span>
+      <span>{formatLongitude(position.fix.longitudeDeg)}</span>
     </p>
-    <p class="meta">Source : {fix.sourceId} — il y a {formatAge(now - fix.measuredAt)}</p>
+    <p class="meta">Source : {position.fix.sourceId} — il y a {formatAge(position.ageMs)}</p>
   {:else}
     <p class="badge stale" role="alert">Aucune position</p>
   {/if}
   {#if error}
-    <p class="error" role="alert">Relevé rejeté : {error}</p>
+    <p class="error" role="alert">Données rejetées : {error}</p>
   {/if}
 </section>
 
@@ -61,6 +67,7 @@
 
   .badge {
     display: inline-block;
+    margin-right: 0.25rem;
     padding: 0.1rem 0.5rem;
     border-radius: 0.25rem;
     font-size: 0.75rem;
