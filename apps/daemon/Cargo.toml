@@ -1,0 +1,22 @@
+[package]
+name = "nautik-daemon"
+description = "NautiK — service de navigation autonome (sans interface graphique)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nautikd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+nav-core.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

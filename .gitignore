@@ -1,0 +1,25 @@
+# Rust
+/target/
+
+# Node / Vite
+node_modules/
+apps/desktop/dist/
+.vite/
+
+# Tauri
+apps/desktop/src-tauri/gen/schemas/
+
+# Données locales
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+.env
+.env.*
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
