@@ -302,19 +302,54 @@ Critères :
 
 ## Phase 6 — Alarmes
 
-- [ ] Créer nav-alarms.
-- [ ] Définir machine à états.
-- [ ] Ajouter alarme mouillage.
-- [ ] Ajouter perte GPS.
-- [ ] Ajouter hystérésis.
-- [ ] Ajouter temporisation.
-- [ ] Ajouter alarme sonore.
-- [ ] Historiser les événements.
+- [x] Créer nav-alarms.
+- [x] Définir machine à états.
+- [x] Ajouter alarme mouillage.
+- [x] Ajouter perte GPS.
+- [x] Ajouter hystérésis.
+- [x] Ajouter temporisation.
+- [x] Ajouter alarme sonore.
+- [x] Historiser les événements.
 
 Critères :
-- Alarme mouillage fonctionnelle.
-- Historique conservé.
-- Alarmes indépendantes de Svelte.
+- [x] Alarme mouillage fonctionnelle (recette sous Windows 11 en mode
+      simulateur).
+- [x] Historique conservé (table `alarm_events`, transaction).
+- [x] Alarmes indépendantes de Svelte (évaluées par le moteur à chaque
+      pas de la boucle, sans interface).
+
+État (2026-11-13) : phase 6 terminée (recette sous Windows 11 en mode simulateur).
+- nav-alarms (sans E/S) :
+  - machine à états Normal → En attente → Active → Acquittée → Normal ;
+    temporisation avant déclenchement, retour stable de 5 s avant
+    résolution ; une donnée absente ou obsolète ne résout ni ne
+    déclenche jamais une alarme ;
+  - mouillage (ALR-001) : ancre posée à la position courante, qui doit
+    être fraîche (aucune position supposée) ; rayon 10 à 2 000 m,
+    hystérésis 10 % du rayon (5 m au moins), temporisation 0 à 300 s ;
+  - perte de position (ALR-002) : position absente ou obsolète, après
+    une première position reçue ou dès que le mouillage est surveillé ;
+    une alarme active le reste après un changement de source ;
+  - désactiver la surveillance ou lever l'ancre est explicite et
+    historisé ; une alarme acquittée reste affichée.
+- nav-storage : configuration (`alarms`, reprise au redémarrage, valeurs
+  illisibles signalées) et historique (`alarm_events`) ; pas de
+  migration (tables du schéma initial).
+- Desktop : événement `alarms` chaque seconde, déclenchements
+  journalisés (`tracing`), commandes `get_alarms`, `drop_anchor`,
+  `raise_anchor`, `acknowledge_alarm`, `set_alarm_enabled`,
+  `list_alarm_events`.
+- Frontend : bandeau d'alarme dans tous les onglets et en plein écran
+  (acquittement), pastille « Alarmes » dans l'en-tête, carte Mouillage
+  (distance, levée confirmée), cercle d'évitage et limite de retour
+  sur la carte, son généré localement (Web Audio) tant que l'alarme
+  n'est pas acquittée, Paramètres → Alarmes (désactivation confirmée,
+  historique).
+- Reportés : alarmes profondeur, écart de route, batterie, perte
+  Signal K distincte de la perte de position, CPA/TCPA (V2) ; ancre
+  posée à une position choisie sur la carte.
+- Rust : fmt, clippy (`-D warnings`), 373 tests. Frontend : lint,
+  svelte-check, 274 tests Vitest, build.
 
 ## Phase 7 — Service embarqué
 

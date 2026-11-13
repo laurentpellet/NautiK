@@ -20,9 +20,11 @@
     status: Snippet;
     /** Réglages des sources (panneau existant). */
     sources: Snippet;
+    /** Alarmes (surveillance et historique). */
+    alarms?: Snippet;
   }
 
-  let { simulator, status, sources }: Props = $props();
+  let { simulator, status, sources, alarms }: Props = $props();
 
   let speedText = $state('');
   let speedError = $state<string | null>(null);
@@ -136,6 +138,12 @@
     <section class="card sources" aria-label="Sources">
       {@render sources()}
     </section>
+
+    {#if alarms}
+      <section class="card sources">
+        {@render alarms()}
+      </section>
+    {/if}
   </div>
 </section>
 

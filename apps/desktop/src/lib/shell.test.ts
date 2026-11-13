@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AlarmView } from './services/alarms';
 import type { PositionStatus } from './services/instruments';
 import { activeAlerts, statusPills, utcClock, type ShellInputs } from './shell';
 
@@ -32,9 +33,53 @@ const pill = (over: Partial<ShellInputs>, id: string) =>
 describe("pastilles d'état", () => {
   it('tout va bien', () => {
     const pills = statusPills(inputs());
-    expect(pills.map((p) => p.id)).toEqual(['position', 'link', 'ais', 'engine']);
-    expect(pills.map((p) => p.level)).toEqual(['ok', 'ok', 'off', 'ok']);
+    expect(pills.map((p) => p.id)).toEqual(['position', 'link', 'ais', 'alarm', 'engine']);
+    expect(pills.map((p) => p.level)).toEqual(['ok', 'ok', 'off', 'off', 'ok']);
     expect(activeAlerts(pills)).toEqual([]);
+  });
+
+  it('résume les alarmes du moteur', () => {
+    const view = (kind: AlarmView['kind'], state: AlarmView['state']): AlarmView => ({
+      kind,
+      label: kind === 'anchor' ? 'Mouillage' : 'Perte de position',
+      state,
+      since: null,
+      message: `${kind} ${state}`,
+    });
+    const alarms = (a: AlarmView['state'], p: AlarmView['state'], anchored = false) => ({
+      computedAt: 0,
+      alarms: [view('anchor', a), view('positionLost', p)],
+      anchor: anchored
+        ? {
+            position: { latitudeDeg: 0, longitudeDeg: 0 },
+            radiusM: 50,
+            hysteresisM: 5,
+            delayS: 10,
+            distanceM: 3,
+            bearingRad: null,
+          }
+        : null,
+      anchorRadiusM: 50,
+      sounding: false,
+      simulated: false,
+    });
+    expect(pill({ alarms: alarms('off', 'normal') }, 'alarm')).toMatchObject({
+      state: 'Veille',
+      level: 'ok',
+    });
+    expect(pill({ alarms: alarms('normal', 'normal', true) }, 'alarm')?.state).toBe('Mouillage');
+    expect(pill({ alarms: alarms('pending', 'normal', true) }, 'alarm')?.level).toBe('warn');
+    expect(pill({ alarms: alarms('off', 'off') }, 'alarm')).toMatchObject({
+      state: 'Réduites',
+      level: 'warn',
+    });
+    expect(pill({ alarms: alarms('active', 'normal', true) }, 'alarm')).toMatchObject({
+      state: 'Mouillage',
+      level: 'alert',
+    });
+    const both = statusPills(inputs({ alarms: alarms('acknowledged', 'active', true) }));
+    expect(both.find((p) => p.id === 'alarm')?.state).toBe('2 actives');
+    expect(activeAlerts(both)[0]).toContain('anchor acknowledged');
   });
 
   it('signale position absente, obsolète, simulée ou rejouée', () => {

@@ -20,6 +20,7 @@ anyhow.workspace = true
 keyring = { version = "3", features = ["apple-native", "linux-native", "windows-native"] }
 chrono.workspace = true
 nav-ais.workspace = true
+nav-alarms.workspace = true
 nav-charts.workspace = true
 nav-core.workspace = true
 nav-nmea0183.workspace = true

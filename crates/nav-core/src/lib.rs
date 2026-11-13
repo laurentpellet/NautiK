@@ -25,7 +25,7 @@ pub use instrument_sim::InstrumentSimulator;
 pub use link::{ConnectionState, Sample};
 pub use measurement::{Measurement, MeasurementError, Quantity};
 pub use position::{GeoPosition, PositionError, PositionFix, SourceKind};
-pub use vessel::{InstrumentsSnapshot, Priorities, VesselState};
+pub use vessel::{InstrumentsSnapshot, PositionStatus, Priorities, Reading, VesselState};
 
 /// Version du moteur NautiK (version du workspace).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

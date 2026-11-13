@@ -27,6 +27,7 @@ publish = false
 [workspace.dependencies]
 # Crates internes
 nav-ais = { path = "crates/nav-ais" }
+nav-alarms = { path = "crates/nav-alarms" }
 nav-core = { path = "crates/nav-core" }
 nav-charts = { path = "crates/nav-charts" }
 nav-geodesy = { path = "crates/nav-geodesy" }

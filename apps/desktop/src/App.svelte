@@ -21,6 +21,17 @@
   } from './lib/services/weather';
   import WeatherView from './lib/components/WeatherView.svelte';
   import WindTimeBar from './lib/components/WindTimeBar.svelte';
+  import AlarmBanner from './lib/components/AlarmBanner.svelte';
+  import AlarmsPanel from './lib/components/AlarmsPanel.svelte';
+  import AnchorCard from './lib/components/AnchorCard.svelte';
+  import { AlarmSound } from './lib/alarmSound';
+  import {
+    AlarmsApi,
+    alertingAlarms,
+    subscribeAlarms,
+    type AlarmKind,
+    type AlarmsSnapshot,
+  } from './lib/services/alarms';
   import NavigationPanel from './lib/components/NavigationPanel.svelte';
   import PositionPanel from './lib/components/PositionPanel.svelte';
   import RoutesPanel from './lib/components/RoutesPanel.svelte';
@@ -101,6 +112,40 @@
   const sourcesApi = new SourcesApi((command, args) => invokeFn(command, args));
   const simulator = new SimulatorApi((command, args) => invokeFn(command, args));
   const weatherApi = new WeatherApi((command, args) => invokeFn(command, args));
+  const alarmsApi = new AlarmsApi((command, args) => invokeFn(command, args));
+
+  /** État des alarmes, évaluées par le moteur. */
+  let alarms = $state.raw<AlarmsSnapshot | null>(null);
+  let alarmsError = $state<string | null>(null);
+  let soundUnavailable = $state(false);
+  const sound = new AlarmSound();
+  const alerting = $derived(alertingAlarms(alarms));
+  const anchorAlerting = $derived(alerting.some((a) => a.kind === 'anchor'));
+
+  // Son piloté par l'état du moteur : seul l'acquittement ou la
+  // résolution l'arrête.
+  $effect(() => {
+    sound.set(alarms?.sounding ?? false);
+    soundUnavailable = sound.unavailable;
+  });
+  $effect(() => () => sound.dispose());
+
+  async function acknowledge(kind: AlarmKind): Promise<void> {
+    try {
+      alarms = await alarmsApi.acknowledge(kind);
+      alarmsError = null;
+    } catch (e) {
+      alarmsError = `Acquittement impossible : ${message(e)}`;
+    }
+  }
+
+  async function dropAnchor(radiusM: number, delayS: number): Promise<void> {
+    alarms = await alarmsApi.dropAnchor(radiusM, delayS);
+  }
+
+  async function raiseAnchor(): Promise<void> {
+    alarms = await alarmsApi.raiseAnchor();
+  }
 
   function showWeather(file: WeatherFile | null): void {
     weatherShown = file;
@@ -182,7 +227,7 @@
   const fix = $derived(position?.fix ?? null);
   const stale = $derived(fix !== null && (silent || (position?.stale ?? false)));
 
-  const pills = $derived(statusPills({ position, silent, connection, ais }));
+  const pills = $derived(statusPills({ position, silent, connection, ais, alarms }));
 
   function setLayers(next: MapLayers): void {
     layers = next;
@@ -260,6 +305,28 @@
           listenFn,
         ),
       (e) => (aisError = message(e)),
+    ),
+  );
+
+  $effect(() => {
+    alarmsApi
+      .get()
+      .then((a) => (alarms = a))
+      .catch((e: unknown) => (alarmsError = `Alarmes illisibles : ${message(e)}`));
+  });
+
+  $effect(() =>
+    holdSubscription(
+      () =>
+        subscribeAlarms(
+          (a) => {
+            alarms = a;
+            alarmsError = null;
+          },
+          (e) => (alarmsError = `Alarmes illisibles : ${e.message}`),
+          listenFn,
+        ),
+      (e) => (alarmsError = `Alarmes illisibles : ${message(e)}`),
     ),
   );
 
@@ -343,6 +410,8 @@
           onaisclick={(mmsi) => (selectedTarget = mmsi)}
           wind={weatherShown ? (windField?.points ?? null) : null}
           onviewchange={(b) => (mapView = b)}
+          anchor={alarms?.anchor ?? null}
+          {anchorAlerting}
         />
       {/await}
     {/if}
@@ -350,6 +419,20 @@
     {#snippet statusStrip()}
       <StatusStrip {position} {silent} {connection} />
     {/snippet}
+
+    {#snippet alarmsSection()}
+      <AlarmsPanel api={alarmsApi} {alarms} onchange={(a) => (alarms = a)} />
+    {/snippet}
+
+    <!-- Alarmes : visibles dans tous les onglets, en plein écran compris. -->
+    <AlarmBanner
+      --banner-top={fullscreen ? '3.4rem' : '0.6rem'}
+      alarms={alerting}
+      simulated={alarms?.simulated ?? false}
+      {soundUnavailable}
+      onacknowledge={acknowledge}
+      error={alarmsError}
+    />
 
     {#if fullscreen}
       <!-- Plein écran : en-tête masqué, onglets et sortie toujours accessibles. -->
@@ -380,6 +463,12 @@
     {#if tab === 'chart'}
       <div class="map-side">
         <MapLayersMenu {layers} onchange={setLayers} />
+        <AnchorCard
+          {alarms}
+          canDrop={fix !== null && !stale}
+          ondrop={dropAnchor}
+          onraise={raiseAnchor}
+        />
         <LiveNavCard {snapshot} {silent} />
       </div>
       {#if weatherShown}
@@ -421,7 +510,7 @@
         listen={listenFn}
       />
     {:else if tab === 'settings'}
-      <SettingsView {simulator} status={statusStrip}>
+      <SettingsView {simulator} status={statusStrip} alarms={alarmsSection}>
         {#snippet sources()}
           <SourcePanel api={sourcesApi} {connection} {rejections} />
           {#if connectionError}

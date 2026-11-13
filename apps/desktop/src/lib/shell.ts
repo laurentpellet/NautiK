@@ -5,13 +5,14 @@
  */
 import { describeConnection, formatAge } from './format';
 import type { AisSnapshot } from './services/ais';
+import { alertingAlarms, type AlarmsSnapshot } from './services/alarms';
 import type { ConnectionState, PositionStatus } from './services/instruments';
 
 /** Gravité d'une pastille : `off` = information absente. */
 export type PillLevel = 'ok' | 'warn' | 'alert' | 'off';
 
 export interface StatusPill {
-  id: 'position' | 'link' | 'ais' | 'engine';
+  id: 'position' | 'link' | 'ais' | 'alarm' | 'engine';
   label: string;
   /** État court affiché sous le libellé. */
   state: string;
@@ -26,6 +27,41 @@ export interface ShellInputs {
   /** `undefined` : état inconnu ; `null` : pas de liaison (simulateur). */
   connection: ConnectionState | null | undefined;
   ais: AisSnapshot | null;
+  /** État des alarmes (moteur) ; absent tant qu'il n'est pas connu. */
+  alarms?: AlarmsSnapshot | null;
+}
+
+function alarmPill(alarms: AlarmsSnapshot | null | undefined): StatusPill {
+  const base = { id: 'alarm', label: 'Alarmes' } as const;
+  if (!alarms) return { ...base, state: '…', level: 'off', title: 'État des alarmes inconnu' };
+  const alerting = alertingAlarms(alarms);
+  if (alerting.length > 0) {
+    return {
+      ...base,
+      state: alerting.length > 1 ? `${alerting.length} actives` : (alerting[0]?.label ?? ''),
+      level: 'alert',
+      title: alerting.map((a) => `${a.label} : ${a.message}`).join(' — '),
+    };
+  }
+  const pending = alarms.alarms.filter((a) => a.state === 'pending');
+  if (pending.length > 0) {
+    return {
+      ...base,
+      state: 'Vérification',
+      level: 'warn',
+      title: pending.map((a) => `${a.label} : ${a.message}`).join(' — '),
+    };
+  }
+  const off = alarms.alarms.filter((a) => a.kind === 'positionLost' && a.state === 'off');
+  if (off.length > 0) {
+    return { ...base, state: 'Réduites', level: 'warn', title: 'Perte de position non surveillée' };
+  }
+  return {
+    ...base,
+    state: alarms.anchor ? 'Mouillage' : 'Veille',
+    level: 'ok',
+    title: alarms.anchor ? 'Mouillage surveillé' : 'Aucune alarme déclenchée',
+  };
 }
 
 function positionPill(position: PositionStatus | null): StatusPill {
@@ -94,6 +130,7 @@ export function statusPills(inputs: ShellInputs): StatusPill[] {
     positionPill(inputs.position),
     linkPill(inputs.connection),
     aisPill(inputs.ais),
+    alarmPill(inputs.alarms),
     enginePill(inputs.silent),
   ];
 }

@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 chrono.workspace = true
+nav-alarms.workspace = true
 nav-core.workspace = true
 nav-routing.workspace = true
 serde.workspace = true

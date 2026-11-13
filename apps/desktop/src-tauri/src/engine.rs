@@ -26,6 +26,9 @@
 
 use chrono::{DateTime, Utc};
 use nav_ais::{AisDecoder, AisError, AisSimulator, AisTargetView, AisTracker, Fragment};
+use nav_alarms::{
+    AlarmEvent, AlarmKind, AlarmManager, AlarmSettings, AlarmsSnapshot, AnchorConfig, RuleError,
+};
 use nav_core::{
     GeoPosition, InstrumentSimulator, InstrumentsSnapshot, Measurement, PositionFix, Priorities,
     SourceKind, VesselState,
@@ -53,6 +56,12 @@ pub enum EngineError {
     /// Configuration d'enregistrement invalide.
     #[error(transparent)]
     Recorder(#[from] RecorderError),
+    /// Aucune position fraîche : l'ancre ne peut pas être posée.
+    #[error("aucune position récente : impossible de poser l'ancre")]
+    NoFreshPosition,
+    /// Configuration d'alarme invalide.
+    #[error(transparent)]
+    Alarm(#[from] RuleError),
 }
 
 /// Source des données de navigation.
@@ -101,6 +110,10 @@ pub struct Tick {
     pub snapshot: InstrumentsSnapshot,
     /// Cibles AIS.
     pub ais: AisSnapshot,
+    /// État des alarmes.
+    pub alarms: AlarmsSnapshot,
+    /// Événements d'alarme survenus pendant ce pas (à historiser).
+    pub alarm_events: Vec<AlarmEvent>,
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +136,7 @@ pub struct Engine {
     ais_targets: AisTracker,
     ais_simulator: AisSimulator,
     instruments_simulator: InstrumentSimulator,
+    alarms: AlarmManager,
 }
 
 impl Engine {
@@ -140,7 +154,69 @@ impl Engine {
             ais_targets: AisTracker::new(),
             ais_simulator: AisSimulator::new(start),
             instruments_simulator: InstrumentSimulator::new(),
+            alarms: Self::alarm_manager(AlarmSettings::default(), true),
         }
+    }
+
+    fn alarm_manager(settings: AlarmSettings, simulated: bool) -> AlarmManager {
+        let mut alarms = AlarmManager::new(settings);
+        alarms.on_source_changed(simulated);
+        alarms
+    }
+
+    /// Restaure la configuration des alarmes enregistrée (démarrage).
+    pub fn restore_alarms(&mut self, settings: AlarmSettings) {
+        self.alarms = Self::alarm_manager(settings, self.is_simulated());
+    }
+
+    /// Configuration des alarmes, à persister après chaque commande.
+    #[must_use]
+    pub fn alarm_settings(&self) -> AlarmSettings {
+        self.alarms.settings()
+    }
+
+    /// État des alarmes.
+    #[must_use]
+    pub fn alarms(&self, now: DateTime<Utc>) -> AlarmsSnapshot {
+        self.alarms.snapshot(now)
+    }
+
+    /// Pose l'ancre à la position courante du bateau, qui doit être
+    /// fraîche : aucune position n'est supposée.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::NoFreshPosition`] sans position récente,
+    /// [`EngineError::Alarm`] si le rayon ou la temporisation est invalide.
+    pub fn drop_anchor(
+        &mut self,
+        radius_m: f64,
+        delay_s: u32,
+        now: DateTime<Utc>,
+    ) -> Result<AlarmEvent, EngineError> {
+        let position = self
+            .vessel
+            .snapshot(now)
+            .position
+            .filter(|p| !p.stale)
+            .ok_or(EngineError::NoFreshPosition)?;
+        let config = AnchorConfig::new(position.fix.position, radius_m, delay_s)?;
+        Ok(self.alarms.drop_anchor(config, now))
+    }
+
+    /// Lève l'ancre. `None` si aucun mouillage n'était surveillé.
+    pub fn raise_anchor(&mut self, now: DateTime<Utc>) -> Option<AlarmEvent> {
+        self.alarms.raise_anchor(now)
+    }
+
+    /// Acquitte une alarme. `None` si elle n'était pas active.
+    pub fn acknowledge_alarm(&mut self, kind: AlarmKind, now: DateTime<Utc>) -> Option<AlarmEvent> {
+        self.alarms.acknowledge(kind, now)
+    }
+
+    /// Active ou désactive l'alarme de perte de position.
+    pub fn set_position_alarm(&mut self, enabled: bool, now: DateTime<Utc>) -> Option<AlarmEvent> {
+        self.alarms.set_position_lost_enabled(enabled, now)
     }
 
     /// Mode de source courant.
@@ -158,6 +234,7 @@ impl Engine {
         self.vessel.clear();
         self.ais_decoder.clear();
         self.ais_targets.clear();
+        self.alarms.on_source_changed(self.is_simulated());
         let route = match mode {
             SourceMode::Simulator => self.navigation.as_ref().map(ActiveNavigation::route),
             SourceMode::SignalK | SourceMode::Nmea0183 => None,
@@ -317,14 +394,19 @@ impl Engine {
             }
             SourceMode::SignalK | SourceMode::Nmea0183 => None,
         };
+        let snapshot = self.vessel.snapshot(now);
+        // Les alarmes sont évaluées dans tous les modes, sans interface.
+        let alarm_events = self.alarms.evaluate(&snapshot, now);
         Tick {
             update,
-            snapshot: self.vessel.snapshot(now),
+            snapshot,
             ais: AisSnapshot {
                 computed_at: now,
                 simulated: self.is_simulated(),
                 targets: self.ais_targets.snapshot(now),
             },
+            alarms: self.alarms.snapshot(now),
+            alarm_events,
         }
     }
 }
@@ -597,5 +679,92 @@ mod tests {
         engine.tick(t(0));
         let fix = engine.tick(t(10)).update.expect("relevé").fix;
         assert_eq!(fix.sog_mps, Some(5.0));
+    }
+
+    #[test]
+    fn anchor_alarm_fires_when_the_simulated_boat_leaves_the_circle() {
+        use nav_alarms::{AlarmState, EventKind};
+
+        let mut engine = Engine::new(p(0.0, 0.0), 4.0);
+        engine.tick(t(0));
+        let dropped = engine.drop_anchor(50.0, 0, t(0)).expect("ancre");
+        assert_eq!(dropped.kind, EventKind::Enabled);
+        assert!(dropped.details.simulated);
+        engine.activate(route()).expect("route");
+        let mut fired = None;
+        for s in 1..60 {
+            let tick = engine.tick(t(s));
+            assert!(tick.alarms.simulated);
+            if let Some(e) = tick
+                .alarm_events
+                .iter()
+                .find(|e| e.alarm == AlarmKind::Anchor && e.kind == EventKind::Activated)
+            {
+                fired = Some((s, e.details.distance_m.expect("distance")));
+                assert!(tick.alarms.sounding);
+                break;
+            }
+        }
+        let (s, distance) = fired.expect("dérapage détecté");
+        assert!(distance > 50.0 && distance < 60.0, "{s} s, {distance} m");
+
+        let ack = engine
+            .acknowledge_alarm(AlarmKind::Anchor, t(s))
+            .expect("acquit");
+        assert_eq!(ack.kind, EventKind::Acknowledged);
+        let alarms = engine.alarms(t(s));
+        assert!(!alarms.sounding);
+        assert_eq!(alarms.alarms[0].state, AlarmState::Acknowledged);
+        assert!(engine.raise_anchor(t(s)).is_some());
+        assert!(engine.alarm_settings().anchor.is_none());
+    }
+
+    #[test]
+    fn anchor_needs_a_fresh_position_and_valid_settings() {
+        let mut engine = Engine::new(p(0.0, 0.0), 4.0);
+        engine.set_mode(SourceMode::SignalK, false);
+        assert_eq!(
+            engine.drop_anchor(50.0, 10, t(0)),
+            Err(EngineError::NoFreshPosition)
+        );
+        engine.on_fix(signalk_fix(0, 0.0));
+        assert!(matches!(
+            engine.drop_anchor(5.0, 10, t(0)),
+            Err(EngineError::Alarm(_))
+        ));
+        assert!(engine.drop_anchor(50.0, 10, t(0)).is_ok());
+        // Position devenue obsolète.
+        assert_eq!(
+            engine.drop_anchor(50.0, 10, t(60)),
+            Err(EngineError::NoFreshPosition)
+        );
+    }
+
+    #[test]
+    fn signal_k_loss_raises_the_position_alarm_without_inventing_a_fix() {
+        use nav_alarms::EventKind;
+
+        let mut engine = Engine::new(p(0.0, 0.0), 4.0);
+        engine.set_mode(SourceMode::SignalK, false);
+        engine.on_fix(signalk_fix(0, 0.0));
+        let mut events = Vec::new();
+        for s in 0..20 {
+            let tick = engine.tick(t(s));
+            assert!(tick.update.is_none(), "aucune position inventée");
+            assert!(!tick.alarms.simulated);
+            events.extend(tick.alarm_events);
+        }
+        let activated: Vec<_> = events
+            .iter()
+            .filter(|e| e.kind == EventKind::Activated)
+            .map(|e| e.alarm)
+            .collect();
+        assert_eq!(activated, [AlarmKind::PositionLost]);
+
+        // Restauration au démarrage : la configuration est reprise.
+        let settings = engine.alarm_settings();
+        let mut restarted = Engine::new(p(0.0, 0.0), 4.0);
+        restarted.restore_alarms(settings);
+        assert_eq!(restarted.alarm_settings(), settings);
     }
 }

@@ -31,7 +31,30 @@ const routingDefaults: Record<string, () => Promise<unknown>> = {
   get_sources: () => Promise.resolve(sourcesView()),
   list_serial_ports: () => Promise.resolve(['COM3']),
   get_simulator_settings: () => Promise.resolve({ speedMps: 4.115 }),
+  get_alarms: () => Promise.resolve(alarmsSnapshot()),
+  list_alarm_events: () => Promise.resolve([]),
 };
+
+function alarmsSnapshot(patch: Record<string, unknown> = {}) {
+  return {
+    computedAt: new Date().toISOString(),
+    alarms: [
+      { kind: 'anchor', label: 'Mouillage', state: 'off', since: null, message: 'Ancre levée' },
+      {
+        kind: 'positionLost',
+        label: 'Perte de position',
+        state: 'normal',
+        since: null,
+        message: 'Position reçue',
+      },
+    ],
+    anchor: null,
+    anchorRadiusM: 50,
+    sounding: false,
+    simulated: true,
+    ...patch,
+  };
+}
 
 function sourcesView(patch: Record<string, unknown> = {}) {
   return {
@@ -831,5 +854,210 @@ describe('App', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Afficher sur la carte' }));
     expect(await screen.findByText('Vent indisponible : fichier corrompu')).toBeTruthy();
     expect(screen.getByTestId('wind-stub').textContent).toBe('sans vent');
+  });
+
+  const anchorView = {
+    position: { latitudeDeg: -17.5, longitudeDeg: -149.5 },
+    radiusM: 60,
+    hysteresisM: 6,
+    delayS: 10,
+    distanceM: 72,
+    bearingRad: 0.5,
+  };
+
+  const dragging = (state: 'active' | 'acknowledged') =>
+    alarmsSnapshot({
+      alarms: [
+        {
+          kind: 'anchor',
+          label: 'Mouillage',
+          state,
+          since: new Date().toISOString(),
+          message: 'DÉRAPAGE — 72 m de l’ancre, rayon 60 m',
+        },
+        {
+          kind: 'positionLost',
+          label: 'Perte de position',
+          state: 'normal',
+          since: null,
+          message: 'Position reçue',
+        },
+      ],
+      anchor: anchorView,
+      sounding: state === 'active',
+    });
+
+  it('affiche une alarme déclenchée partout et l’acquitte', async () => {
+    const events = fakeListen();
+    const calls: [string, unknown][] = [];
+    const base = fakeIpc({
+      get_engine_info: () => Promise.resolve(engine),
+      get_chart_catalog: () => Promise.reject(new Error('x')),
+    });
+    render(App, {
+      invoke: (command: string, args?: Record<string, unknown>) => {
+        calls.push([command, args]);
+        if (command === 'acknowledge_alarm') return Promise.resolve(dragging('acknowledged'));
+        return base(command);
+      },
+      listen: events.listen,
+    });
+    await screen.findByText('Aucune position');
+    events.emit(dragging('active'), 'alarms');
+
+    const banner = await screen.findByTestId('alarm-banner');
+    expect(banner.textContent).toContain('MOUILLAGE');
+    expect(banner.textContent).toContain('72 m');
+    expect(banner.textContent).toContain('SIMULATION');
+    expect(screen.getByTestId('pill-alarm').className).toContain('alert');
+
+    // Visible aussi dans un autre onglet.
+    await fireEvent.click(screen.getByRole('tab', { name: 'Instruments' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Acquitter' }));
+    expect(calls).toContainEqual(['acknowledge_alarm', { kind: 'anchor' }]);
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('alarm-banner').textContent).toContain('ACQUITTÉE'),
+    );
+    expect(screen.queryByRole('button', { name: 'Acquitter' })).toBeNull();
+
+    // Résolution par le moteur : le bandeau disparaît.
+    events.emit(alarmsSnapshot(), 'alarms');
+    await vi.waitFor(() => expect(screen.queryByTestId('alarm-banner')).toBeNull());
+  });
+
+  it("pose l'ancre à la position courante et la lève après confirmation", async () => {
+    const events = fakeListen();
+    const calls: [string, unknown][] = [];
+    const base = fakeIpc({
+      get_engine_info: () => Promise.resolve(engine),
+      get_chart_catalog: () => Promise.resolve(emptyCatalog),
+    });
+    render(App, {
+      invoke: (command: string, args?: Record<string, unknown>) => {
+        calls.push([command, args]);
+        if (command === 'drop_anchor') {
+          return Promise.resolve(
+            alarmsSnapshot({ anchor: { ...anchorView, distanceM: 3 }, anchorRadiusM: 60 }),
+          );
+        }
+        if (command === 'raise_anchor')
+          return Promise.resolve(alarmsSnapshot({ anchorRadiusM: 60 }));
+        return base(command);
+      },
+      listen: events.listen,
+    });
+    const card = await screen.findByTestId('anchor-card');
+    const drop = screen.getByRole('button', { name: 'Mouiller ici' });
+    expect((drop as HTMLButtonElement).disabled).toBe(true);
+    expect(card.textContent).toContain('Position récente requise');
+
+    events.emit(
+      snapshotWith({
+        position: { latitudeDeg: -17.5, longitudeDeg: -149.5 },
+        source: 'simulator',
+        sourceId: 'simulator',
+      }),
+    );
+    await vi.waitFor(() => expect((drop as HTMLButtonElement).disabled).toBe(false));
+    const radius = screen.getByLabelText("Rayon d'évitage (m)");
+    expect((radius as HTMLInputElement).value).toBe('50');
+    await fireEvent.input(radius, { target: { value: '5' } });
+    await fireEvent.click(drop);
+    expect(await screen.findByText(/Rayon invalide/)).toBeTruthy();
+    expect(calls.some(([c]) => c === 'drop_anchor')).toBe(false);
+
+    await fireEvent.input(radius, { target: { value: '60' } });
+    await fireEvent.click(drop);
+    expect(calls).toContainEqual(['drop_anchor', { radiusM: 60, delayS: 10 }]);
+    expect((await screen.findByTestId('anchor-distance')).textContent).toContain('3 m');
+
+    await fireEvent.click(screen.getByRole('button', { name: "Lever l'ancre" }));
+    expect(calls.some(([c]) => c === 'raise_anchor')).toBe(false);
+    await fireEvent.click(screen.getByRole('button', { name: "Confirmer : lever l'ancre" }));
+    expect(calls.some(([c]) => c === 'raise_anchor')).toBe(true);
+    await screen.findByRole('button', { name: 'Mouiller ici' });
+  });
+
+  it("refuse de poser l'ancre si le moteur n'a pas de position", async () => {
+    const events = fakeListen();
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        drop_anchor: () =>
+          Promise.reject(new Error('aucune position récente : impossible de poser l’ancre')),
+      }),
+      listen: events.listen,
+    });
+    await screen.findByTestId('anchor-card');
+    events.emit(
+      snapshotWith({
+        position: { latitudeDeg: -17.5, longitudeDeg: -149.5 },
+        source: 'signalK',
+        sourceId: 'gps',
+      }),
+    );
+    const drop = screen.getByRole('button', { name: 'Mouiller ici' });
+    await vi.waitFor(() => expect((drop as HTMLButtonElement).disabled).toBe(false));
+    await fireEvent.click(drop);
+    expect(await screen.findByText(/aucune position récente/)).toBeTruthy();
+  });
+
+  it("montre l'historique et confirme la désactivation de la surveillance", async () => {
+    const calls: [string, unknown][] = [];
+    const base = fakeIpc({
+      get_engine_info: () => Promise.resolve(engine),
+      get_chart_catalog: () => Promise.reject(new Error('x')),
+      list_alarm_events: () =>
+        Promise.resolve([
+          {
+            id: 'e1',
+            alarm: 'anchor',
+            kind: 'activated',
+            at: new Date().toISOString(),
+            details: { message: 'Dérapage : 62 m de l’ancre', distanceM: 62, simulated: true },
+          },
+        ]),
+    });
+    render(App, {
+      invoke: (command: string, args?: Record<string, unknown>) => {
+        calls.push([command, args]);
+        if (command === 'set_alarm_enabled') {
+          return Promise.resolve(
+            alarmsSnapshot({
+              alarms: [
+                {
+                  kind: 'anchor',
+                  label: 'Mouillage',
+                  state: 'off',
+                  since: null,
+                  message: 'Ancre levée',
+                },
+                {
+                  kind: 'positionLost',
+                  label: 'Perte de position',
+                  state: 'off',
+                  since: null,
+                  message: 'Surveillance désactivée',
+                },
+              ],
+            }),
+          );
+        }
+        return base(command);
+      },
+      listen: fakeListen().listen,
+    });
+    await openSettings();
+    const events = await screen.findByTestId('alarm-events');
+    expect(events.textContent).toContain('Déclenchée');
+    expect(events.textContent).toContain('(simulation)');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Désactiver' }));
+    expect(calls.some(([c]) => c === 'set_alarm_enabled')).toBe(false);
+    await fireEvent.click(screen.getByRole('button', { name: 'Confirmer la désactivation' }));
+    expect(calls).toContainEqual(['set_alarm_enabled', { kind: 'positionLost', enabled: false }]);
+    expect(await screen.findByText('DÉSACTIVÉE')).toBeTruthy();
+    expect(screen.getByTestId('pill-alarm').textContent).toContain('Réduites');
   });
 });

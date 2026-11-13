@@ -10,6 +10,7 @@
 //!   lexicographique soit l'ordre chronologique ;
 //! - unités SI (m, m/s, rad).
 
+mod alarms;
 mod codec;
 mod db;
 mod error;
@@ -19,6 +20,7 @@ mod settings;
 mod tracks;
 mod waypoints;
 
+pub use alarms::MAX_EVENTS_PAGE;
 pub use db::Db;
 pub use error::StorageError;
 pub use tracks::TrackSummary;

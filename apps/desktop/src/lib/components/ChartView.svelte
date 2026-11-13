@@ -24,6 +24,8 @@
   import { AIS_SOURCE, AIS_SYMBOL_LAYER, aisData, aisIcons, aisLayers } from '../map/ais';
   import { WIND_SOURCE, viewBounds, windData, windIcon, windLayers } from '../map/wind';
   import type { Bounds, WindVector } from '../services/weather';
+  import { ANCHOR_SOURCE, anchorData, anchorLayers } from '../map/anchor';
+  import type { AnchorView } from '../services/alarms';
   import {
     DRAFT_SOURCE,
     ROUTES_SOURCE,
@@ -71,6 +73,10 @@
     wind?: WindVector[] | null;
     /** Emprise affichée, après chaque déplacement de la carte. */
     onviewchange?: (bounds: Bounds) => void;
+    /** Mouillage surveillé (cercle d'évitage). */
+    anchor?: AnchorView | null;
+    /** L'alarme de mouillage est déclenchée. */
+    anchorAlerting?: boolean;
   }
 
   let {
@@ -89,6 +95,8 @@
     onaisclick,
     wind = null,
     onviewchange,
+    anchor = null,
+    anchorAlerting = false,
   }: Props = $props();
 
   function emitView(m: MapLibreMap): void {
@@ -147,6 +155,11 @@
       m.addImage(icon.id, icon.image, { sdf: true });
       m.addSource(WIND_SOURCE, { type: 'geojson', data: emptyCollection() });
       for (const layer of windLayers()) {
+        m.addLayer(layer, overlays[0]?.id);
+      }
+      // Cercle d'évitage au-dessus du vent, sous les routes.
+      m.addSource(ANCHOR_SOURCE, { type: 'geojson', data: emptyCollection() });
+      for (const layer of anchorLayers()) {
         m.addLayer(layer, overlays[0]?.id);
       }
       for (const { id, image } of aisIcons()) {
@@ -228,6 +241,11 @@
   $effect(() => {
     const data = aisData(ais);
     if (map && loaded) setData(AIS_SOURCE, data);
+  });
+
+  $effect(() => {
+    const data = anchorData(anchor, anchorAlerting);
+    if (map && loaded) map.getSource<GeoJSONSource>(ANCHOR_SOURCE)?.setData(data);
   });
 
   $effect(() => {

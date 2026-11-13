@@ -188,6 +188,10 @@ pub fn spawn_engine_loop(app: AppHandle) {
             if let Some(update) = tick.update {
                 publish_update(&app, &state, update).await;
             }
+            crate::alarms::emit_alarms(&app, &tick.alarms);
+            if !tick.alarm_events.is_empty() {
+                crate::alarms::record(&state, &tick.alarm_events).await;
+            }
             if let Err(error) = app.emit(INSTRUMENTS_EVENT, &tick.snapshot) {
                 tracing::warn!(error = %error, "émission des instruments impossible");
             }

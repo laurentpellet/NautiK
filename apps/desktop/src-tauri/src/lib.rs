@@ -6,6 +6,7 @@
 //! métier n'est implémentée ici ; la boucle moteur (`engine`) est
 //! indépendante de Tauri.
 
+mod alarms;
 mod charts;
 mod commands;
 mod engine;
@@ -119,6 +120,7 @@ pub fn run() -> anyhow::Result<()> {
                     return;
                 };
                 simulator::restore(&state).await;
+                alarms::restore(&state).await;
                 let settings = sources::load(&state).await;
                 if let Err(error) = sources::apply(&handle, &state, &settings).await {
                     tracing::error!(%error, "source de données non démarrée");
@@ -157,6 +159,12 @@ pub fn run() -> anyhow::Result<()> {
             weather::download_weather,
             weather::delete_weather_file,
             weather::get_wind_field,
+            alarms::get_alarms,
+            alarms::drop_anchor,
+            alarms::raise_anchor,
+            alarms::acknowledge_alarm,
+            alarms::set_alarm_enabled,
+            alarms::list_alarm_events,
         ])
         .run(tauri::generate_context!())
         .context("exécution de l'application Tauri")
