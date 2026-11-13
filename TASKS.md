@@ -198,19 +198,57 @@ Critères :
 
 ## Phase 5 — AIS
 
-- [ ] Créer nav-ais.
-- [ ] Décoder VDM/VDO.
-- [ ] Gérer les fragments AIS.
-- [ ] Créer le modèle AisTarget.
-- [ ] Afficher les cibles.
-- [ ] Afficher COG/SOG.
-- [ ] Gérer les cibles obsolètes.
-- [ ] Ajouter historique.
+- [x] Créer nav-ais.
+- [x] Décoder VDM/VDO.
+- [x] Gérer les fragments AIS.
+- [x] Créer le modèle AisTarget.
+- [x] Afficher les cibles.
+- [x] Afficher COG/SOG.
+- [x] Gérer les cibles obsolètes.
+- [x] Ajouter historique.
 
 Critères :
-- Flux AIS simulé décodé.
-- Cibles visibles sur la carte.
-- Aucune panne sur message invalide.
+- [x] Flux AIS simulé décodé.
+- [x] Cibles visibles sur la carte.
+- [x] Aucune panne sur message invalide (tests de messages malformés).
+
+État (2026-11-12) : phase 5 terminée (recette sous Windows 11 en mode simulateur).
+- nav-ais (lecture seule) :
+  - fragments VDM/VDO validés (nombre, numéro, identifiant, canal,
+    alphabet, bits de remplissage) ; réassemblage dans l'ordre,
+    16 messages en cours au plus, 5 s au plus, 256 caractères au
+    plus ; fragment orphelin, hors ordre ou incomplet rejeté ;
+  - messages 1, 2, 3, 5, 18, 19, 24 (parties A et B) ; autres types
+    ignorés ; MMSI 1 à 999 999 999 ; valeurs « non disponible » et
+    réservées (position 181°/91° ou hors bornes, SOG 1023, COG ≥ 3600,
+    cap ≥ 360, statut 15, type 0) → absentes, jamais inventées ;
+  - suivi des cibles : fusion par MMSI, fraîcheur selon l'intervalle
+    nominal ITU-R M.1371 (classe, vitesse, mouillage) : obsolète
+    au-delà de 3 intervalles, perdue au-delà de 6 ou sans position,
+    retirée après 30 min de silence ; messages VDO (navire propre)
+    ignorés ; 2 000 cibles au plus ; historique en mémoire (une
+    position par 30 s, 20 min) ; vecteur de déplacement à 6 min
+    calculé par le moteur (cible active seulement) ;
+  - flux simulé : 3 navires fictifs (MMSI 97000000x, noms « SIM … »)
+    émis en phrases `!AIVDM` complètes, décodées par le même chemin
+    que les flux réels.
+- nav-nmea0183 : phrases `!AIVDM`/`!AIVDO` transmises comme fragments
+  (somme de contrôle obligatoire, débit écrêté) ; erreurs AIS comptées
+  parmi les rejets de la liaison.
+- Desktop : cibles oubliées à chaque changement de source ; événement
+  `ais-targets` chaque seconde ; cibles simulées ou rejouées marquées.
+- Frontend : symboles SDF générés localement (triangle orienté par le
+  cap, sinon la route ; cercle sans direction ; classe A / B
+  différenciées ; obsolète estompée, perdue grisée), vecteurs COG/SOG,
+  historique en pointillés, panneau AIS (SOG, COG, état, sélection
+  au clic sur la carte, bandeau SIMULATION).
+- Reportés : persistance de la table `ais_targets` ; cibles AIS reçues
+  par Signal K (contexte limité au navire propre) ; CPA/TCPA (V2) ;
+  mesures de charge (phase 8).
+- Rust : fmt, clippy (`-D warnings`), 310 tests. Frontend : lint,
+  svelte-check, 186 tests Vitest, build.
+- Carte : zoom 10 au moins au démarrage, centrée sur la première
+  position reçue (sauf si la carte a déjà été déplacée).
 
 ## Phase 6 — Alarmes
 

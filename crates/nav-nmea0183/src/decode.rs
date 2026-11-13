@@ -3,14 +3,16 @@
 //!
 //! Phrases prises en charge : RMC, GGA, GLL (position), VTG (route et
 //! vitesse fond), HDT, HDG, HDM (cap), VHW (vitesse surface), DPT, DBT
-//! (profondeur), MWV (vent apparent). Les autres sont ignorées (AIS :
-//! phase 5).
+//! (profondeur), MWV (vent apparent). Les phrases AIS encapsulées
+//! (`!AIVDM`, `!AIVDO`) sont transmises à `nav-ais` sous forme de
+//! fragments. Les autres sont ignorées.
 //!
 //! Aucune position n'est produite si l'équipement la déclare invalide
 //! (statut `V`, qualité GGA 0) ou non mesurée : estimée (navigation à
 //! l'estime), saisie manuellement ou simulée par le récepteur.
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveTime, TimeZone, Utc};
+use nav_ais::{AisError, Fragment};
 use nav_core::{GeoPosition, Measurement, PositionFix, Quantity, Sample, SourceKind};
 use nav_geodesy::units::MPS_PER_KNOT;
 use thiserror::Error;
@@ -32,6 +34,9 @@ pub enum DecodeError {
     /// Phrase invalide (format, somme de contrôle).
     #[error(transparent)]
     Sentence(#[from] SentenceError),
+    /// Phrase AIS invalide.
+    #[error(transparent)]
+    Ais(#[from] AisError),
     /// Champ invalide.
     #[error("{kind} : champ {field} invalide ({reason})")]
     Field {
@@ -50,6 +55,9 @@ pub enum Decoded {
     /// Données extraites (éventuellement aucune : position déclarée
     /// invalide par l'équipement, champs vides).
     Samples(Vec<Sample>),
+    /// Fragment de message AIS (VDM, VDO), à réassembler et décoder par
+    /// `nav-ais`.
+    Ais(Fragment),
     /// Type de phrase non pris en charge.
     Unsupported(String),
 }
@@ -498,6 +506,9 @@ pub fn decode_sentence(sentence: &Sentence<'_>, ctx: DecodeContext<'_>) -> Resul
         (false, "DPT") => decoder.dpt()?,
         (false, "DBT") => decoder.dbt()?,
         (false, "MWV") => decoder.mwv()?,
+        (true, kind @ ("VDM" | "VDO")) => {
+            return Ok(Decoded::Ais(Fragment::parse(kind, &sentence.fields)?));
+        }
         (_, kind) => return Ok(Decoded::Unsupported(kind.to_owned())),
     }
     Ok(Decoded::Samples(decoder.samples))

@@ -38,6 +38,7 @@ fn samples_at(body: &str, received: DateTime<Utc>) -> Vec<Sample> {
     match decode(&line(body), ctx(received)).expect("décodage") {
         Decoded::Samples(s) => s,
         Decoded::Unsupported(kind) => panic!("non pris en charge : {kind}"),
+        Decoded::Ais(_) => panic!("AIS inattendu"),
     }
 }
 
@@ -355,7 +356,7 @@ fn checksum_and_framing_errors_are_reported() {
 }
 
 #[test]
-fn unsupported_and_ais_sentences_are_ignored() {
+fn unsupported_sentences_are_ignored_and_ais_is_forwarded() {
     let c = ctx(at(18, 30, 5));
     assert_eq!(
         decode(&line("GPZDA,183000.00,12,11,2026,00,00"), c),
@@ -363,7 +364,37 @@ fn unsupported_and_ais_sentences_are_ignored() {
     );
     let body = "AIVDM,1,1,,A,15M67FC000G?ufbE`FepT@3n00Sa,0";
     let ais = format!("!{body}*{:02X}", checksum(body));
-    assert_eq!(decode(&ais, c), Ok(Decoded::Unsupported("VDM".to_owned())));
+    let Ok(Decoded::Ais(fragment)) = decode(&ais, c) else {
+        panic!("fragment AIS attendu");
+    };
+    assert_eq!(
+        (fragment.count, fragment.number, fragment.channel),
+        (1, 1, Some('A'))
+    );
+    assert!(!fragment.own_vessel);
+
+    let body = "AIVDO,1,1,,,15M67FC000G?ufbE`FepT@3n00Sa,0";
+    let vdo = format!("!{body}*{:02X}", checksum(body));
+    assert!(matches!(decode(&vdo, c), Ok(Decoded::Ais(f)) if f.own_vessel));
+
+    // Fragment malformé : rejeté sans panne.
+    for body in [
+        "AIVDM,1,1,,A,15M67F,7",
+        "AIVDM,0,1,,A,15M67F,0",
+        "AIVDM,1,1,,A,15M~7F,0",
+        "AIVDM,1,1,,A",
+    ] {
+        let raw = format!("!{body}*{:02X}", checksum(body));
+        assert!(
+            matches!(decode(&raw, c), Err(DecodeError::Ais(_))),
+            "{body}"
+        );
+    }
+    // Une phrase AIS non encapsulée n'est pas un fragment.
+    assert_eq!(
+        decode(&line("AIVDM,1,1,,A,15M67F,0"), c),
+        Ok(Decoded::Unsupported("VDM".to_owned()))
+    );
 }
 
 #[test]

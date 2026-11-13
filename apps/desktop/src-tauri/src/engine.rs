@@ -18,11 +18,18 @@
 //! Lorsque plusieurs équipements fournissent une position, seule la
 //! source retenue par l'arbitrage (`VesselState`) alimente la
 //! navigation et la trace.
+//!
+//! Cibles AIS : les fragments VDM/VDO reçus sont réassemblés et décodés
+//! (`nav-ais`) puis suivis. En mode simulateur, un flux AIS simulé
+//! (phrases complètes) emprunte le même chemin de décodage. Les cibles
+//! sont oubliées à chaque changement de source.
 
 use chrono::{DateTime, Utc};
+use nav_ais::{AisDecoder, AisError, AisSimulator, AisTargetView, AisTracker, Fragment};
 use nav_core::{
-    GeoPosition, InstrumentsSnapshot, Measurement, PositionFix, Priorities, VesselState,
+    GeoPosition, InstrumentsSnapshot, Measurement, PositionFix, Priorities, SourceKind, VesselState,
 };
+use nav_nmea0183::{DecodeContext, Decoded};
 use nav_routing::navigation::{NavigationError, DEFAULT_ARRIVAL_RADIUS_M};
 use nav_routing::recorder::RecorderError;
 use nav_routing::{
@@ -71,6 +78,19 @@ pub struct FixUpdate {
     pub track_point: Option<(Uuid, TrackPoint)>,
 }
 
+/// Cibles AIS suivies, diffusées périodiquement.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AisSnapshot {
+    /// Instant du calcul.
+    pub computed_at: DateTime<Utc>,
+    /// Les cibles sont simulées ou rejouées : elles ne décrivent pas la
+    /// situation réelle actuelle.
+    pub simulated: bool,
+    /// Cibles, triées par MMSI.
+    pub targets: Vec<AisTargetView>,
+}
+
 /// Résultat d'un pas périodique de la boucle moteur.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tick {
@@ -78,6 +98,8 @@ pub struct Tick {
     pub update: Option<FixUpdate>,
     /// Instantané de l'état du bateau, avec la fraîcheur des données.
     pub snapshot: InstrumentsSnapshot,
+    /// Cibles AIS.
+    pub ais: AisSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +118,9 @@ pub struct Engine {
     vessel: VesselState,
     navigation: Option<ActiveNavigation>,
     recording: Option<Recording>,
+    ais_decoder: AisDecoder,
+    ais_targets: AisTracker,
+    ais_simulator: AisSimulator,
 }
 
 impl Engine {
@@ -109,6 +134,9 @@ impl Engine {
             vessel: VesselState::new(),
             navigation: None,
             recording: None,
+            ais_decoder: AisDecoder::new(),
+            ais_targets: AisTracker::new(),
+            ais_simulator: AisSimulator::new(start),
         }
     }
 
@@ -125,6 +153,8 @@ impl Engine {
         self.mode = mode;
         self.replay = replay && mode == SourceMode::Nmea0183;
         self.vessel.clear();
+        self.ais_decoder.clear();
+        self.ais_targets.clear();
         let route = match mode {
             SourceMode::Simulator => self.navigation.as_ref().map(ActiveNavigation::route),
             SourceMode::SignalK | SourceMode::Nmea0183 => None,
@@ -219,11 +249,52 @@ impl Engine {
         self.vessel.update_measurement(measurement)
     }
 
-    /// Pas périodique : avance le simulateur (en mode simulateur) et
-    /// produit l'instantané de l'état du bateau.
+    /// Traite un fragment AIS reçu à `received_at`.
+    ///
+    /// # Errors
+    ///
+    /// [`AisError`] si le fragment ou le message est invalide (à compter
+    /// parmi les rejets de la liaison).
+    pub fn on_ais(
+        &mut self,
+        fragment: Fragment,
+        received_at: DateTime<Utc>,
+    ) -> Result<(), AisError> {
+        if let Some(report) = self.ais_decoder.push(fragment, received_at)? {
+            self.ais_targets.update(&report, received_at);
+        }
+        Ok(())
+    }
+
+    /// Passe le flux AIS simulé par le décodage NMEA puis AIS, comme un
+    /// flux réel.
+    fn simulate_ais(&mut self, now: DateTime<Utc>) {
+        let ctx = DecodeContext {
+            origin: "simulator",
+            source: SourceKind::Simulator,
+            received_at: now,
+            use_sentence_time: false,
+        };
+        for line in self.ais_simulator.step(now) {
+            let fragment = match nav_nmea0183::decode(&line, ctx) {
+                Ok(Decoded::Ais(fragment)) => fragment,
+                other => {
+                    tracing::warn!(?other, "phrase AIS simulée inattendue");
+                    continue;
+                }
+            };
+            if let Err(error) = self.on_ais(fragment, now) {
+                tracing::warn!(%error, "message AIS simulé rejeté");
+            }
+        }
+    }
+
+    /// Pas périodique : avance les simulateurs (en mode simulateur) et
+    /// produit les instantanés de l'état du bateau et des cibles AIS.
     pub fn tick(&mut self, now: DateTime<Utc>) -> Tick {
         let update = match self.mode {
             SourceMode::Simulator => {
+                self.simulate_ais(now);
                 let fix = self.simulator.step(now);
                 self.on_fix(fix)
             }
@@ -232,6 +303,11 @@ impl Engine {
         Tick {
             update,
             snapshot: self.vessel.snapshot(now),
+            ais: AisSnapshot {
+                computed_at: now,
+                simulated: self.is_simulated(),
+                targets: self.ais_targets.snapshot(now),
+            },
         }
     }
 }
@@ -412,6 +488,53 @@ mod tests {
         engine.on_fix(signalk_fix(0, 0.0));
         engine.set_mode(SourceMode::Nmea0183, false);
         assert!(engine.tick(t(1)).snapshot.position.is_none());
+    }
+
+    fn ais_fragment(body: &str) -> Fragment {
+        let line = format!("!{body}*{:02X}", nav_nmea0183::sentence::checksum(body));
+        let ctx = DecodeContext {
+            origin: "nmea0183",
+            source: SourceKind::Nmea0183,
+            received_at: t(0),
+            use_sentence_time: true,
+        };
+        match nav_nmea0183::decode(&line, ctx) {
+            Ok(Decoded::Ais(fragment)) => fragment,
+            other => panic!("fragment attendu : {other:?}"),
+        }
+    }
+
+    #[test]
+    fn simulator_produces_simulated_ais_targets() {
+        let mut engine = Engine::new(p(-14.968, -147.638), 4.0);
+        let ais = engine.tick(t(0)).ais;
+        assert!(ais.simulated);
+        assert_eq!(ais.targets.len(), 3);
+        assert!(ais.targets.iter().all(|t| t.position.is_some()));
+        assert!(ais
+            .targets
+            .iter()
+            .all(|t| t.name.as_deref().is_some_and(|n| n.starts_with("SIM"))));
+        // Changement de source : cibles simulées oubliées.
+        engine.set_mode(SourceMode::Nmea0183, false);
+        let ais = engine.tick(t(1)).ais;
+        assert!(!ais.simulated);
+        assert!(ais.targets.is_empty());
+    }
+
+    #[test]
+    fn received_ais_fragments_create_targets() {
+        let mut engine = Engine::new(p(0.0, 0.0), 4.0);
+        engine.set_mode(SourceMode::Nmea0183, false);
+        let fragment = ais_fragment("AIVDM,1,1,,A,15M67FC000G?ufbE`FepT@3n00Sa,0");
+        engine.on_ais(fragment, t(0)).expect("décodé");
+        let orphan = ais_fragment("AIVDM,2,2,3,A,15M67F,0");
+        assert_eq!(engine.on_ais(orphan, t(0)), Err(AisError::OutOfSequence));
+        let ais = engine.tick(t(1)).ais;
+        assert_eq!(ais.targets.len(), 1);
+        assert!(!ais.simulated);
+        // Aucune cible simulée hors du mode simulateur.
+        assert_eq!(engine.tick(t(60)).ais.targets.len(), 1);
     }
 
     #[test]

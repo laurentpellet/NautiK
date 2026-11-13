@@ -8,6 +8,7 @@ import {
   initialView,
   maxMapZoom,
   rasterPaint,
+  startZoom,
   tileUrlTemplate,
 } from './style';
 
@@ -103,11 +104,20 @@ describe('vue initiale et zoom', () => {
     const view = initialView(
       catalog([chart({ bounds: null, center: { longitude: 1, latitude: 2, zoom: null } })]),
     );
-    expect(view).toEqual({ kind: 'center', center: [1, 2], zoom: 5 });
+    expect(view).toEqual({ kind: 'center', center: [1, 2], zoom: 10 });
+    const close = initialView(
+      catalog([chart({ bounds: null, center: { longitude: 1, latitude: 2, zoom: 13 } })]),
+    );
+    expect(close).toEqual({ kind: 'center', center: [1, 2], zoom: 13 });
+  });
+
+  it('démarre au zoom 10 au moins', () => {
+    expect(startZoom(4.2)).toBe(10);
+    expect(startZoom(12.5)).toBe(12.5);
   });
 
   it('vue monde sans carte', () => {
-    expect(initialView(catalog([]))).toEqual({ kind: 'center', center: [0, 0], zoom: 1 });
+    expect(initialView(catalog([]))).toEqual({ kind: 'center', center: [0, 0], zoom: 10 });
   });
 
   it('autorise un sur-zoom limité', () => {

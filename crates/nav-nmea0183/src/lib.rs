@@ -5,7 +5,8 @@
 //!
 //! - [`sentence`] : délimiteurs, adresse, somme de contrôle ;
 //! - [`decode`] : RMC, GGA, GLL, VTG, HDT, HDG, HDM, VHW, DPT, DBT, MWV
-//!   vers [`nav_core::Sample`] (WGS84, SI, UTC) ;
+//!   vers [`nav_core::Sample`] (WGS84, SI, UTC), fragments AIS VDM/VDO
+//!   vers `nav-ais` ;
 //! - [`framer`] : découpage borné d'un flux en lignes ;
 //! - [`client`] : liaisons, reconnexion, écrêtage du débit.
 //!

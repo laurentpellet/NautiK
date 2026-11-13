@@ -92,7 +92,7 @@ fn recorded_stream_is_decoded_with_errors_reported() {
         received_at: Utc::now(),
         use_sentence_time: true,
     };
-    let (mut positions, mut measurements, mut errors, mut unsupported) = (0, 0, 0, 0);
+    let (mut positions, mut measurements, mut errors, mut unsupported, mut ais) = (0, 0, 0, 0, 0);
     for line in lines {
         let line = line.expect("ligne");
         match decode(&line, ctx) {
@@ -105,6 +105,7 @@ fn recorded_stream_is_decoded_with_errors_reported() {
                 }
             }
             Ok(Decoded::Unsupported(_)) => unsupported += 1,
+            Ok(Decoded::Ais(_)) => ais += 1,
             Err(_) => errors += 1,
         }
     }
@@ -112,7 +113,8 @@ fn recorded_stream_is_decoded_with_errors_reported() {
     // bornes écartés.
     assert_eq!(positions, 20);
     assert_eq!(measurements, 100);
-    assert_eq!(unsupported, 1, "AIS");
+    assert_eq!(ais, 1, "AIS");
+    assert_eq!(unsupported, 0);
     assert_eq!(
         errors, 5,
         "somme fausse, absente, tronquée, bruit, hors bornes"
@@ -283,6 +285,7 @@ async fn excessive_rate_is_clipped_and_reported() {
             }
             NmeaEvent::State(ConnectionState::Disconnected { .. }) => break,
             NmeaEvent::State(_) => {}
+            NmeaEvent::Ais { .. } => panic!("AIS inattendu"),
         }
     }
     assert_eq!(samples, 10);
@@ -319,6 +322,60 @@ async fn udp_datagrams_are_decoded() {
         }
     }
     assert_eq!(quantities.len(), 3);
+    client.stop().await;
+}
+
+#[tokio::test]
+async fn simulated_ais_stream_is_decoded() {
+    let port = {
+        let s = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind");
+        s.local_addr().expect("addr").port()
+    };
+    let mut client = start(Transport::Udp { port }, fast());
+    client
+        .until(|e| matches!(e, NmeaEvent::State(ConnectionState::Connected { .. })))
+        .await;
+    let center = nav_core::GeoPosition::new(-14.968, -147.638).expect("pos");
+    let lines = nav_ais::AisSimulator::new(center).step(Utc::now());
+    assert!(lines.len() > 3);
+    let datagram: String = lines
+        .iter()
+        .map(|l| {
+            format!(
+                "{l}
+"
+            )
+        })
+        .collect();
+    let sender = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
+    sender
+        .send_to(datagram.as_bytes(), ("127.0.0.1", port))
+        .await
+        .expect("envoi");
+
+    let mut decoder = nav_ais::AisDecoder::new();
+    let mut tracker = nav_ais::AisTracker::new();
+    let mut fragments = 0;
+    while fragments < lines.len() {
+        match client.next().await {
+            NmeaEvent::Ais {
+                fragment,
+                received_at,
+            } => {
+                fragments += 1;
+                if let Some(report) = decoder.push(fragment, received_at).expect("décodage") {
+                    tracker.update(&report, received_at);
+                }
+            }
+            NmeaEvent::Rejected(reason) => panic!("rejet : {reason}"),
+            _ => {}
+        }
+    }
+    let targets = tracker.snapshot(Utc::now());
+    assert_eq!(targets.len(), 3);
+    assert!(targets
+        .iter()
+        .all(|t| t.position.is_some() && t.name.as_deref().is_some_and(|n| n.starts_with("SIM"))));
     client.stop().await;
 }
 

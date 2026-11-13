@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use nav_ais::Fragment;
 use nav_core::{ConnectionState, Sample};
 use nav_nmea0183::{NmeaEvent, Transport};
 use nav_routing::NavigationStatus;
@@ -37,6 +38,9 @@ pub const SOURCE_STATUS_EVENT: &str = "source-status";
 
 /// Événement portant les données rejetées ([`Rejections`]).
 pub const SOURCE_REJECTIONS_EVENT: &str = "source-rejections";
+
+/// Événement portant les cibles AIS (`AisSnapshot`).
+pub const AIS_EVENT: &str = "ais-targets";
 
 /// Période de la boucle moteur.
 const TICK_PERIOD: Duration = Duration::from_secs(1);
@@ -187,6 +191,9 @@ pub fn spawn_engine_loop(app: AppHandle) {
             if let Err(error) = app.emit(INSTRUMENTS_EVENT, &tick.snapshot) {
                 tracing::warn!(error = %error, "émission des instruments impossible");
             }
+            if let Err(error) = app.emit(AIS_EVENT, &tick.ais) {
+                tracing::warn!(error = %error, "émission des cibles AIS impossible");
+            }
             // Rejets : diffusés au plus une fois par seconde, s'ils ont
             // changé.
             let rejections = state.rejections();
@@ -202,6 +209,7 @@ pub fn spawn_engine_loop(app: AppHandle) {
 enum SourceEvent {
     State(ConnectionState),
     Sample(Sample),
+    Ais(Fragment, DateTime<Utc>),
     Rejected(String),
 }
 
@@ -220,6 +228,10 @@ impl From<NmeaEvent> for SourceEvent {
         match event {
             NmeaEvent::State(s) => Self::State(s),
             NmeaEvent::Sample(s) => Self::Sample(s),
+            NmeaEvent::Ais {
+                fragment,
+                received_at,
+            } => Self::Ais(fragment, received_at),
             NmeaEvent::Rejected(r) => Self::Rejected(r),
         }
     }
@@ -253,6 +265,14 @@ pub fn spawn_nmea(app: AppHandle, state: &AppState, transport: Transport, genera
         stop_rx,
     ));
     spawn_consumer(app, SourceMode::Nmea0183, generation, rx);
+}
+
+/// Compte une donnée rejetée par le connecteur courant.
+fn reject(state: &AppState, reason: String) {
+    tracing::debug!(%reason, "donnée rejetée");
+    let mut r = lock(&state.rejections);
+    r.count = r.count.saturating_add(1);
+    r.last_reason = Some(reason);
 }
 
 fn spawn_consumer<E>(app: AppHandle, mode: SourceMode, generation: u64, mut rx: mpsc::Receiver<E>)
@@ -292,12 +312,19 @@ where
                         engine.on_measurement(measurement);
                     }
                 }
-                SourceEvent::Rejected(reason) => {
-                    tracing::debug!(%reason, "donnée rejetée");
-                    let mut r = lock(&state.rejections);
-                    r.count = r.count.saturating_add(1);
-                    r.last_reason = Some(reason);
+                SourceEvent::Ais(fragment, received_at) => {
+                    let result = {
+                        let mut engine = state.engine();
+                        if engine.mode() != mode {
+                            continue;
+                        }
+                        engine.on_ais(fragment, received_at)
+                    };
+                    if let Err(error) = result {
+                        reject(&state, error.to_string());
+                    }
                 }
+                SourceEvent::Rejected(reason) => reject(&state, reason),
             }
         }
     });

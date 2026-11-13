@@ -17,9 +17,11 @@
   import 'maplibre-gl/dist/maplibre-gl.css';
   import { untrack } from 'svelte';
   import type { GeoJSONSource } from 'maplibre-gl';
+  import type { AisSnapshot } from '../services/ais';
   import type { ChartCatalog } from '../services/charts';
   import type { PositionFix } from '../services/position';
   import type { LatLon, Route } from '../services/routing';
+  import { AIS_SOURCE, AIS_SYMBOL_LAYER, aisData, aisIcons, aisLayers } from '../map/ais';
   import {
     DRAFT_SOURCE,
     ROUTES_SOURCE,
@@ -38,6 +40,7 @@
     initialView,
     maxMapZoom,
     rasterPaint,
+    startZoom,
     type Theme,
   } from '../map/style';
 
@@ -58,6 +61,10 @@
     /** Mode tracé : un clic sur la carte ajoute un point. */
     drawing?: boolean;
     onmapclick?: (position: LatLon) => void;
+    /** Cibles AIS à dessiner. */
+    ais?: AisSnapshot | null;
+    /** Clic sur une cible AIS (hors mode tracé). */
+    onaisclick?: (mmsi: string) => void;
   }
 
   let {
@@ -72,6 +79,8 @@
     tracks = [],
     drawing = false,
     onmapclick,
+    ais = null,
+    onaisclick,
   }: Props = $props();
 
   let container: HTMLDivElement;
@@ -80,6 +89,10 @@
   let zoom = $state(0);
   let marker: Marker | null = null;
   let markerElement: HTMLDivElement | null = null;
+  /** La carte a déjà été centrée sur la première position reçue. */
+  let centeredOnBoat = false;
+  /** L'utilisateur a déplacé la carte : plus de recentrage automatique. */
+  let userMoved = false;
 
   // Création unique de la carte : les changements ultérieurs passent par
   // des mises à jour ciblées, sans reconstruire le style.
@@ -103,6 +116,11 @@
     m.addControl(new ScaleControl({ unit: 'nautical' }), 'bottom-left');
     m.addControl(new AttributionControl({ compact: true }), 'bottom-right');
     m.touchPitch.disable();
+    // Une emprise de carte étendue donnerait un zoom trop faible.
+    m.jumpTo({ zoom: startZoom(m.getZoom()) });
+    m.on('movestart', (event) => {
+      if (event.originalEvent) userMoved = true;
+    });
     m.on('load', () => {
       for (const source of [ROUTES_SOURCE, DRAFT_SOURCE, TRACKS_SOURCE]) {
         m.addSource(source, { type: 'geojson', data: emptyCollection() });
@@ -110,7 +128,24 @@
       for (const layer of overlayLayers()) {
         m.addLayer(layer);
       }
+      for (const { id, image } of aisIcons()) {
+        m.addImage(id, image, { sdf: true });
+      }
+      m.addSource(AIS_SOURCE, { type: 'geojson', data: emptyCollection() });
+      for (const layer of aisLayers()) {
+        m.addLayer(layer);
+      }
       loaded = true;
+    });
+    m.on('click', AIS_SYMBOL_LAYER, (event) => {
+      const mmsi = event.features?.[0]?.properties.mmsi;
+      if (!drawing && typeof mmsi === 'string') onaisclick?.(mmsi);
+    });
+    m.on('mouseenter', AIS_SYMBOL_LAYER, () => {
+      if (!drawing) m.getCanvas().style.cursor = 'pointer';
+    });
+    m.on('mouseleave', AIS_SYMBOL_LAYER, () => {
+      if (!drawing) m.getCanvas().style.cursor = '';
     });
     m.on('click', (event) => {
       if (drawing) {
@@ -168,6 +203,11 @@
   });
 
   $effect(() => {
+    const data = aisData(ais);
+    if (map && loaded) setData(AIS_SOURCE, data);
+  });
+
+  $effect(() => {
     const m = map;
     if (!m) return;
     m.getCanvas().style.cursor = drawing ? 'crosshair' : '';
@@ -198,6 +238,10 @@
     const current = fix;
     if (!m || !current) return;
     const lngLat: [number, number] = [current.longitudeDeg, current.latitudeDeg];
+    if (!centeredOnBoat) {
+      centeredOnBoat = true;
+      if (!userMoved) m.jumpTo({ center: lngLat });
+    }
     if (!marker || !markerElement) {
       markerElement = document.createElement('div');
       markerElement.className = 'boat-marker';

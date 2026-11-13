@@ -8,7 +8,8 @@
 
 use std::time::Duration;
 
-use chrono::{NaiveTime, Utc};
+use chrono::{DateTime, NaiveTime, Utc};
+use nav_ais::Fragment;
 use nav_core::{ConnectionState, Sample, SourceKind};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::net::{TcpStream, UdpSocket};
@@ -71,6 +72,14 @@ pub enum NmeaEvent {
     State(ConnectionState),
     /// Donnée normalisée.
     Sample(Sample),
+    /// Fragment de message AIS (VDM/VDO), à réassembler par le
+    /// destinataire (`nav_ais::AisDecoder`).
+    Ais {
+        /// Fragment validé.
+        fragment: Fragment,
+        /// Horodatage de réception.
+        received_at: DateTime<Utc>,
+    },
     /// Phrase ou ligne rejetée (cause).
     Rejected(String),
 }
@@ -168,10 +177,21 @@ impl Session<'_> {
             Ok(decoded) => {
                 self.last_valid = Instant::now();
                 self.receiving = true;
-                if let Decoded::Samples(samples) = decoded {
-                    for sample in samples {
-                        self.emit(NmeaEvent::Sample(sample)).await?;
+                match decoded {
+                    Decoded::Samples(samples) => {
+                        for sample in samples {
+                            self.emit(NmeaEvent::Sample(sample)).await?;
+                        }
                     }
+                    Decoded::Ais(fragment) => {
+                        let received_at = ctx.received_at;
+                        self.emit(NmeaEvent::Ais {
+                            fragment,
+                            received_at,
+                        })
+                        .await?;
+                    }
+                    Decoded::Unsupported(_) => {}
                 }
                 Ok(())
             }

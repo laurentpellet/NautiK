@@ -8,7 +8,15 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+chrono.workspace = true
 nav-core.workspace = true
+# Vecteurs de déplacement et cibles simulées (problème direct).
+nav-geodesy.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

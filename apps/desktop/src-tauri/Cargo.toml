@@ -19,6 +19,7 @@ anyhow.workspace = true
 # Coffre du système pour le jeton Signal K (SECURITY.md §3).
 keyring = { version = "3", features = ["apple-native", "linux-native", "windows-native"] }
 chrono.workspace = true
+nav-ais.workspace = true
 nav-charts.workspace = true
 nav-core.workspace = true
 nav-nmea0183.workspace = true

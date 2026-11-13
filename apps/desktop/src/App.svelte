@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import AisPanel from './lib/components/AisPanel.svelte';
   import InstrumentsPanel from './lib/components/InstrumentsPanel.svelte';
   import NavigationPanel from './lib/components/NavigationPanel.svelte';
   import PositionPanel from './lib/components/PositionPanel.svelte';
@@ -9,6 +10,7 @@
   import TracksPanel from './lib/components/TracksPanel.svelte';
   import { isEngineSilent } from './lib/format';
   import type { Theme } from './lib/map/style';
+  import { subscribeAis, type AisSnapshot } from './lib/services/ais';
   import { fetchChartCatalog, type ChartCatalog } from './lib/services/charts';
   import { fetchEngineInfo, type EngineInfo, type InvokeFn } from './lib/services/engine';
   import {
@@ -46,6 +48,9 @@
   let connection = $state<ConnectionState | null | undefined>(undefined);
   let connectionError = $state<string | null>(null);
   let rejections = $state<Rejections | undefined>(undefined);
+  let ais = $state.raw<AisSnapshot | null>(null);
+  let aisError = $state<string | null>(null);
+  let selectedTarget = $state<string | null>(null);
   let now = $state(Date.now());
   let theme = $state<Theme>(loadTheme());
   let northUp = $state(true);
@@ -128,6 +133,21 @@
     ),
   );
 
+  $effect(() =>
+    holdSubscription(
+      () =>
+        subscribeAis(
+          (a) => {
+            ais = a;
+            aisError = null;
+          },
+          (e) => (aisError = e.message),
+          listenFn,
+        ),
+      (e) => (aisError = message(e)),
+    ),
+  );
+
   $effect(() => {
     void nav.refresh();
   });
@@ -188,6 +208,8 @@
         tracks={nav.displayedTracks}
         drawing={nav.drawing}
         onmapclick={(p) => nav.addPoint(p)}
+        {ais}
+        onaisclick={(mmsi) => (selectedTarget = mmsi)}
       />
     {/await}
   {/if}
@@ -235,6 +257,16 @@
     <SourcePanel api={sources} {connection} {rejections} />
     {#if connectionError}
       <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
+    {/if}
+
+    <AisPanel
+      snapshot={ais}
+      {silent}
+      selected={selectedTarget}
+      onselect={(mmsi) => (selectedTarget = mmsi)}
+    />
+    {#if aisError}
+      <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
     {/if}
 
     <RoutesPanel {nav} />

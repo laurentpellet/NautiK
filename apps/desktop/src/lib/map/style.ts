@@ -109,11 +109,23 @@ export function maxMapZoom(catalog: ChartCatalog): number {
   return Math.min(ABSOLUTE_MAX_ZOOM, max + OVERZOOM);
 }
 
+/** Zoom minimal au démarrage (échelle utile à la navigation et à l'AIS). */
+export const MIN_INITIAL_ZOOM = 10;
+
+/** Zoom de démarrage : jamais en deçà de [`MIN_INITIAL_ZOOM`]. */
+export function startZoom(zoom: number): number {
+  return Math.max(zoom, MIN_INITIAL_ZOOM);
+}
+
 export type InitialView =
   | { kind: 'bounds'; bounds: LngLatBoundsLike }
   | { kind: 'center'; center: [number, number]; zoom: number };
 
-/** Vue initiale : carte la plus détaillée (dernière du catalogue), sinon le monde. */
+/**
+ * Vue initiale : carte la plus détaillée (dernière du catalogue), sinon
+ * l'origine. Le zoom est ensuite porté à [`MIN_INITIAL_ZOOM`] au moins
+ * (voir [`startZoom`]) et la carte se centre sur la première position.
+ */
 export function initialView(catalog: ChartCatalog): InitialView {
   const chart = catalog.charts.at(-1);
   if (chart?.bounds) {
@@ -130,8 +142,8 @@ export function initialView(catalog: ChartCatalog): InitialView {
     return {
       kind: 'center',
       center: [chart.center.longitude, chart.center.latitude],
-      zoom: chart.center.zoom ?? chart.minZoom,
+      zoom: startZoom(chart.center.zoom ?? chart.minZoom),
     };
   }
-  return { kind: 'center', center: [0, 0], zoom: 1 };
+  return { kind: 'center', center: [0, 0], zoom: MIN_INITIAL_ZOOM };
 }

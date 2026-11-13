@@ -2327,6 +2327,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "keyring",
+ "nav-ais",
  "nav-charts",
  "nav-core",
  "nav-nmea0183",
@@ -2350,7 +2351,12 @@ dependencies = [
 name = "nav-ais"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "nav-core",
+ "nav-geodesy",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2406,6 +2412,7 @@ name = "nav-nmea0183"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "nav-ais",
  "nav-core",
  "nav-geodesy",
  "tempfile",

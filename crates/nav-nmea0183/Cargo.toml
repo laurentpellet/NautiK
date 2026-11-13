@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 chrono.workspace = true
+nav-ais.workspace = true
 nav-core.workspace = true
 nav-geodesy.workspace = true
 thiserror.workspace = true

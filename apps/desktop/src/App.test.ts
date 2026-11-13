@@ -538,4 +538,54 @@ describe('App', () => {
     });
     expect((await screen.findByText(/Cartes indisponibles/)).textContent).toContain('accès refusé');
   });
+
+  it('liste les cibles AIS, signale la simulation et les cibles perdues', async () => {
+    const events = fakeListen();
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+      }),
+      listen: events.listen,
+    });
+    expect(await screen.findByText('Aucune cible AIS reçue.')).toBeTruthy();
+    const now = new Date().toISOString();
+    const target = {
+      mmsi: '970000001',
+      class: 'A',
+      name: 'SIM CARGO',
+      callsign: 'SIM1',
+      shipType: 70,
+      navigationStatus: 0,
+      position: { latitudeDeg: -14.99, longitudeDeg: -147.66 },
+      sogMps: 6.17,
+      cogRad: Math.PI / 2,
+      headingRad: Math.PI / 2,
+      vectorEnd: null,
+      lastSeenAt: now,
+      positionAgeMs: 2000,
+      state: 'active',
+      history: [],
+    };
+    events.emit(
+      {
+        computedAt: now,
+        simulated: true,
+        targets: [target, { ...target, mmsi: '970000002', class: 'B', name: null, state: 'lost' }],
+      },
+      'ais-targets',
+    );
+    expect((await screen.findByTestId('ais-count')).textContent).toContain('2 cibles, 1 perdue');
+    expect(screen.getByTestId('ais-simulated').textContent).toContain('SIMULATION');
+    const rows = screen.getByTestId('ais-targets').querySelectorAll('li');
+    expect(rows[0]?.textContent).toContain('SIM CARGO');
+    expect(rows[0]?.textContent).toContain('12.0 kn · 090°');
+    expect(rows[1]?.textContent).toContain('MMSI 970000002');
+    expect(rows[1]?.textContent).toContain('PERDUE');
+    await fireEvent.click(screen.getByRole('button', { name: /SIM CARGO/ }));
+    expect(rows[0]?.classList.contains('selected')).toBe(true);
+
+    events.emit({ computedAt: now, simulated: false, targets: [{ mmsi: 'x' }] }, 'ais-targets');
+    expect((await screen.findByText(/Cibles AIS rejetées/)).textContent).toContain('MMSI');
+  });
 });
