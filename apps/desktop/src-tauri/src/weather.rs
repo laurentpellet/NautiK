@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
 
-use crate::routing::CommandResult;
+use nav_engine::CommandResult;
 
 /// Extensions reconnues.
 const EXTENSIONS: [&str; 4] = ["grb2", "grib2", "grb", "grib"];

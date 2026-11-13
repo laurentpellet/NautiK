@@ -19,13 +19,11 @@ anyhow.workspace = true
 # Coffre du système pour le jeton Signal K (SECURITY.md §3).
 keyring = { version = "3", features = ["apple-native", "linux-native", "windows-native"] }
 chrono.workspace = true
-nav-ais.workspace = true
 nav-alarms.workspace = true
 nav-charts.workspace = true
 nav-core.workspace = true
-nav-nmea0183.workspace = true
+nav-engine.workspace = true
 nav-routing.workspace = true
-nav-signalk.workspace = true
 nav-storage.workspace = true
 nav-weather.workspace = true
 serde.workspace = true
@@ -33,7 +31,6 @@ tauri = { version = "2", features = [] }
 # Boîtes de dialogue natives (import/export GPX), appelées uniquement
 # depuis Rust : aucune permission n'est accordée au frontend.
 tauri-plugin-dialog = "2"
-thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

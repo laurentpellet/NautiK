@@ -50,6 +50,7 @@ nautik/
 │   ├── nav-routing/
 │   ├── nav-alarms/
 │   ├── nav-storage/
+│   ├── nav-engine/
 │   └── nav-api/
 ├── migrations/
 ├── fixtures/
@@ -120,6 +121,13 @@ nautik/
 - Machine à états.
 - Historique.
 - Notifications.
+
+### nav-engine
+
+- Boucle moteur périodique.
+- Connecteurs d'acquisition et arbitrage.
+- Opérations validées (alarmes, routes, traces, sources).
+- Diffusion des événements (desktop et nautikd).
 
 ### nav-storage
 

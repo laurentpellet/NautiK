@@ -353,31 +353,102 @@ Critères :
 
 ## Phase 7 — Service embarqué
 
-- [ ] Développer le service nautikd (apps/daemon).
-- [ ] Créer API Axum.
-- [ ] Ajouter WebSocket.
-- [ ] Authentifier les clients.
-- [ ] Ajouter service systemd.
-- [ ] Compiler Linux ARM64.
-- [ ] Tester Raspberry Pi.
-- [ ] Ajouter watchdog.
-- [ ] Documenter installation.
+- [x] Développer le service nautikd (apps/daemon).
+- [x] Créer API Axum.
+- [x] Ajouter WebSocket.
+- [x] Authentifier les clients.
+- [x] Ajouter service systemd.
+- [x] Compiler Linux ARM64 (job CI « Service ARM64 », exécuteur
+      `ubuntu-24.04-arm`, artefact `nautikd-linux-arm64`).
+- [ ] Tester Raspberry Pi (pas de Pi disponible pour l'instant ; outils
+      prêts : paquet `.deb` arm64, `scripts/measure-nautikd.sh`).
+- [x] Ajouter watchdog.
+- [x] Documenter installation (`apps/daemon/README.md`).
 
 Critères :
-- Service sans interface.
-- Reconnexion après panne.
-- Client distant fonctionnel.
+- [x] Service sans interface (test de bout en bout : démarrage, boucle,
+      API, arrêt propre).
+- [ ] Reconnexion après panne (redémarrage systemd, reconnexion des
+      liaisons et reprise des réglages en place ; à vérifier sur le Pi).
+- [ ] Client distant fonctionnel (API REST/WebSocket testée ; interface
+      web servie par nautikd à faire).
+
+État (2026-11-13) : phase 7 développée, recette Raspberry Pi à faire.
+- nav-engine (nouveau crate, sans Tauri) : moteur, boucle périodique,
+  connecteurs, opérations (alarmes, routes, traces, sources, simulateur)
+  extraits de l'application desktop, qui n'est plus qu'une couche de
+  commandes Tauri. Les changements sont diffusés sur un canal
+  (`EngineEvent`) relayé en événements Tauri (noms inchangés) ou en
+  WebSocket.
+- nav-api (Axum) : REST `/api/v1/…`, WebSocket `/api/v1/ws` (état initial
+  puis flux), `/health` public. Jeton d'accès (en-tête Bearer ou premier
+  message WebSocket, comparaison en temps constant, jamais journalisé),
+  corps limités à 256 Kio, 16 sessions WebSocket au plus, champs inconnus
+  refusés, rejeu de fichier refusé à distance.
+- nautikd : options `--data-dir`, `--listen` (127.0.0.1:8375 par défaut,
+  ouverture au réseau explicite), `--rotate-token` ; jeton et coffre des
+  secrets dans des fichiers `0600` ; chien de garde systemd réarmé
+  seulement si la boucle progresse ; arrêt propre sur SIGTERM (trace
+  clôturée, clients prévenus). Unité systemd durcie avec limites de
+  ressources.
+- Reporté : alarme sonore sur le service (buzzer), interface web servie
+  par nautikd, cartes et météo via l'API, surveillance du disque.
+- Rust : fmt, clippy (`-D warnings`), 403 tests. Frontend : lint,
+  svelte-check, 274 tests Vitest, build.
 
 ## Phase 8 — Stabilisation
 
-- [ ] Tests d'intégration.
-- [ ] Tests de charge AIS.
-- [ ] Tests coupure réseau.
-- [ ] Tests coupure alimentation.
-- [ ] Mesures CPU/RAM.
-- [ ] Packaging Windows.
-- [ ] Packaging Linux.
-- [ ] Documentation utilisateur.
+- [x] Tests d'intégration (`crates/nav-engine/tests/pipeline.rs` : liaison
+      TCP réelle → connecteur → arbitrage → boucle → événements).
+- [x] Tests de charge AIS (`crates/nav-ais/tests/load.rs` : 100, 1 000 et
+      10 000 cibles).
+- [x] Tests coupure réseau (perte signalée, position obsolète conservée
+      sans extrapolation, alarme, reconnexion automatique ; source
+      injoignable sans position inventée).
+- [x] Tests coupure alimentation (`apps/daemon/tests/power_cut.rs` :
+      `nautikd` tué pendant un enregistrement, ancre mouillée).
+- [x] Mesures CPU/RAM (`scripts/measure-nautikd.ps1` / `.sh`, multiplexeur
+      simulé `cargo run -p nav-engine --example nmea_feed`). Raspberry Pi
+      à mesurer.
+- [x] Packaging Windows (MSI, NSIS ; workflow « Paquets » ; installateur NSIS
+      construit localement : `NautiK_0.1.0_x64-setup.exe`, 5,1 Mio).
+- [x] Packaging Linux (application : deb, AppImage ; service : `.deb`
+      amd64 et arm64 par `apps/daemon/packaging/build-deb.sh`).
+- [x] Documentation utilisateur (`docs/guide-utilisateur.md`).
+
+Critères (TEST_PLAN.md §7) :
+- [x] Le code compile ; les tests passent.
+- [x] Résilience réseau et alimentation vérifiées par des tests
+      automatisés.
+- [ ] Paquets Linux et `.deb` du service construits par la CI (à vérifier
+      au premier lancement du workflow « Paquets »).
+- [ ] Mesures sur Raspberry Pi.
+
+État (2026-11-13) : phase 8 développée ; Raspberry Pi non disponible.
+- Mesures (Windows 11, 12 cœurs, `nautikd` release, flux TCP simulé,
+  90 s) :
+
+  | Cibles AIS | Phrases/s | Cibles suivies | CPU moyen / pic (1 cœur) | RAM (working set) |
+  | --- | --- | --- | --- | --- |
+  | 100 | ~10 | 100 | 0,0 % / 0,0 % | 10,9 Mio |
+  | 1 000 | ~100 | 1 000 | 0,4 % / 3,1 % | 11,4 à 11,9 Mio |
+  | 2 000 | ~200 | 2 000 | 0,6 % / 2,3 % | 11,4 à 13,1 Mio |
+
+  Démarrage du service : ~0,6 s. Décodage et suivi AIS (release) :
+  ~1 µs par phrase ; instantané de 1 000 cibles : 1,6 ms ; 10 000 cibles
+  plafonnées à 2 000 sans croissance de la mémoire.
+- Constat : à 2 000 cibles le flux atteint l'écrêtage du connecteur
+  (200 phrases/s), signalé comme rejet ; toutes les cibles restent
+  suivies. Un récepteur AIS réel plafonne vers 75 messages/s (capacité
+  des deux canaux) : limite conservée.
+- Flotte AIS simulée (`AisSimulator::fleet`, MMSI 971…, au plus 20 000)
+  aux émissions étalées comme le partage du temps TDMA.
+- Base vérifiée au démarrage (`PRAGMA quick_check`) par l'application et
+  le service : anomalie journalisée sans bloquer la navigation.
+- Coupure d'alimentation : base intègre (WAL), points conservés, trace
+  clôturée à l'heure de son dernier point, mouillage repris.
+- Rust : fmt, clippy (`-D warnings`), 414 tests. Frontend : lint,
+  svelte-check, 274 tests Vitest, build.
 
 ## Phase 9 — Évolutions
 

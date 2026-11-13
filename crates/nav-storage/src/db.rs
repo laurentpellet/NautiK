@@ -65,11 +65,55 @@ impl Db {
         Ok(Self { pool })
     }
 
+    /// Vérifie l'intégrité de la base (`PRAGMA quick_check`), par exemple
+    /// après un arrêt brutal. Retourne les anomalies trouvées (vide si la
+    /// base est saine), au plus [`MAX_INTEGRITY_ERRORS`].
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Database`] si la vérification ne peut être menée.
+    pub async fn quick_check(&self) -> Result<Vec<String>, StorageError> {
+        let rows: Vec<String> =
+            sqlx::query_scalar(&format!("PRAGMA quick_check({MAX_INTEGRITY_ERRORS})"))
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(rows.into_iter().filter(|r| r != "ok").collect())
+    }
+
+    /// Vérification au démarrage (après un éventuel arrêt brutal) : une
+    /// anomalie est journalisée en erreur, sans empêcher le démarrage (la
+    /// navigation et les alarmes restent prioritaires). Retourne `true`
+    /// si la base est saine.
+    pub async fn check_integrity(&self) -> bool {
+        match self.quick_check().await {
+            Ok(problems) if problems.is_empty() => true,
+            Ok(problems) => {
+                tracing::error!(
+                    component = crate::COMPONENT,
+                    ?problems,
+                    "base de données endommagée : sauvegardez-la et vérifiez traces et routes"
+                );
+                false
+            }
+            Err(error) => {
+                tracing::error!(
+                    component = crate::COMPONENT,
+                    %error,
+                    "vérification de la base impossible"
+                );
+                false
+            }
+        }
+    }
+
     /// Ferme proprement les connexions.
     pub async fn close(&self) {
         self.pool.close().await;
     }
 }
+
+/// Nombre maximal d'anomalies rapportées par [`Db::quick_check`].
+pub const MAX_INTEGRITY_ERRORS: u32 = 20;
 
 #[cfg(test)]
 mod tests {
@@ -107,6 +151,27 @@ mod tests {
             .expect("pragma");
         assert_eq!(mode.to_lowercase(), "wal");
         db.close().await;
+    }
+
+    #[tokio::test]
+    async fn quick_check_reports_healthy_database() {
+        let dir = tempfile::tempdir().expect("dir");
+        let db = Db::open(&dir.path().join("n.db")).await.expect("db");
+        assert!(db.quick_check().await.expect("vérification").is_empty());
+        assert!(db.check_integrity().await);
+        db.close().await;
+        // Base fermée : la vérification échoue et le signale.
+        assert!(!db.check_integrity().await);
+        let memory = Db::open_in_memory().await.expect("db");
+        assert!(memory.quick_check().await.expect("vérification").is_empty());
+    }
+
+    #[tokio::test]
+    async fn file_that_is_not_a_database_is_refused() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("n.db");
+        std::fs::write(&path, vec![0x5A_u8; 8_192]).expect("écriture");
+        assert!(Db::open(&path).await.is_err());
     }
 
     #[tokio::test]

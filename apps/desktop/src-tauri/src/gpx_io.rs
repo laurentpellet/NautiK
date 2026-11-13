@@ -13,8 +13,10 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
 use tokio::sync::oneshot;
 
-use crate::routing::{CommandResult, SIMULATED_TRACK_PREFIX};
-use crate::runtime::AppState;
+use nav_engine::routing::SIMULATED_TRACK_PREFIX;
+use nav_engine::CommandResult;
+
+use crate::AppState;
 
 /// Taille maximale d'un fichier GPX importé.
 pub const MAX_GPX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -196,17 +198,17 @@ pub async fn export_track_gpx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::Engine;
     use nav_core::GeoPosition;
+    use nav_engine::{Engine, MemoryStore, Service};
     use nav_storage::Db;
 
     async fn state() -> AppState {
         let db = Db::open_in_memory().await.expect("db");
         let start = GeoPosition::new(-14.968, -147.638).expect("pos");
-        AppState::new(
+        Service::new(
             db,
             Engine::new(start, 4.0),
-            std::sync::Arc::new(crate::secrets::MemoryStore::default()),
+            std::sync::Arc::new(MemoryStore::default()),
         )
     }
 

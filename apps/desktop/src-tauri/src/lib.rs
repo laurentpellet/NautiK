@@ -2,18 +2,16 @@
 //!
 //! Cette crate est une fine couche d'adaptation : elle expose au
 //! frontend Svelte des commandes typées, un protocole local de tuiles et
-//! des événements, qui délèguent au moteur Rust (`nav-*`). Aucune logique
-//! métier n'est implémentée ici ; la boucle moteur (`engine`) est
-//! indépendante de Tauri.
+//! des événements, qui délèguent au moteur Rust partagé (`nav-engine`,
+//! également utilisé par le service `nautikd`). Aucune logique métier
+//! n'est implémentée ici.
 
 mod alarms;
 mod charts;
 mod commands;
-mod engine;
+mod events;
 mod gpx_io;
-mod position;
 mod routing;
-mod runtime;
 mod secrets;
 mod simulator;
 mod sources;
@@ -22,14 +20,16 @@ mod weather;
 use std::sync::Arc;
 
 use anyhow::Context;
+use nav_engine::{position, Engine, Service};
 use nav_storage::Db;
 use tauri::Manager;
 use tracing_subscriber::EnvFilter;
 
 use crate::charts::{resolve_charts_dir, to_http_response, ChartState, TILE_SCHEME};
-use crate::engine::Engine;
-use crate::runtime::AppState;
 use crate::secrets::KeyringStore;
+
+/// État géré par Tauri : le moteur partagé.
+pub(crate) type AppState = Arc<Service>;
 
 /// Niveau de journalisation par défaut si `RUST_LOG` n'est pas défini.
 const DEFAULT_LOG_FILTER: &str = "info";
@@ -58,6 +58,8 @@ fn open_database(app: &tauri::App) -> anyhow::Result<Db> {
     tracing::info!(path = %path.display(), "base de données");
     let db = tauri::async_runtime::block_on(Db::open(&path))
         .with_context(|| format!("ouverture de {}", path.display()))?;
+    // Après un arrêt brutal : base vérifiée, anomalie journalisée.
+    tauri::async_runtime::block_on(db.check_integrity());
     tauri::async_runtime::block_on(db.close_interrupted_tracks())
         .context("clôture des enregistrements interrompus")?;
     Ok(db)
@@ -104,27 +106,23 @@ pub fn run() -> anyhow::Result<()> {
             let start =
                 position::simulated_start_position().context("position simulée invalide")?;
             let secrets = Arc::new(KeyringStore::new(&app.config().identifier));
-            app.manage(AppState::new(
+            let service = Service::new(
                 db,
                 Engine::new(start, position::SIMULATED_SPEED_MPS),
                 secrets,
-            ));
-            runtime::spawn_engine_loop(app.handle().clone());
+            );
+            app.manage(Arc::clone(&service));
 
-            // Source enregistrée (simulateur par défaut). Un échec est
-            // journalisé et visible dans l'interface (état de connexion
-            // absent) ; l'application reste utilisable.
+            // Relais des événements, réglages enregistrés, source (un
+            // échec est journalisé et visible dans l'interface : état de
+            // connexion absent), puis boucle moteur.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                let Some(state) = handle.try_state::<AppState>() else {
-                    return;
-                };
-                simulator::restore(&state).await;
-                alarms::restore(&state).await;
-                let settings = sources::load(&state).await;
-                if let Err(error) = sources::apply(&handle, &state, &settings).await {
-                    tracing::error!(%error, "source de données non démarrée");
-                }
+                tokio::spawn(events::forward(handle, Arc::clone(&service)));
+                nav_engine::simulator::restore(&service).await;
+                nav_engine::alarms::restore(&service).await;
+                nav_engine::sources::restore(&service).await;
+                service.run().await;
             });
             Ok(())
         })

@@ -1,0 +1,71 @@
+# NautiK — service de navigation autonome (nautikd).
+#
+# Installation : voir apps/daemon/README.md.
+# Les données (base, jeton d'accès, secrets) sont dans /var/lib/nautik,
+# lisibles du seul compte « nautik ».
+
+[Unit]
+Description=NautiK - service de navigation
+Documentation=https://github.com/laurentpellet/NautiK
+After=network-online.target
+Wants=network-online.target
+# Ne jamais renoncer à redémarrer : les alarmes en dépendent.
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/local/bin/nautikd
+User=nautik
+Group=nautik
+# Accès aux ports série (GPS, multiplexeur NMEA).
+SupplementaryGroups=dialout
+StateDirectory=nautik
+StateDirectoryMode=0700
+Environment=RUST_LOG=info
+# API limitée à la machine par défaut. Pour l'ouvrir au réseau du bord :
+#Environment=NAUTIK_LISTEN=0.0.0.0:8375
+
+# Redémarrage automatique et chien de garde : si la boucle moteur se
+# bloque plus de 30 s, systemd arrête puis relance le service.
+Restart=always
+RestartSec=5
+WatchdogSec=30
+TimeoutStopSec=15
+
+# Limitation des ressources.
+MemoryMax=256M
+CPUQuota=80%
+TasksMax=64
+LimitNOFILE=1024
+Nice=-5
+
+# Durcissement.
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# Périphériques : ports série uniquement.
+DevicePolicy=closed
+DeviceAllow=char-ttyS rw
+DeviceAllow=char-ttyUSB rw
+DeviceAllow=char-ttyACM rw
+DeviceAllow=char-ttyAMA rw
+
+[Install]
+WantedBy=multi-user.target

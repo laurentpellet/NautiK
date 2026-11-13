@@ -46,6 +46,12 @@ Le logiciel doit fonctionner :
 - Les communications externes sont sécurisées.
 - Les fonctionnalités sont développées progressivement.
 
+## Documentation
+
+- [Guide utilisateur](docs/guide-utilisateur.md).
+- [Service embarqué nautikd](apps/daemon/README.md) (Raspberry Pi,
+  systemd, API).
+
 ## Licence
 
 À définir après audit des dépendances.

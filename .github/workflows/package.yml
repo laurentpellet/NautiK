@@ -1,0 +1,112 @@
+name: Paquets
+
+# Installateurs de l'application et paquets du service : sur étiquette de
+# version (v*) ou à la demande. Les fichiers produits sont des artefacts
+# du workflow ; aucune publication automatique.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows (MSI, NSIS)
+    runs-on: windows-2025
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+      - run: npm run tauri -- build --bundles msi,nsis
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nautik-windows-x64
+          path: |
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  linux-desktop:
+    name: Linux x86-64 (deb, AppImage)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Dépendances système Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+      - run: npm run tauri -- build --bundles deb,appimage
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nautik-linux-x64
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  daemon:
+    name: Service nautikd (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          # Même architecture qu'un Raspberry Pi 4/5 (64 bits).
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo build --release --locked -p nautik-daemon
+      - run: bash apps/daemon/packaging/build-deb.sh target/release/nautikd ${{ matrix.arch }} dist
+      - name: Contrôle du paquet
+        run: |
+          dpkg-deb --info dist/nautikd_*_${{ matrix.arch }}.deb
+          dpkg-deb --contents dist/nautikd_*_${{ matrix.arch }}.deb
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nautikd-deb-${{ matrix.arch }}
+          path: dist/*.deb
+          if-no-files-found: error

@@ -42,6 +42,26 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked
       - run: cargo test --workspace --locked
 
+  daemon-arm64:
+    name: Service ARM64 (nautikd)
+    # Exécuteur ARM64 natif : même architecture qu'un Raspberry Pi 4/5.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --locked -p nautik-daemon -p nav-api -p nav-engine
+      - run: cargo build --release --locked -p nautik-daemon
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nautikd-linux-arm64
+          path: target/release/nautikd
+          if-no-files-found: error
+
   frontend:
     name: Frontend (lint, check, test, build)
     runs-on: ubuntu-24.04

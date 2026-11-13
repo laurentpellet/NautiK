@@ -28,6 +28,26 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "publisher": "NautiK",
+    "homepage": "https://github.com/laurentpellet/NautiK",
+    "category": "Travel",
+    "shortDescription": "Navigation maritime hors ligne",
+    "longDescription": "NautiK : cartes MBTiles hors ligne, Signal K, NMEA 0183, AIS, routes, traces et alarmes. Aide à la navigation, pas un ECDIS certifié.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["French", "English"],
+        "displayLanguageSelector": false
+      },
+      "wix": {
+        "language": "fr-FR"
+      }
+    },
+    "linux": {
+      "deb": {
+        "section": "misc"
+      }
+    }
   }
 }

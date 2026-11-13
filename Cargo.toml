@@ -12,6 +12,7 @@ members = [
     "crates/nav-charts",
     "crates/nav-routing",
     "crates/nav-alarms",
+    "crates/nav-engine",
     "crates/nav-storage",
     "crates/nav-api",
     "crates/nav-weather",
@@ -28,7 +29,9 @@ publish = false
 # Crates internes
 nav-ais = { path = "crates/nav-ais" }
 nav-alarms = { path = "crates/nav-alarms" }
+nav-api = { path = "crates/nav-api" }
 nav-core = { path = "crates/nav-core" }
+nav-engine = { path = "crates/nav-engine" }
 nav-charts = { path = "crates/nav-charts" }
 nav-geodesy = { path = "crates/nav-geodesy" }
 nav-nmea0183 = { path = "crates/nav-nmea0183" }
