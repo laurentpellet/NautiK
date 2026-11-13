@@ -14,6 +14,7 @@ members = [
     "crates/nav-alarms",
     "crates/nav-storage",
     "crates/nav-api",
+    "crates/nav-weather",
 ]
 
 [workspace.package]
@@ -33,6 +34,7 @@ nav-nmea0183 = { path = "crates/nav-nmea0183" }
 nav-routing = { path = "crates/nav-routing" }
 nav-signalk = { path = "crates/nav-signalk" }
 nav-storage = { path = "crates/nav-storage" }
+nav-weather = { path = "crates/nav-weather" }
 
 # Dépendances communes
 anyhow = "1"

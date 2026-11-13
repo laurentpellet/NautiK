@@ -14,7 +14,9 @@ mod position;
 mod routing;
 mod runtime;
 mod secrets;
+mod simulator;
 mod sources;
+mod weather;
 
 use std::sync::Arc;
 
@@ -95,6 +97,7 @@ pub fn run() -> anyhow::Result<()> {
             let charts_dir = resolve_charts_dir(&data_dir)?;
             tracing::info!(dir = %charts_dir.display(), "répertoire des cartes");
             app.manage(ChartState::new(charts_dir));
+            app.manage(weather::WeatherStore::new(data_dir.join("weather")));
 
             let db = open_database(app)?;
             let start =
@@ -115,6 +118,7 @@ pub fn run() -> anyhow::Result<()> {
                 let Some(state) = handle.try_state::<AppState>() else {
                     return;
                 };
+                simulator::restore(&state).await;
                 let settings = sources::load(&state).await;
                 if let Err(error) = sources::apply(&handle, &state, &settings).await {
                     tracing::error!(%error, "source de données non démarrée");
@@ -146,6 +150,13 @@ pub fn run() -> anyhow::Result<()> {
             sources::set_sources,
             sources::list_serial_ports,
             sources::choose_nmea_recording,
+            simulator::get_simulator_settings,
+            simulator::set_simulator_settings,
+            weather::list_weather_files,
+            weather::import_weather_file,
+            weather::download_weather,
+            weather::delete_weather_file,
+            weather::get_wind_field,
         ])
         .run(tauri::generate_context!())
         .context("exécution de l'application Tauri")

@@ -3,5 +3,9 @@
   "identifier": "default",
   "description": "Permissions minimales de la fenêtre principale.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen"
+  ]
 }

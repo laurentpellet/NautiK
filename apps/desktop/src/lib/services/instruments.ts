@@ -46,6 +46,20 @@ export const QUANTITIES = [
   'depthBelowTransducer',
   'windSpeedApparent',
   'windAngleApparent',
+  'windSpeedTrue',
+  'windDirectionTrue',
+  'waterTemperature',
+  'airTemperature',
+  'atmosphericPressure',
+  'engineSpeed',
+  'engineCoolantTemperature',
+  'engineOilPressure',
+  'fuelLevel',
+  'freshWaterLevel',
+  'batteryVoltage',
+  'batteryCurrent',
+  'batteryStateOfCharge',
+  'solarPower',
 ] as const;
 
 export type Quantity = (typeof QUANTITIES)[number];

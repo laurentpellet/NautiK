@@ -2334,6 +2334,7 @@ dependencies = [
  "nav-routing",
  "nav-signalk",
  "nav-storage",
+ "nav-weather",
  "serde",
  "serde_json",
  "tauri",
@@ -2476,6 +2477,20 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "nav-weather"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

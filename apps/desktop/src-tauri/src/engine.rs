@@ -27,7 +27,8 @@
 use chrono::{DateTime, Utc};
 use nav_ais::{AisDecoder, AisError, AisSimulator, AisTargetView, AisTracker, Fragment};
 use nav_core::{
-    GeoPosition, InstrumentsSnapshot, Measurement, PositionFix, Priorities, SourceKind, VesselState,
+    GeoPosition, InstrumentSimulator, InstrumentsSnapshot, Measurement, PositionFix, Priorities,
+    SourceKind, VesselState,
 };
 use nav_nmea0183::{DecodeContext, Decoded};
 use nav_routing::navigation::{NavigationError, DEFAULT_ARRIVAL_RADIUS_M};
@@ -121,6 +122,7 @@ pub struct Engine {
     ais_decoder: AisDecoder,
     ais_targets: AisTracker,
     ais_simulator: AisSimulator,
+    instruments_simulator: InstrumentSimulator,
 }
 
 impl Engine {
@@ -137,6 +139,7 @@ impl Engine {
             ais_decoder: AisDecoder::new(),
             ais_targets: AisTracker::new(),
             ais_simulator: AisSimulator::new(start),
+            instruments_simulator: InstrumentSimulator::new(),
         }
     }
 
@@ -160,6 +163,17 @@ impl Engine {
             SourceMode::SignalK | SourceMode::Nmea0183 => None,
         };
         self.simulator.follow(route);
+    }
+
+    /// Vitesse du bateau simulé lorsqu'il suit une route (m/s).
+    #[must_use]
+    pub fn simulated_speed_mps(&self) -> f64 {
+        self.simulator.speed_mps()
+    }
+
+    /// Change la vitesse du bateau simulé.
+    pub fn set_simulated_speed(&mut self, speed_mps: f64) {
+        self.simulator.set_speed(speed_mps);
     }
 
     /// Définit les priorités des sources (arbitrage).
@@ -296,6 +310,9 @@ impl Engine {
             SourceMode::Simulator => {
                 self.simulate_ais(now);
                 let fix = self.simulator.step(now);
+                for measurement in self.instruments_simulator.step(&fix) {
+                    self.on_measurement(measurement);
+                }
                 self.on_fix(fix)
             }
             SourceMode::SignalK | SourceMode::Nmea0183 => None,
@@ -406,6 +423,27 @@ mod tests {
         assert!(points.iter().all(|(id, _)| *id == track));
         assert_eq!(engine.stop_recording(), Some(track));
         assert_eq!(engine.stop_recording(), None);
+    }
+
+    #[test]
+    fn simulator_mode_simulates_all_instruments_and_only_there() {
+        let mut engine = Engine::new(p(0.0, 0.0), 4.0);
+        let readings = engine.tick(t(0)).snapshot.readings;
+        for q in [
+            Quantity::EngineSpeed,
+            Quantity::FuelLevel,
+            Quantity::BatteryStateOfCharge,
+            Quantity::WindSpeedApparent,
+            Quantity::DepthBelowTransducer,
+        ] {
+            let r = readings.iter().find(|r| r.quantity == q).expect("simulée");
+            assert!(r.source.is_simulated());
+        }
+        engine.set_mode(SourceMode::SignalK, false);
+        assert!(
+            engine.tick(t(1)).snapshot.readings.is_empty(),
+            "rien d'inventé"
+        );
     }
 
     #[test]
@@ -535,6 +573,19 @@ mod tests {
         assert!(!ais.simulated);
         // Aucune cible simulée hors du mode simulateur.
         assert_eq!(engine.tick(t(60)).ais.targets.len(), 1);
+    }
+
+    #[test]
+    fn simulated_speed_can_change() {
+        let mut engine = Engine::new(p(0.0, 0.0), 4.0);
+        engine.activate(route()).expect("activate");
+        engine.set_simulated_speed(6.0);
+        assert_eq!(engine.simulated_speed_mps(), 6.0);
+        engine.tick(t(0));
+        let fix = engine.tick(t(10)).update.expect("relevé").fix;
+        assert_eq!(fix.sog_mps, Some(6.0));
+        engine.set_simulated_speed(-3.0);
+        assert_eq!(engine.simulated_speed_mps(), 0.0);
     }
 
     #[test]

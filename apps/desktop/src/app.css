@@ -1,7 +1,8 @@
-/* Thème jour (par défaut). Le thème actif est porté par
-   <html data-theme="day|night">, piloté par l'application. */
+/* Thème jour (par défaut) : interface bleu marine contrastée, carte
+   claire. Le thème actif est porté par <html data-theme="day|night">,
+   piloté par l'application. */
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family:
     system-ui,
     -apple-system,
@@ -9,19 +10,35 @@
     Roboto,
     sans-serif;
   line-height: 1.5;
-  --bg: #dfe9ee;
-  --fg: #12202f;
-  --muted: #5b6b7c;
-  --panel-bg: rgba(255, 255, 255, 0.92);
-  --button-bg: #f2f5f8;
-  --border: #b8c4cf;
-  --warn-bg: #fff4d6;
-  --warn-fg: #6b4b00;
-  --sim-bg: #ffe0b2;
-  --sim-fg: #7a3e00;
-  --alert-bg: #ffcdd2;
-  --alert-fg: #8e0000;
-  --error-fg: #b00020;
+  --bg: #060b16;
+  --fg: #e6edf6;
+  --muted: #8a9bb4;
+  --panel-bg: rgba(13, 22, 38, 0.94);
+  --button-bg: #16233a;
+  --border: #24344f;
+  --warn-bg: #3a2c0a;
+  --warn-fg: #f5c451;
+  --sim-bg: #3d2a0c;
+  --sim-fg: #f0a64a;
+  --alert-bg: #6b1515;
+  --alert-fg: #ffb4ab;
+  --error-fg: #ff8a80;
+  --ok-fg: #34d399;
+  --header-bg: #08101d;
+  --accent-bg: #1d4ed8;
+  --accent-fg: #ffffff;
+  --card-bg: rgba(13, 22, 38, 0.94);
+  --inset-bg: #0a1324;
+  /* Couleurs des grandeurs (tableau de bord). */
+  --tone-main: #f8fafc;
+  --tone-depth: #22d3ee;
+  --tone-water: #60a5fa;
+  --tone-wind: #f59e0b;
+  --tone-angle: #facc15;
+  --tone-good: #4ade80;
+  --tone-bad: #f87171;
+  --port: #ef4444;
+  --starboard: #22c55e;
 }
 
 /* Thème nuit : faible luminosité pour préserver la vision nocturne. */
@@ -40,6 +57,21 @@
   --alert-bg: #4a0d0d;
   --alert-fg: #ff8a80;
   --error-fg: #ff6e6e;
+  --ok-fg: #7f9a5c;
+  --header-bg: #0a0606;
+  --accent-bg: #3a1a14;
+  --accent-fg: #e0b0a0;
+  --card-bg: rgba(12, 8, 8, 0.92);
+  --inset-bg: #0d0909;
+  --tone-main: #c9a9a0;
+  --tone-depth: #9a8f88;
+  --tone-water: #a08c96;
+  --tone-wind: #c88850;
+  --tone-angle: #b09060;
+  --tone-good: #7f9a5c;
+  --tone-bad: #d0604e;
+  --port: #a33a2e;
+  --starboard: #5f7a44;
 }
 
 html,

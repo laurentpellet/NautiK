@@ -1,0 +1,25 @@
+[package]
+name = "nav-weather"
+description = "NautiK — météo : décodage GRIB2, prévisions de vent, téléchargement GFS optionnel."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+# Téléchargement optionnel des prévisions GFS (NOAA NOMADS, https).
+reqwest.workspace = true
+# TLS avec le fournisseur `ring` (comme nav-signalk).
+rustls.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

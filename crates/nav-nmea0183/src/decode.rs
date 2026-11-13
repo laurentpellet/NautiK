@@ -476,6 +476,7 @@ fn quantity_field(quantity: Quantity) -> &'static str {
         Quantity::DepthBelowTransducer => "profondeur",
         Quantity::WindSpeedApparent => "vitesse du vent",
         Quantity::WindAngleApparent => "angle du vent",
+        other => other.label(),
     }
 }
 

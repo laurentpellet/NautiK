@@ -147,7 +147,7 @@ const SDF_RADIUS = 8;
  * Icône SDF : l'alpha encode la distance signée au contour
  * (`192` sur le contour, décroissant vers l'extérieur).
  */
-function sdfIcon(distance: (x: number, y: number) => number): IconImage {
+export function sdfIcon(distance: (x: number, y: number) => number): IconImage {
   const data = new Uint8Array(ICON_SIZE * ICON_SIZE * 4);
   for (let y = 0; y < ICON_SIZE; y++) {
     for (let x = 0; x < ICON_SIZE; x++) {
@@ -163,7 +163,7 @@ function sdfIcon(distance: (x: number, y: number) => number): IconImage {
   return { width: ICON_SIZE, height: ICON_SIZE, data };
 }
 
-type Point2 = [number, number];
+export type Point2 = [number, number];
 
 function segmentDistance(p: Point2, a: Point2, b: Point2): number {
   const [px, py] = p;
@@ -188,7 +188,7 @@ function inside(p: Point2, polygon: Point2[]): boolean {
 }
 
 /** Distance signée à un polygone (négative à l'intérieur). */
-function polygonDistance(polygon: Point2[]): (x: number, y: number) => number {
+export function polygonDistance(polygon: Point2[]): (x: number, y: number) => number {
   return (x, y) => {
     const p: Point2 = [x, y];
     let d = Infinity;

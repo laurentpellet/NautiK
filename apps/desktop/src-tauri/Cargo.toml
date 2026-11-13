@@ -26,6 +26,7 @@ nav-nmea0183.workspace = true
 nav-routing.workspace = true
 nav-signalk.workspace = true
 nav-storage.workspace = true
+nav-weather.workspace = true
 serde.workspace = true
 tauri = { version = "2", features = [] }
 # Boîtes de dialogue natives (import/export GPX), appelées uniquement

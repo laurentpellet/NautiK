@@ -250,6 +250,56 @@ Critères :
 - Carte : zoom 10 au moins au démarrage, centrée sur la première
   position reçue (sauf si la carte a déjà été déplacée).
 
+### Interface (hors phase, avant la phase 6)
+
+- [x] Onglet Instruments : tableau de bord sombre (SOG, fond, surface,
+      route, cap, vent apparent), cadran de vent (secteurs bâbord /
+      tribord), tendance du vent apparent sur 1 h sans interpolation
+      des trous, navigation active et position. Données obsolètes
+      estompées et signalées ; aucune donnée inventée.
+- [x] Plein écran complet (bouton, F11, Échap) ; alertes de position et
+      de liaison toujours visibles.
+- [x] Onglet Paramètres : unités (vitesse, distance, profondeur),
+      vitesse du bateau simulé (persistée, appliquée par le moteur),
+      sources.
+- [x] Refonte visuelle : barre d'en-tête (onglets, état position /
+      liaison / AIS / moteur, compteur d'alertes, heure UTC, thème,
+      plein écran), thème jour bleu marine (nuit inchangé), menu des
+      calques (un calque masqué reste signalé), carte « Navigation
+      temps réel » avec compas, cartes Systèmes et Données historiques
+      (mémoire seule, depuis le lancement, 15 min / 1 h / 6 h).
+- [x] Simulateur complet : vent réel, températures eau / air,
+      pression, moteur (régime, température, pression d'huile),
+      réservoirs (gasoil, eau douce), batterie (charge, tension,
+      courant), solaire. Grandeurs SI ajoutées à `nav_core::Quantity` ;
+      vent apparent calculé depuis le vent réel et le déplacement ;
+      moteur arrêté au mouillage ; mode simulateur seulement (rien
+      d'inventé en mode Signal K). Cartes Moteur, Énergie, Réservoirs,
+      Environnement dans l'onglet Instruments.
+
+### Météo GRIB (phase 9, avancée — recette OK le 2026-11-12)
+
+- [x] Crate nav-weather (sans dépendance C) : décodeur GRIB2 (grille
+      lat/lon 3.0, produits 4.0/4.1, compactage 5.0, 5.2, 5.3 ordres 1
+      et 2, bitmap) ; champs non pris en charge ignorés et signalés ;
+      fichier 200 Mo et 4 M points au plus ; vent U/V à 10 m.
+- [x] Téléchargement GFS 0,25° optionnel (filtre NOMADS, zone affichée
+      réduite à 120° × 90°, 24 à 120 h par pas de 3 h, run précédent si
+      absent, réponse vérifiée « GRIB », 20 Mo par échéance) ; jamais
+      automatique, Internet non requis pour l'usage.
+- [x] Bibliothèque hors ligne (dossier `weather`, écriture atomique,
+      identifiants validés), import par le dialogue du système,
+      suppression confirmée.
+- [x] Onglet Météo ; flèches de vent colorées par la force sur la carte
+      (zone affichée, 1 500 points au plus), barre d'échéances, run et
+      prévision ancienne / échéance passée signalés ; avertissement :
+      aide à la décision, pas un bulletin officiel.
+- Reportés : rafales, pression, vagues, courants, GRIB1, grilles non
+  régulières, interpolation temporelle, routage météo.
+- Rust : fmt, clippy (`-D warnings`), 341 tests (+ 1 test GFS réel
+  ignoré par défaut, vérifié le 2026-11-12). Frontend : lint,
+  svelte-check, 253 tests Vitest, build.
+
 ## Phase 6 — Alarmes
 
 - [ ] Créer nav-alarms.
@@ -299,7 +349,7 @@ Critères :
 - [ ] Cartes ENC S-57.
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
-- [ ] Météo GRIB.
+- [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).
 - [ ] Marées et courants.
 - [ ] Routage météo.
 - [ ] Intégration pilote automatique.

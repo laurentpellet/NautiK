@@ -14,12 +14,14 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod instrument_sim;
 pub mod link;
 pub mod measurement;
 pub mod position;
 pub mod simulation;
 pub mod vessel;
 
+pub use instrument_sim::InstrumentSimulator;
 pub use link::{ConnectionState, Sample};
 pub use measurement::{Measurement, MeasurementError, Quantity};
 pub use position::{GeoPosition, PositionError, PositionFix, SourceKind};

@@ -22,6 +22,8 @@
   import type { PositionFix } from '../services/position';
   import type { LatLon, Route } from '../services/routing';
   import { AIS_SOURCE, AIS_SYMBOL_LAYER, aisData, aisIcons, aisLayers } from '../map/ais';
+  import { WIND_SOURCE, viewBounds, windData, windIcon, windLayers } from '../map/wind';
+  import type { Bounds, WindVector } from '../services/weather';
   import {
     DRAFT_SOURCE,
     ROUTES_SOURCE,
@@ -65,6 +67,10 @@
     ais?: AisSnapshot | null;
     /** Clic sur une cible AIS (hors mode tracé). */
     onaisclick?: (mmsi: string) => void;
+    /** Vent prévu à dessiner (fichier GRIB). */
+    wind?: WindVector[] | null;
+    /** Emprise affichée, après chaque déplacement de la carte. */
+    onviewchange?: (bounds: Bounds) => void;
   }
 
   let {
@@ -81,7 +87,14 @@
     onmapclick,
     ais = null,
     onaisclick,
+    wind = null,
+    onviewchange,
   }: Props = $props();
+
+  function emitView(m: MapLibreMap): void {
+    const b = m.getBounds();
+    onviewchange?.(viewBounds(b.getWest(), b.getSouth(), b.getEast(), b.getNorth()));
+  }
 
   let container: HTMLDivElement;
   let map = $state.raw<MapLibreMap | null>(null);
@@ -125,8 +138,16 @@
       for (const source of [ROUTES_SOURCE, DRAFT_SOURCE, TRACKS_SOURCE]) {
         m.addSource(source, { type: 'geojson', data: emptyCollection() });
       }
-      for (const layer of overlayLayers()) {
+      const overlays = overlayLayers();
+      for (const layer of overlays) {
         m.addLayer(layer);
+      }
+      // Vent sous les routes, traces et cibles.
+      const icon = windIcon();
+      m.addImage(icon.id, icon.image, { sdf: true });
+      m.addSource(WIND_SOURCE, { type: 'geojson', data: emptyCollection() });
+      for (const layer of windLayers()) {
+        m.addLayer(layer, overlays[0]?.id);
       }
       for (const { id, image } of aisIcons()) {
         m.addImage(id, image, { sdf: true });
@@ -136,7 +157,9 @@
         m.addLayer(layer);
       }
       loaded = true;
+      emitView(m);
     });
+    m.on('moveend', () => emitView(m));
     m.on('click', AIS_SYMBOL_LAYER, (event) => {
       const mmsi = event.features?.[0]?.properties.mmsi;
       if (!drawing && typeof mmsi === 'string') onaisclick?.(mmsi);
@@ -205,6 +228,11 @@
   $effect(() => {
     const data = aisData(ais);
     if (map && loaded) setData(AIS_SOURCE, data);
+  });
+
+  $effect(() => {
+    const data = windData(wind);
+    if (map && loaded) map.getSource<GeoJSONSource>(WIND_SOURCE)?.setData(data);
   });
 
   $effect(() => {

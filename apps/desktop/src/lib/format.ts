@@ -1,5 +1,14 @@
 /** Formatage pour l'affichage (aucun calcul de navigation). */
 import type { ConnectionState } from './services/instruments';
+import {
+  DEPTH_UNITS,
+  DISTANCE_UNITS,
+  SPEED_UNITS,
+  depthIn,
+  distanceIn,
+  speedIn,
+  units,
+} from './units.svelte';
 
 function formatDegreesMinutes(value: number, positive: string, negative: string, pad: number) {
   const hemisphere = value < 0 ? negative : positive;
@@ -48,16 +57,42 @@ export function isEngineSilent(lastSnapshotAt: number | null, now: number): bool
 /** Nœuds par mètre/seconde. */
 export const KNOTS_PER_MPS = 3600 / 1852;
 
-/** Vitesse en nœuds : `6.4 kn`. */
-export function formatSpeed(mps: number | null): string {
-  if (mps === null) return '—';
-  return `${(mps * KNOTS_PER_MPS).toFixed(1)} kn`;
+/** Valeur et unité séparées (affichage en grands caractères). */
+export interface Parts {
+  value: string;
+  unit: string;
 }
 
-/** Profondeur en mètres : `12.5 m` (`125 m` à partir de 100 m). */
+/** Vitesse dans l'unité choisie : `6.4` `kn`. */
+export function speedParts(mps: number): Parts {
+  return { value: speedIn(mps).toFixed(1), unit: SPEED_UNITS[units.speed].label };
+}
+
+/** Profondeur dans l'unité choisie (sans décimale à partir de 100). */
+export function depthParts(meters: number): Parts {
+  const v = depthIn(meters);
+  return { value: v < 100 ? v.toFixed(1) : v.toFixed(0), unit: DEPTH_UNITS[units.depth].label };
+}
+
+/** Distance dans l'unité choisie (2 décimales sous 1). */
+export function distanceParts(meters: number): Parts {
+  const v = distanceIn(meters);
+  return {
+    value: v < 1 ? v.toFixed(2) : v.toFixed(1),
+    unit: DISTANCE_UNITS[units.distance].label,
+  };
+}
+
+const joined = (p: Parts) => `${p.value} ${p.unit}`;
+
+/** Vitesse : `6.4 kn` (unité choisie). */
+export function formatSpeed(mps: number | null): string {
+  return mps === null ? '—' : joined(speedParts(mps));
+}
+
+/** Profondeur : `12.5 m` (`125 m` à partir de 100 ; unité choisie). */
 export function formatDepth(meters: number | null): string {
-  if (meters === null) return '—';
-  return `${meters < 100 ? meters.toFixed(1) : meters.toFixed(0)} m`;
+  return meters === null ? '—' : joined(depthParts(meters));
 }
 
 /** Angle relatif (vent apparent) : `045° Td` (tribord) ou `120° Bd` (bâbord). */
@@ -72,10 +107,9 @@ export function formatRelativeAngle(radians: number | null): string {
 /** Mètres par mille marin. */
 export const METERS_PER_NM = 1852;
 
-/** Distance en milles marins : `12.3 NM` (`0.05 NM` sous 1 NM). */
+/** Distance : `12.3 NM` (`0.05 NM` sous 1 ; unité choisie). */
 export function formatDistance(meters: number): string {
-  const nm = meters / METERS_PER_NM;
-  return `${nm < 1 ? nm.toFixed(2) : nm.toFixed(1)} NM`;
+  return joined(distanceParts(meters));
 }
 
 /** Relèvement vrai en degrés : `036°`. */

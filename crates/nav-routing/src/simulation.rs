@@ -44,6 +44,22 @@ impl RouteSimulator {
         }
     }
 
+    /// Vitesse lorsqu'il suit une route (m/s).
+    #[must_use]
+    pub fn speed_mps(&self) -> f64 {
+        self.speed_mps
+    }
+
+    /// Change la vitesse (négative ou non finie ramenée à 0) ; prise en
+    /// compte au pas suivant.
+    pub fn set_speed(&mut self, speed_mps: f64) {
+        self.speed_mps = if speed_mps.is_finite() {
+            speed_mps.max(0.0)
+        } else {
+            0.0
+        };
+    }
+
     /// Position courante.
     #[must_use]
     pub fn position(&self) -> GeoPosition {

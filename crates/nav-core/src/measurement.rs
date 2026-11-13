@@ -34,11 +34,39 @@ pub enum Quantity {
     WindSpeedApparent,
     /// Angle du vent apparent (rad, ]-π, π], positif à tribord).
     WindAngleApparent,
+    /// Vitesse du vent réel (m/s).
+    WindSpeedTrue,
+    /// Direction d'où vient le vent réel, vraie (rad, [0, 2π)).
+    WindDirectionTrue,
+    /// Température de l'eau (K).
+    WaterTemperature,
+    /// Température de l'air extérieur (K).
+    AirTemperature,
+    /// Pression atmosphérique (Pa).
+    AtmosphericPressure,
+    /// Régime moteur (Hz, tours par seconde).
+    EngineSpeed,
+    /// Température du liquide de refroidissement moteur (K).
+    EngineCoolantTemperature,
+    /// Pression d'huile moteur (Pa).
+    EngineOilPressure,
+    /// Niveau du réservoir de carburant (rapport, [0, 1]).
+    FuelLevel,
+    /// Niveau du réservoir d'eau douce (rapport, [0, 1]).
+    FreshWaterLevel,
+    /// Tension de la batterie de service (V).
+    BatteryVoltage,
+    /// Courant de la batterie de service (A, positif en charge).
+    BatteryCurrent,
+    /// État de charge de la batterie de service (rapport, [0, 1]).
+    BatteryStateOfCharge,
+    /// Puissance produite par les panneaux solaires (W).
+    SolarPower,
 }
 
 impl Quantity {
     /// Toutes les grandeurs, dans l'ordre d'affichage.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 22] = [
         Self::SpeedOverGround,
         Self::CourseOverGroundTrue,
         Self::HeadingTrue,
@@ -47,17 +75,97 @@ impl Quantity {
         Self::DepthBelowTransducer,
         Self::WindSpeedApparent,
         Self::WindAngleApparent,
+        Self::WindSpeedTrue,
+        Self::WindDirectionTrue,
+        Self::WaterTemperature,
+        Self::AirTemperature,
+        Self::AtmosphericPressure,
+        Self::EngineSpeed,
+        Self::EngineCoolantTemperature,
+        Self::EngineOilPressure,
+        Self::FuelLevel,
+        Self::FreshWaterLevel,
+        Self::BatteryVoltage,
+        Self::BatteryCurrent,
+        Self::BatteryStateOfCharge,
+        Self::SolarPower,
     ];
 
     /// Âge au-delà duquel la mesure est obsolète.
     #[must_use]
     pub fn stale_after(self) -> Duration {
         match self {
-            Self::DepthBelowTransducer | Self::WindSpeedApparent | Self::WindAngleApparent => {
-                Duration::from_secs(10)
-            }
+            Self::DepthBelowTransducer
+            | Self::WindSpeedApparent
+            | Self::WindAngleApparent
+            | Self::WindSpeedTrue
+            | Self::WindDirectionTrue
+            | Self::BatteryVoltage
+            | Self::BatteryCurrent
+            | Self::BatteryStateOfCharge => Duration::from_secs(10),
+            Self::WaterTemperature
+            | Self::AirTemperature
+            | Self::AtmosphericPressure
+            | Self::SolarPower => Duration::from_secs(30),
+            Self::FuelLevel | Self::FreshWaterLevel => Duration::from_secs(60),
             _ => Duration::from_secs(5),
         }
+    }
+
+    /// Libellé français (journaux, messages d'erreur).
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SpeedOverGround => "vitesse fond",
+            Self::CourseOverGroundTrue => "route fond",
+            Self::HeadingTrue => "cap vrai",
+            Self::HeadingMagnetic => "cap magnétique",
+            Self::SpeedThroughWater => "vitesse surface",
+            Self::DepthBelowTransducer => "profondeur",
+            Self::WindSpeedApparent => "vitesse du vent apparent",
+            Self::WindAngleApparent => "angle du vent apparent",
+            Self::WindSpeedTrue => "vitesse du vent réel",
+            Self::WindDirectionTrue => "direction du vent réel",
+            Self::WaterTemperature => "température de l'eau",
+            Self::AirTemperature => "température de l'air",
+            Self::AtmosphericPressure => "pression atmosphérique",
+            Self::EngineSpeed => "régime moteur",
+            Self::EngineCoolantTemperature => "température moteur",
+            Self::EngineOilPressure => "pression d'huile",
+            Self::FuelLevel => "niveau de carburant",
+            Self::FreshWaterLevel => "niveau d'eau douce",
+            Self::BatteryVoltage => "tension batterie",
+            Self::BatteryCurrent => "courant batterie",
+            Self::BatteryStateOfCharge => "charge batterie",
+            Self::SolarPower => "puissance solaire",
+        }
+    }
+
+    /// Domaine physique admis pour les grandeurs scalaires (non angulaires).
+    fn range(self) -> Option<(f64, f64)> {
+        Some(match self {
+            Self::SpeedOverGround
+            | Self::SpeedThroughWater
+            | Self::WindSpeedApparent
+            | Self::WindSpeedTrue => (0.0, 200.0),
+            Self::DepthBelowTransducer => (0.0, 12_000.0),
+            // −73 °C à +77 °C.
+            Self::WaterTemperature | Self::AirTemperature => (200.0, 350.0),
+            Self::AtmosphericPressure => (80_000.0, 110_000.0),
+            // 12 000 tr/min au plus.
+            Self::EngineSpeed => (0.0, 200.0),
+            Self::EngineCoolantTemperature => (200.0, 450.0),
+            Self::EngineOilPressure => (0.0, 2_000_000.0),
+            Self::FuelLevel | Self::FreshWaterLevel | Self::BatteryStateOfCharge => (0.0, 1.0),
+            Self::BatteryVoltage => (0.0, 100.0),
+            Self::BatteryCurrent => (-2_000.0, 2_000.0),
+            Self::SolarPower => (0.0, 20_000.0),
+            Self::CourseOverGroundTrue
+            | Self::HeadingTrue
+            | Self::HeadingMagnetic
+            | Self::WindDirectionTrue
+            | Self::WindAngleApparent => return None,
+        })
     }
 
     /// Valide et normalise une valeur SI pour cette grandeur.
@@ -69,23 +177,19 @@ impl Quantity {
         if !value.is_finite() {
             return Err(MeasurementError::NotFinite(self));
         }
+        if let Some((min, max)) = self.range() {
+            // Ex. vitesse négative ou > 200 m/s : aberrante, rejetée.
+            return if (min..=max).contains(&value) {
+                Ok(value)
+            } else {
+                Err(MeasurementError::OutOfRange(self, value))
+            };
+        }
         match self {
-            Self::SpeedOverGround | Self::SpeedThroughWater | Self::WindSpeedApparent => {
-                // Vitesses : négatives impossibles ; > 200 m/s aberrantes.
-                if (0.0..=200.0).contains(&value) {
-                    Ok(value)
-                } else {
-                    Err(MeasurementError::OutOfRange(self, value))
-                }
-            }
-            Self::DepthBelowTransducer => {
-                if (0.0..=12_000.0).contains(&value) {
-                    Ok(value)
-                } else {
-                    Err(MeasurementError::OutOfRange(self, value))
-                }
-            }
-            Self::CourseOverGroundTrue | Self::HeadingTrue | Self::HeadingMagnetic => {
+            Self::CourseOverGroundTrue
+            | Self::HeadingTrue
+            | Self::HeadingMagnetic
+            | Self::WindDirectionTrue => {
                 if value.abs() > 4.0 * PI {
                     return Err(MeasurementError::OutOfRange(self, value));
                 }
@@ -98,6 +202,8 @@ impl Quantity {
                 let wrapped = value.rem_euclid(TAU);
                 Ok(if wrapped > PI { wrapped - TAU } else { wrapped })
             }
+            // Grandeurs scalaires : traitées par `range` ci-dessus.
+            _ => Err(MeasurementError::OutOfRange(self, value)),
         }
     }
 }
@@ -198,6 +304,36 @@ mod tests {
             "degrés envoyés pour des radians"
         );
         assert_eq!(Quantity::DepthBelowTransducer.normalize(0.0), Ok(0.0));
+    }
+
+    #[test]
+    fn validates_environment_engine_and_energy_values() {
+        // Celsius envoyés pour des kelvins : rejetés.
+        assert!(Quantity::WaterTemperature.normalize(27.0).is_err());
+        assert_eq!(Quantity::WaterTemperature.normalize(300.15), Ok(300.15));
+        // hPa envoyés pour des Pa : rejetés.
+        assert!(Quantity::AtmosphericPressure.normalize(1013.0).is_err());
+        assert!(Quantity::AtmosphericPressure.normalize(101_300.0).is_ok());
+        // tr/min envoyés pour des Hz : rejetés au-delà de 12 000 tr/min.
+        assert!(Quantity::EngineSpeed.normalize(2_400.0).is_err());
+        assert_eq!(Quantity::EngineSpeed.normalize(40.0), Ok(40.0));
+        // Pourcentages envoyés pour des rapports : rejetés.
+        assert!(Quantity::FuelLevel.normalize(84.0).is_err());
+        assert_eq!(Quantity::FuelLevel.normalize(1.0), Ok(1.0));
+        assert!(Quantity::BatteryStateOfCharge.normalize(-0.01).is_err());
+        assert_eq!(Quantity::BatteryCurrent.normalize(-35.0), Ok(-35.0));
+        assert!(Quantity::BatteryVoltage.normalize(-1.0).is_err());
+        assert!(Quantity::SolarPower.normalize(-5.0).is_err());
+        let twd = Quantity::WindDirectionTrue.normalize(-FRAC).expect("ok");
+        assert!((twd - (TAU - FRAC)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn every_quantity_has_a_freshness_threshold() {
+        for q in Quantity::ALL {
+            assert!(q.stale_after() >= Duration::from_secs(5));
+        }
+        assert_eq!(Quantity::FuelLevel.stale_after(), Duration::from_secs(60));
     }
 
     #[test]
