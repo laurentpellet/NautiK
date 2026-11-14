@@ -10,6 +10,7 @@
   import ChartsFolderPanel from './lib/components/ChartsFolderPanel.svelte';
   import EncFolderPanel from './lib/components/EncFolderPanel.svelte';
   import { EncApi } from './lib/services/enc';
+  import { EncMapController } from './lib/encMap.svelte';
   import FloatingPanel from './lib/components/FloatingPanel.svelte';
   import MapBar from './lib/components/MapBar.svelte';
   import {
@@ -226,6 +227,24 @@
   const simulator = new SimulatorApi((command, args) => invokeFn(command, args));
   const chartsApi = new ChartsApi((command, args) => invokeFn(command, args));
   const encApi = new EncApi((command, args) => invokeFn(command, args));
+  /** Cartes ENC de la vue (cellules décodées par le moteur). */
+  const encMap = new EncMapController(encApi);
+
+  // ENC de la zone affichée, après un court délai (déplacements rapides).
+  $effect(() => {
+    const view = mapView;
+    if (!layers.enc) {
+      encMap.hide();
+      return;
+    }
+    const timer = setTimeout(() => void encMap.show(view), 200);
+    return () => clearTimeout(timer);
+  });
+
+  async function reloadEnc(): Promise<void> {
+    await encMap.refresh();
+    if (layers.enc) await encMap.show(mapView);
+  }
   const weatherApi = new WeatherApi((command, args) => invokeFn(command, args));
   const alarmsApi = new AlarmsApi((command, args) => invokeFn(command, args));
 
@@ -536,6 +555,7 @@
                 onaisclick={(mmsi) => (selectedTarget = mmsi)}
                 wind={weatherShown ? (windField?.points ?? null) : null}
                 onviewchange={(b) => (mapView = b)}
+                enc={encMap.data}
                 anchor={alarms?.anchor ?? null}
                 {anchorAlerting}
                 camera={followedCamera('left', split, leader, cameras)}
@@ -561,6 +581,7 @@
                   ais={layers.ais ? ais : null}
                   onaisclick={(mmsi) => (selectedTarget = mmsi)}
                   wind={weatherShown ? (windField?.points ?? null) : null}
+                  enc={encMap.data}
                   anchor={alarms?.anchor ?? null}
                   {anchorAlerting}
                   camera={followedCamera('right', split, leader, cameras)}
@@ -602,7 +623,7 @@
 
     {#snippet chartsSection()}
       <ChartsFolderPanel api={chartsApi} {catalog} onchange={(c) => (catalog = c)} />
-      <EncFolderPanel api={encApi} />
+      <EncFolderPanel api={encApi} onchange={() => void reloadEnc()} />
     {/snippet}
 
     {#snippet alarmsSection()}
@@ -625,6 +646,12 @@
         {#if hiddenOnMap.length > 0}
           <p class="hidden-note" role="status" data-testid="hidden-layers">
             Masqué : {hiddenOnMap.join(', ')}
+          </p>
+        {/if}
+        <!-- Cartes ENC : rien n'est omis en silence (pas à jour, annulée…). -->
+        {#if encMap.warnings.length > 0}
+          <p class="hidden-note enc-note" role="status" data-testid="enc-warnings">
+            {encMap.warnings.join(' · ')}
           </p>
         {/if}
         {#if layout.anchor.visible}
@@ -917,6 +944,10 @@
     color: var(--warn-fg);
     font-size: 0.75rem;
     font-weight: 600;
+  }
+
+  .enc-note {
+    max-width: 28rem;
   }
 
   .wind-bar {

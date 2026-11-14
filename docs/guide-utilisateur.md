@@ -69,7 +69,7 @@ Un dossier choisi qui a disparu (clé USB retirée) est signalé, jamais
 remplacé en silence. Un fichier illisible ou corrompu est signalé sans
 empêcher le chargement des autres.
 
-**Cartes ENC (S-57)** — en préparation. **Paramètres → Cartes → Cartes
+**Cartes ENC (S-57)**. **Paramètres → Cartes → Cartes
 ENC → Choisir le dossier ENC…** indique où se trouve votre jeu d'échange
 ENC (en général le dossier `ENC_ROOT`, avec `CATALOG.031` et les
 cellules `.000`). NautiK affiche le nombre de cellules trouvées, celles
@@ -85,10 +85,42 @@ appliquée à moitié : la cellule est signalée « pas à jour », avec la
 raison. Une cellule annulée par son producteur est signalée en rouge :
 ne l'utilisez plus, procurez-vous la cellule qui la remplace. Un objet
 incohérent est écarté et signalé, jamais
-deviné. L'affichage des ENC sur la carte viendra dans une version
-suivante. Un
+deviné. Un
 dossier ENC disparu est signalé ; **Retirer** l'oublie sans toucher aux
 fichiers.
+
+Les cellules ENC de la zone affichée sont dessinées sur la carte, par
+dessus les cartes raster, avec une symbologie simplifiée inspirée de la
+norme S-52 (ce n'est pas un ECDIS) : terre en beige, zones de
+profondeur en bleu d'autant plus soutenu que le fond est faible
+(isobathes 2, 10 et 30 m ; l'isobathe de 10 m est plus épaisse), zones
+non hydrographiées en gris, sondes en mètres à partir du zoom 12 (en
+gras sous 10 m), dangers (épaves, obstructions, roches) en magenta,
+bouées et balises à leur couleur, feux en halo magenta. Les cellules
+les plus détaillées sont dessinées par-dessus ; 16 au plus à la fois.
+Le calque **Cartes ENC (S-57)** du menu **Calques** les masque. Une
+note en haut à droite de la carte signale toujours ce qui n'est pas
+affiché ou pas fiable : cellule pas à jour, cellule annulée (jamais
+dessinée), cellule illisible, trop de cellules dans la vue (« zoomez »).
+Après avoir ajouté des cellules ou des mises à jour, **Relire le
+dossier** redessine la carte.
+
+**Base CM93 (C-MAP).** Une base CM93 v2 (dossier contenant
+`CM93OBJ.DIC` et `CM93ATTR.DIC`) placée dans le dossier ENC, ou dans un
+de ses sous-dossiers sur deux niveaux, est reconnue : le panneau
+**Paramètres → Cartes** indique « Base CM93 trouvée ». Ses cartes sont
+dessinées **sous** les ENC officielles, avec la même symbologie, de la
+moins à la plus détaillée selon le zoom (16 cellules au plus) ; le
+calque **Cartes ENC (S-57)** les masque aussi. Ce ne
+sont pas des cartes officielles et elles sont souvent anciennes : la
+note de la carte le rappelle toujours, avec la date des données. Elle
+signale aussi le décalage WGS 84 déclaré par certaines cellules (il
+n'est pas corrigé, comme dans OpenCPN : vérifiez la position par
+rapport à la côte), les cellules illisibles et celles qui ne sont pas
+dessinées (« zoomez »). Certaines copies de bases CM93 contiennent un
+double complet de la base dans un sous-dossier (par exemple
+`00300420/`) : il est ignoré et peut être supprimé par vous pour
+gagner de la place.
 
 Sur la carte :
 

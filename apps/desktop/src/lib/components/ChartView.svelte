@@ -27,6 +27,16 @@
   import { ANCHOR_SOURCE, anchorData, anchorLayers } from '../map/anchor';
   import type { AnchorView } from '../services/alarms';
   import type { MapCamera } from '../split';
+  import type { EncFeature } from '../services/enc';
+  import {
+    ENC_SOURCE,
+    emptyEncCollection,
+    encLayers,
+    encThemeChanges,
+    parseSoundingImageId,
+    soundingImage,
+  } from '../map/enc';
+  import type { FeatureCollection } from 'geojson';
   import {
     DRAFT_SOURCE,
     ROUTES_SOURCE,
@@ -84,6 +94,8 @@
     camera?: MapCamera | null;
     /** Vue après chaque mouvement ; `user` : mouvement fait par l'utilisateur. */
     oncamera?: (camera: MapCamera, user: boolean) => void;
+    /** Entités des cartes ENC à dessiner (symbologie simplifiée). */
+    enc?: FeatureCollection<EncFeature['geometry'], EncFeature['properties']>;
   }
 
   let {
@@ -107,6 +119,7 @@
     hiddenCharts = [],
     camera = null,
     oncamera,
+    enc = emptyEncCollection(),
   }: Props = $props();
 
   function emitView(m: MapLibreMap): void {
@@ -197,7 +210,20 @@
     m.on('move', () => {
       if (!applying) oncamera?.(cameraOf(m), byUser());
     });
+    // Sondes ENC : images créées à la demande (pas de polices hors ligne).
+    m.on('styleimagemissing', (event: { id: string }) => {
+      const sounding = parseSoundingImageId(event.id);
+      if (!sounding || m.hasImage(event.id)) return;
+      const ratio = window.devicePixelRatio || 1;
+      const image = soundingImage(sounding.label, sounding.shallow, sounding.theme, ratio);
+      if (image) m.addImage(event.id, image, { pixelRatio: ratio });
+    });
     m.on('load', () => {
+      // Cartes ENC au-dessus des cartes raster, sous toutes les surimpressions.
+      m.addSource(ENC_SOURCE, { type: 'geojson', data: emptyEncCollection() });
+      for (const layer of encLayers(untrack(() => theme))) {
+        m.addLayer(layer);
+      }
       for (const source of [ROUTES_SOURCE, DRAFT_SOURCE, TRACKS_SOURCE]) {
         m.addSource(source, { type: 'geojson', data: emptyCollection() });
       }
@@ -294,6 +320,16 @@
         m.setPaintProperty(chartLayerId(chart), property, paint[property]);
       }
     }
+    for (const [layer, kind, property, value] of encThemeChanges(t)) {
+      // Propriétés issues de `encLayers`, donc valides pour ces couches.
+      if (kind === 'paint') m.setPaintProperty(layer, property as never, value as never);
+      else m.setLayoutProperty(layer, property as never, value as never);
+    }
+  });
+
+  $effect(() => {
+    const data = enc;
+    if (map && loaded) map.getSource<GeoJSONSource>(ENC_SOURCE)?.setData(data);
   });
 
   // Cartes masquées : visibilité des couches raster, sans reconstruire

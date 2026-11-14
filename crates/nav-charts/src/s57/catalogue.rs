@@ -35,6 +35,7 @@ const OBJECT_CLASSES: &[(u16, &str)] = &[
     (129, "SOUNDG"),
     (144, "TOPMAR"),
     (153, "UWTROC"),
+    (154, "UNSARE"),
     (159, "WRECKS"),
     (302, "M_COVR"),
     (308, "M_QUAL"),

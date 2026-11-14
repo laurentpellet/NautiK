@@ -59,4 +59,8 @@ pub enum ChartError {
     /// Chemin de cellule ENC refusé (hors du dossier, mal formé, absent).
     #[error("cellule ENC refusée ({0})")]
     InvalidCellPath(String),
+
+    /// Cellule ENC illisible ou annulée : non affichable.
+    #[error("cellule ENC inutilisable : {0}")]
+    EncUnusable(String),
 }

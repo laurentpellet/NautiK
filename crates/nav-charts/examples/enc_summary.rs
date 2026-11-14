@@ -31,6 +31,20 @@ fn main() -> anyhow::Result<()> {
                         println!("{:?}", feature.attributes);
                     }
                 }
+                let display_started = std::time::Instant::now();
+                let features = nav_charts::s57::display::map_features(&cell);
+                let json = serde_json::to_string(&features)?;
+                println!(
+                    "affichage : {} entités, {} Kio de GeoJSON ({} ms)",
+                    features.len(),
+                    json.len() / 1024,
+                    display_started.elapsed().as_millis()
+                );
+                // Entités d'affichage écrites dans un fichier (essais de rendu).
+                if let Ok(out) = std::env::var("NAUTIK_ENC_GEOJSON") {
+                    std::fs::write(&out, &json)?;
+                    println!("entités écrites dans {out}");
+                }
                 let summary = cell.summary();
                 println!(
                     "{path} ({} ms)\n{}",

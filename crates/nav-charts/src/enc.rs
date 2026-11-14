@@ -52,6 +52,43 @@ pub struct EncInventory {
     pub unreadable_dirs: u32,
     /// Parcours interrompu par les bornes : inventaire incomplet.
     pub truncated: bool,
+    /// Base CM93 trouvée (chemin relatif, `.` pour le dossier lui-même) ;
+    /// son contenu n'est pas parcouru ici (voir [`crate::cm93`]).
+    pub cm93: Option<String>,
+}
+
+/// Base CM93 d'un dossier ENC : le dossier lui-même ou un sous-dossier
+/// jusqu'à deux niveaux (le premier trouvé dans l'ordre des noms).
+pub fn find_cm93_root(root: &Path) -> Option<PathBuf> {
+    if crate::cm93::is_cm93_root(root) {
+        return Some(root.to_path_buf());
+    }
+    let subdirs = |dir: &Path| -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                    .map(|e| e.path())
+                    .take(512)
+                    .collect()
+            })
+            .unwrap_or_default();
+        dirs.sort();
+        dirs
+    };
+    for child in subdirs(root) {
+        if crate::cm93::is_cm93_root(&child) {
+            return Some(child);
+        }
+        if let Some(found) = subdirs(&child)
+            .into_iter()
+            .find(|d| crate::cm93::is_cm93_root(d))
+        {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Extension numérique à trois chiffres (`000` à `999`).
@@ -89,6 +126,10 @@ pub fn scan_enc_dir_blocking(root: &Path) -> Result<EncInventory, ChartError> {
     let first = fs::read_dir(root).map_err(unavailable)?;
 
     let mut inventory = EncInventory::default();
+    if crate::cm93::is_cm93_root(root) {
+        inventory.cm93 = Some(".".into());
+        return Ok(inventory);
+    }
     let mut seen = 0usize;
     // Dossiers restant à parcourir (chemin, profondeur) ; le dossier en
     // cours est déjà ouvert.
@@ -115,7 +156,13 @@ pub fn scan_enc_dir_blocking(root: &Path) -> Result<EncInventory, ChartError> {
             };
             let path = entry.path();
             if kind.is_dir() {
-                if depth < MAX_ENC_DEPTH {
+                if crate::cm93::is_cm93_root(&path) {
+                    // Base CM93 : signalée, pas parcourue (des dizaines de
+                    // milliers de fichiers sans cellule S-57).
+                    if inventory.cm93.is_none() {
+                        inventory.cm93 = Some(relative(root, &path));
+                    }
+                } else if depth < MAX_ENC_DEPTH {
                     pending.push((path, depth + 1));
                 } else {
                     inventory.truncated = true;
@@ -285,6 +332,28 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn cm93_bases_are_found_not_walked() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("Cartes").join("CM93");
+        std::fs::create_dir_all(base.join("02100600").join("F")).unwrap();
+        std::fs::write(base.join("CM93OBJ.DIC"), "x").unwrap();
+        std::fs::write(base.join("CM93ATTR.DIC"), "x").unwrap();
+        // Un .000 dans la base n'est pas une cellule S-57 de l'inventaire.
+        std::fs::write(base.join("02100600").join("F").join("X.000"), "x").unwrap();
+        std::fs::write(dir.path().join("FR1.000"), "x").unwrap();
+        let inventory = scan_enc_dir_blocking(dir.path()).unwrap();
+        assert_eq!(inventory.cells.len(), 1);
+        assert_eq!(inventory.cm93.as_deref(), Some("Cartes/CM93"));
+        assert_eq!(find_cm93_root(dir.path()), Some(base.clone()));
+        // Base choisie directement.
+        let inventory = scan_enc_dir_blocking(&base).unwrap();
+        assert_eq!(inventory.cm93.as_deref(), Some("."));
+        assert!(inventory.cells.is_empty());
+        assert_eq!(find_cm93_root(&base), Some(base));
+        assert_eq!(find_cm93_root(&dir.path().join("absent")), None);
     }
 
     #[test]

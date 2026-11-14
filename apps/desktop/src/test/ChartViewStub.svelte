@@ -8,6 +8,7 @@
     catalog,
     hiddenCharts = [],
     wind = null,
+    enc,
     onviewchange,
     camera = null,
     oncamera,
@@ -15,6 +16,7 @@
     catalog: ChartCatalog;
     hiddenCharts?: string[];
     wind?: WindVector[] | null;
+    enc?: { features: unknown[] };
     onviewchange?: (bounds: Bounds) => void;
     camera?: MapCamera | null;
     oncamera?: (camera: MapCamera, user: boolean) => void;
@@ -31,6 +33,7 @@
 
 <div data-testid="chart-view-stub">{catalog.charts.length} cartes</div>
 <div data-testid="hidden-charts-stub">{hiddenCharts.join(',')}</div>
+<div data-testid="enc-stub">{enc?.features.length ?? 0} entités ENC</div>
 <div data-testid="wind-stub">{wind === null ? 'sans vent' : `${wind.length} vents`}</div>
 <div data-testid="camera-stub">
   {camera ? `${camera.center[0]},${camera.center[1]} z${camera.zoom}` : 'libre'}

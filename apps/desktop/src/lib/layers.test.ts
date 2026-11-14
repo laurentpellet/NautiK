@@ -32,17 +32,17 @@ describe('calques', () => {
       routes: true,
       tracks: true,
       ais: false,
+      enc: true,
     });
+    expect(loadLayers(store('{"enc":false}')).enc).toBe(false);
   });
 
   it('mémorise et liste les calques masqués', () => {
     let saved = '';
-    saveLayers({ routes: true, tracks: false, ais: false }, { setItem: (_k, v) => (saved = v) });
-    expect(JSON.parse(saved)).toEqual({ routes: true, tracks: false, ais: false });
-    expect(hiddenLayers({ routes: true, tracks: false, ais: false })).toEqual([
-      'Traces',
-      'Cibles AIS',
-    ]);
+    const layers = { routes: true, tracks: false, ais: false, enc: false };
+    saveLayers(layers, { setItem: (_k, v) => (saved = v) });
+    expect(JSON.parse(saved)).toEqual(layers);
+    expect(hiddenLayers(layers)).toEqual(['Traces', 'Cibles AIS', 'Cartes ENC (S-57)']);
   });
 });
 

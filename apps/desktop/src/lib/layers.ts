@@ -4,14 +4,17 @@ export interface MapLayers {
   routes: boolean;
   tracks: boolean;
   ais: boolean;
+  /** Cartes ENC S-57 du dossier choisi. */
+  enc: boolean;
 }
 
-export const DEFAULT_LAYERS: MapLayers = { routes: true, tracks: true, ais: true };
+export const DEFAULT_LAYERS: MapLayers = { routes: true, tracks: true, ais: true, enc: true };
 
 export const LAYER_LABELS: Record<keyof MapLayers, string> = {
   routes: 'Routes et waypoints',
   tracks: 'Traces',
   ais: 'Cibles AIS',
+  enc: 'Cartes ENC (S-57)',
 };
 
 const STORAGE_KEY = 'nautik.layers';
@@ -28,7 +31,12 @@ export function loadLayers(
     const record = parsed as Record<string, unknown>;
     const flag = (key: keyof MapLayers) =>
       typeof record[key] === 'boolean' ? (record[key] as boolean) : DEFAULT_LAYERS[key];
-    return { routes: flag('routes'), tracks: flag('tracks'), ais: flag('ais') };
+    return {
+      routes: flag('routes'),
+      tracks: flag('tracks'),
+      ais: flag('ais'),
+      enc: flag('enc'),
+    };
   } catch {
     return { ...DEFAULT_LAYERS };
   }

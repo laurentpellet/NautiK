@@ -4,15 +4,20 @@
 //! jamais de chemin absolu) et mémorisé dans la base. Son contenu est
 //! inventorié par `nav-charts`. Une cellule de l'inventaire peut être
 //! décodée pour en voir le résumé : le frontend ne transmet que son chemin
-//! relatif, vérifié ici (il ne peut pas sortir du dossier). L'affichage
-//! sur la carte viendra dans une étape suivante. Un dossier disparu (clé
+//! relatif, vérifié ici (il ne peut pas sortir du dossier). Les cellules
+//! sont aussi servies pour la carte : index des emprises, puis entités
+//! d'affichage d'une cellule (cache `EncLibrary`). Un dossier disparu (clé
 //! USB retirée) est signalé, jamais oublié en silence.
 
 use std::path::{Path, PathBuf};
 
-use nav_charts::{decode_cell_file, resolve_cell_path, scan_enc_dir, EncInventory, S57CellSummary};
+use nav_charts::{
+    decode_cell_file, resolve_cell_path, scan_enc_dir, Cm93Library, Cm93View, EncInventory,
+    EncLibrary, EncMapIndex, S57CellSummary,
+};
 use nav_engine::CommandResult;
 use serde::Serialize;
+use tauri::ipc::Response;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
@@ -147,6 +152,130 @@ pub async fn inspect_enc_cell(
     inspect(stored_dir(&service).await?, &path).await
 }
 
+/// Index cartographique du dossier ENC.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncMapIndexView {
+    /// Dossier choisi ; `None` tant qu'aucun n'a été choisi.
+    pub dir: Option<String>,
+    /// Cellules affichables (emprise, usage, état des mises à jour).
+    pub index: Option<EncMapIndex>,
+    /// Dossier illisible ou absent.
+    pub error: Option<String>,
+    /// Base CM93 trouvée dans le dossier (chemin relatif, `.` : le
+    /// dossier lui-même).
+    pub cm93: Option<String>,
+    /// Base CM93 illisible.
+    pub cm93_error: Option<String>,
+}
+
+async fn map_index(
+    dir: Option<String>,
+    library: &EncLibrary,
+    cm93: &Cm93Library,
+) -> EncMapIndexView {
+    let Some(text) = dir else {
+        return EncMapIndexView {
+            dir: None,
+            index: None,
+            error: None,
+            cm93: None,
+            cm93_error: None,
+        };
+    };
+    let root = PathBuf::from(&text);
+    match scan_enc_dir(root.clone()).await {
+        Ok(inventory) => {
+            // Base CM93 relue à chaque relecture du dossier.
+            let (cm93, cm93_error) = match cm93.refresh(&root).await {
+                Ok(base) => (base, None),
+                Err(error) => {
+                    tracing::warn!(dir = %text, %error, "base CM93 illisible");
+                    (None, Some(error.to_string()))
+                }
+            };
+            EncMapIndexView {
+                index: Some(library.index(&root, &inventory).await),
+                dir: Some(text),
+                error: None,
+                cm93,
+                cm93_error,
+            }
+        }
+        Err(error) => EncMapIndexView {
+            dir: Some(text),
+            index: None,
+            error: Some(error.to_string()),
+            cm93: None,
+            cm93_error: None,
+        },
+    }
+}
+
+/// Index cartographique des cellules du dossier ENC (décodées une fois,
+/// puis servies depuis le cache tant que leurs fichiers ne changent pas).
+/// Relit aussi l'index de la base CM93 du dossier, s'il y en a une.
+#[tauri::command]
+pub async fn get_enc_map_index(
+    service: State<'_, AppState>,
+    library: State<'_, EncLibrary>,
+    cm93: State<'_, Cm93Library>,
+) -> CommandResult<EncMapIndexView> {
+    Ok(map_index(stored_dir(&service).await?, &library, &cm93).await)
+}
+
+/// Cellules CM93 à dessiner pour la vue `[ouest, sud, est, nord]`
+/// (vérifiée côté moteur) ; vide sans dossier ou sans base CM93.
+#[tauri::command]
+pub async fn get_cm93_view(
+    service: State<'_, AppState>,
+    cm93: State<'_, Cm93Library>,
+    view: [f64; 4],
+) -> CommandResult<Cm93View> {
+    let Some(dir) = stored_dir(&service).await? else {
+        return Ok(Cm93View::default());
+    };
+    cm93.view(Path::new(&dir), view)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Entités d'une cellule CM93 de l'index (chemin vérifié côté moteur) :
+/// objet JSON `{ features, dataDate, declaredOffsetM }`.
+#[tauri::command]
+pub async fn get_cm93_cell_features(
+    service: State<'_, AppState>,
+    cm93: State<'_, Cm93Library>,
+    path: String,
+) -> CommandResult<Response> {
+    let dir = stored_dir(&service)
+        .await?
+        .ok_or_else(|| "aucun dossier ENC choisi".to_owned())?;
+    let json = cm93
+        .features(Path::new(&dir), &path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(Response::new(json.as_str().to_owned()))
+}
+
+/// Entités GeoJSON d'une cellule (chemin relatif de l'index, vérifié
+/// ici) ; une cellule annulée est refusée.
+#[tauri::command]
+pub async fn get_enc_cell_features(
+    service: State<'_, AppState>,
+    library: State<'_, EncLibrary>,
+    path: String,
+) -> CommandResult<Response> {
+    let dir = stored_dir(&service)
+        .await?
+        .ok_or_else(|| "aucun dossier ENC choisi".to_owned())?;
+    let json = library
+        .features(Path::new(&dir), &path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(Response::new(json.as_str().to_owned()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +332,32 @@ mod tests {
             let error = inspect(text.clone(), refused).await.unwrap_err();
             assert!(error.contains("refusée"), "{error}");
         }
+    }
+    #[tokio::test]
+    async fn map_index_without_folder_or_with_missing_folder() {
+        let library = EncLibrary::new();
+        let cm93 = Cm93Library::new();
+        let view = map_index(None, &library, &cm93).await;
+        assert!(view.dir.is_none() && view.index.is_none() && view.error.is_none());
+        let dir = tempfile::tempdir().expect("dossier temporaire");
+        let gone = dir
+            .path()
+            .join("absent")
+            .to_str()
+            .expect("chemin")
+            .to_owned();
+        let view = map_index(Some(gone), &library, &cm93).await;
+        assert!(view.index.is_none());
+        assert!(view.error.is_some());
+        let text = dir.path().to_str().expect("chemin").to_owned();
+        std::fs::write(dir.path().join("BAD.000"), b"x").expect("cellule");
+        let view = map_index(Some(text), &library, &cm93).await;
+        assert!(view.cm93.is_none() && view.cm93_error.is_none());
+        let index = view.index.expect("index");
+        assert_eq!(index.cells.len(), 1);
+        assert!(index.cells[0].error.is_some());
+        let json = serde_json::to_value(&index).expect("JSON");
+        assert_eq!(json["cells"][0]["name"], "BAD");
+        assert!(json["cells"][0].get("updateError").is_some());
     }
 }

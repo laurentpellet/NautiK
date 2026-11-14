@@ -13,7 +13,10 @@
 //! La base de l'application reste du ressort de `nav-storage`.
 
 pub mod catalog;
+pub mod cm93;
+pub mod cm93_map;
 pub mod enc;
+pub mod enc_map;
 pub mod error;
 pub mod mbtiles;
 pub mod metadata;
@@ -21,7 +24,9 @@ pub mod s57;
 pub mod tile;
 
 pub use catalog::{ChartCatalog, ChartInfo, ChartLoadFailure, TileReply};
-pub use enc::{resolve_cell_path, scan_enc_dir, EncCell, EncInventory};
+pub use cm93_map::{Cm93Library, Cm93View};
+pub use enc::{find_cm93_root, resolve_cell_path, scan_enc_dir, EncCell, EncInventory};
+pub use enc_map::{EncLibrary, EncMapCell, EncMapIndex};
 pub use error::ChartError;
 pub use mbtiles::{MbTiles, Tile};
 pub use metadata::{Bounds, Center, ChartMetadata};

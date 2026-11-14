@@ -35,6 +35,8 @@ const routingDefaults: Record<string, () => Promise<unknown>> = {
   get_alarms: () => Promise.resolve(alarmsSnapshot()),
   list_alarm_events: () => Promise.resolve([]),
   get_enc_folder: () => Promise.resolve({ dir: null, inventory: null, error: null }),
+  get_enc_map_index: () => Promise.resolve({ dir: null, index: null, error: null }),
+  get_cm93_view: () => Promise.resolve({ base: null, cells: [], omitted: 0, truncated: false }),
 };
 
 function alarmsSnapshot(patch: Record<string, unknown> = {}) {
@@ -476,6 +478,7 @@ describe('App', () => {
         catalogs: 1,
         unreadableDirs: 1,
         truncated: true,
+        cm93: 'CM93 2018',
       },
       error: null,
     };
@@ -508,6 +511,9 @@ describe('App', () => {
     // Inventaire incomplet et sous-dossier illisible : signalés.
     expect(panel.textContent).toContain('Inventaire incomplet');
     expect(panel.textContent).toContain('1 sous-dossier illisible');
+    expect(within(panel).getByTestId('enc-cm93').textContent).toContain(
+      'Base CM93 trouvée (CM93 2018)',
+    );
     expect(within(panel).getByTestId('enc-cells').textContent).toContain('2 mises à jour');
 
     await fireEvent.click(within(panel).getByRole('button', { name: 'Retirer' }));
@@ -665,6 +671,67 @@ describe('App', () => {
     expect(panel.textContent).not.toContain('Cellule pas à jour');
   });
 
+  it('dessine les ENC de la vue et signale ce qui n’est pas affiché', async () => {
+    const cell = (name: string, patch: Record<string, unknown> = {}) => ({
+      path: `${name}.000`,
+      name,
+      usage: 5,
+      scale: 12000,
+      bounds: [-149.7, -17.7, -149.5, -17.5],
+      updatesApplied: 0,
+      updatesPending: 0,
+      updateError: null,
+      cancelled: null,
+      error: null,
+      ...patch,
+    });
+    const requested: unknown[] = [];
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        get_enc_map_index: () =>
+          Promise.resolve({
+            dir: 'D:\\ENC_ROOT',
+            index: {
+              cells: [
+                cell('FR1', { updateError: 'mise à jour 3 manquante' }),
+                cell('FR2', { cancelled: '20221230' }),
+                cell('LOIN', { bounds: [2, 48, 3, 49] }),
+              ],
+              truncated: false,
+            },
+            error: null,
+          }),
+        get_enc_cell_features: (args) => {
+          requested.push(args?.path);
+          return Promise.resolve([
+            {
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: [-149.6, -17.6] },
+              properties: { cat: 'danger', class: 'UWTROC', usage: 5, cell: 'FR1', depth: 1.2 },
+            },
+          ]);
+        },
+      }),
+      listen: fakeListen().listen,
+    });
+    const warnings = await screen.findByTestId('enc-warnings');
+    expect(warnings.getAttribute('role')).toBe('status');
+    expect(warnings.textContent).toContain('ENC pas à jour : FR1');
+    expect(warnings.textContent).toContain('ENC annulée, non affichée : FR2');
+    expect(screen.getByTestId('enc-stub').textContent).toBe('1 entités ENC');
+    // Seule la cellule de la vue est décodée ; jamais la cellule annulée.
+    expect(requested).toEqual(['FR1.000']);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
+    await fireEvent.click(screen.getByRole('checkbox', { name: /Cartes ENC/ }));
+    await vi.waitFor(() => expect(screen.queryByTestId('enc-warnings')).toBeNull());
+    expect(screen.getByTestId('enc-stub').textContent).toBe('0 entités ENC');
+    expect(screen.getByTestId('hidden-layers').textContent).toContain('Cartes ENC (S-57)');
+    localStorage.removeItem('nautik.layers');
+  });
+
   it('change le dossier des cartes depuis les Paramètres', async () => {
     const chosen = {
       ...emptyCatalog,
@@ -762,6 +829,7 @@ describe('App', () => {
       'Routes',
       'Traces',
       'Cibles',
+      'Cartes',
     ]);
     expect(document.querySelector('[data-testid="layers-menu"] hr')).toBeTruthy();
 
@@ -815,7 +883,7 @@ describe('App', () => {
       });
       await screen.findByTestId('chart-view-stub');
       await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
-      expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+      expect(screen.getAllByRole('checkbox')).toHaveLength(4);
       expect(document.querySelector('[data-testid="layers-menu"] hr')).toBeNull();
       // Carte seule toujours affichée, même masquée auparavant.
       expect(screen.getByTestId('hidden-charts-stub').textContent).toBe('');

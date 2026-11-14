@@ -1,8 +1,8 @@
 <script lang="ts">
   // Paramètres → Cartes : dossier des cartes ENC S-57 (choisi par le
   // dialogue du système côté moteur) et inventaire de ses cellules. Un
-  // dossier disparu est signalé, jamais oublié en silence. L'affichage
-  // des ENC sur la carte viendra dans une étape suivante.
+  // dossier disparu est signalé, jamais oublié en silence. Un changement
+  // de dossier est signalé (`onchange`) pour redessiner les ENC de la carte.
   import {
     formatIssueDate,
     usageLabel,
@@ -14,9 +14,11 @@
 
   interface Props {
     api: EncApi;
+    /** Dossier choisi, relu ou retiré par l'utilisateur. */
+    onchange?: () => void;
   }
 
-  let { api }: Props = $props();
+  let { api, onchange }: Props = $props();
 
   let folder = $state<EncFolder | null>(null);
   let busy = $state(false);
@@ -27,13 +29,14 @@
 
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-  async function run(action: () => Promise<EncFolder | null>): Promise<void> {
+  async function run(action: () => Promise<EncFolder | null>, notify = true): Promise<void> {
     busy = true;
     try {
       const updated = await action();
       if (updated) {
         folder = updated;
         reading = null;
+        if (notify) onchange?.();
       }
       error = null;
     } catch (e) {
@@ -44,7 +47,7 @@
   }
 
   $effect(() => {
-    void run(() => api.get());
+    void run(() => api.get(), false);
   });
 
   /** Cellule lue (décodée par le moteur) et son résumé. */
@@ -104,6 +107,12 @@
           ? 'Catalogue CATALOG.031 présent.'
           : 'Pas de catalogue CATALOG.031.'}
       </p>
+      {#if inventory.cm93}
+        <p class="warn" data-testid="enc-cm93">
+          Base CM93 trouvée{inventory.cm93 === '.' ? '' : ` (${inventory.cm93})`} : affichée sous les
+          ENC officielles. Cartes non officielles et anciennes, à recouper.
+        </p>
+      {/if}
       {#if inventory.truncated}
         <p class="warn" role="status">
           Inventaire incomplet : dossier trop vaste ou trop profond. Choisissez le dossier ENC_ROOT.

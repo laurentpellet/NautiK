@@ -19,10 +19,11 @@
 //! manquante ou refusée est signalée ([`S57Cell::update_error`]).
 
 pub mod catalogue;
+pub mod display;
 mod geometry;
 mod iso8211;
 #[cfg(test)]
-mod testdata;
+pub(crate) mod testdata;
 mod update;
 
 use std::collections::btree_map::Entry as BTreeEntry;
@@ -965,7 +966,7 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, S57Error> {
 
 /// Fichiers de mise à jour d'une cellule (`NOM.001`… dans le même
 /// dossier, casse ignorée), triés par numéro.
-fn update_files(base: &Path) -> Result<Vec<(u32, PathBuf)>, S57Error> {
+pub(crate) fn update_files(base: &Path) -> Result<Vec<(u32, PathBuf)>, S57Error> {
     let Some(stem) = base.file_stem().and_then(|s| s.to_str()) else {
         return Ok(Vec::new());
     };

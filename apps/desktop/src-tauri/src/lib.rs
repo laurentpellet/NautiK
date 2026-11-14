@@ -102,6 +102,8 @@ pub fn run() -> anyhow::Result<()> {
                 .app_data_dir()
                 .context("répertoire de données de l'application")?;
             app.manage(weather::WeatherStore::new(data_dir.join("weather")));
+            app.manage(nav_charts::EncLibrary::new());
+            app.manage(nav_charts::Cm93Library::new());
 
             let db = open_database(app)?;
             // Dossier de cartes choisi dans les Paramètres ; un réglage
@@ -151,6 +153,10 @@ pub fn run() -> anyhow::Result<()> {
             enc::choose_enc_dir,
             enc::clear_enc_dir,
             enc::inspect_enc_cell,
+            enc::get_enc_map_index,
+            enc::get_enc_cell_features,
+            enc::get_cm93_view,
+            enc::get_cm93_cell_features,
             routing::list_routes,
             routing::create_route,
             routing::reverse_route,

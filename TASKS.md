@@ -512,8 +512,66 @@ Critères (TEST_PLAN.md §7) :
       US4MA23M annulée le 09/10/2024.
     - Application : résumé avec mises à jour appliquées et date de la
       dernière, cellule pas à jour ou annulée signalée.
-  - [ ] Affichage sur la carte, symbologie S-52 simplifiée (profondeurs,
-    dangers).
+  - [x] Affichage sur la carte, symbologie S-52 simplifiée (profondeurs,
+    dangers) :
+    - moteur (`nav_charts::s57::display`) : catégories d'affichage
+      (terre, zones de profondeur, zones non hydrographiées, isobathes,
+      trait de côte, sondes, dangers, feux, bouées, balises) et entités
+      GeoJSON WGS 84, une par sonde, étiquette de sonde calculée ; rien
+      pour une cellule annulée ;
+    - `nav_charts::EncLibrary` : index des cellules (emprise, usage,
+      mises à jour) gardé tant que les fichiers ne changent pas, entités
+      des cellules en cache (32 au plus) ; commandes
+      `get_enc_map_index` et `get_enc_cell_features` (chemin relatif
+      vérifié, cellule annulée refusée) ;
+    - interface : cellules de la vue choisies (16 au plus, les plus
+      détaillées par-dessus), couches MapLibre jour et nuit au-dessus
+      des cartes raster et sous routes, traces et AIS ; zones de
+      profondeur colorées selon les isobathes 2, 10 et 30 m ; sondes
+      en images (pas de polices hors ligne), en gras sous 10 m, à
+      partir du zoom 12 ; dangers marqués sous 10 m ou de profondeur
+      inconnue ;
+    - calque « Cartes ENC (S-57) » dans le menu Calques ; avertissement
+      permanent sur la carte : cellule pas à jour, annulée, illisible,
+      index incomplet, cellules non affichées faute de place ;
+    - tests : catégories et étiquettes, cache et signatures, parseurs
+      (données malformées, positions hors limites, catégorie inconnue),
+      choix des cellules (antiméridien), contrôleur et avertissements ;
+    - vérifié sur NOAA US5MA1AM (7 mises à jour) : 1 999 entités, jour
+      et nuit.
+  - [x] Base C-MAP CM93 v2 (cartes non officielles), lecture et
+    affichage (`nav_charts::cm93`) :
+    - table de substitution des octets reprise d'OpenCPN (GPL-2.0 ou
+      ultérieure, provenance notée dans `cm93/table.rs`), lecteur
+      propre : prologue et longueurs contrôlés, en-tête, vecteurs,
+      points 2D/3D, objets (points, lignes, surfaces, sondes) et
+      attributs typés par `CM93ATTR.DIC` ; classes par `CM93OBJ.DIC` ;
+    - coordonnées Mercator sphérique (R = 6 378 388 m) → WGS 84 ;
+      décalage WGS 84 déclaré non appliqué (comme OpenCPN) mais signalé ;
+      objet incohérent écarté et compté, cellule incohérente refusée ;
+    - inventaire `LLLLGGGG/<échelle>/fichiers` (8 échelles Z à G, 100 000
+      cellules au plus), choix des cellules de la vue de la moins à la
+      plus détaillée selon l'étendue (16 au plus, cellules omises
+      comptées) ; contours des surfaces orientés par imbrication (sens
+      du fichier non fiable) ; ITDARE dessinée comme zone découvrante ;
+    - base détectée dans le dossier ENC (le dossier lui-même, un
+      sous-dossier ou un sous-sous-dossier) sans la parcourir comme des
+      ENC ; commandes `get_cm93_view` et `get_cm93_cell_features`
+      (chemin vérifié contre l'index, décodage hors du runtime, cache de
+      48 cellules) ;
+    - interface : CM93 dessinée sous les ENC officielles avec la même
+      symbologie ; avertissements permanents : carte non officielle et
+      date des données, décalage déclaré non corrigé, cellules omises
+      (« zoomez ») ou illisibles, base illisible ;
+    - tests : dictionnaires, cellule fabriquée par un encodeur de test,
+      chaque troncature, octets corrompus, attributs, coordonnées,
+      noms et échelles, antiméridien, parcours, vues, parseurs et
+      contrôleur ;
+    - vérifié sur la base « CM93 2018 » (cartes 2014) : 22 205 cellules
+      indexées en 110 ms, 19,6 millions d'objets décodés (1 écarté),
+      3 cellules incohérentes refusées ; Papeete (`02170631.F`, 2 417
+      objets) affichée jour et nuit. Outil :
+      `cargo run --release -p nav-charts --example cm93_summary -- BASE`.
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).
