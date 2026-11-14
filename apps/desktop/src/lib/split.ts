@@ -3,6 +3,7 @@
  * suivent la même vue (centre, zoom, orientation) : le volet que
  * l'utilisateur manipule mène, l'autre suit.
  */
+import type { VectorCharts } from './layers';
 
 export type Pane = 'left' | 'right';
 
@@ -18,6 +19,8 @@ export interface SplitState {
   locked: boolean;
   /** Cartes masquées dans le volet de droite. */
   hiddenCharts: string[];
+  /** Cartes vectorielles du volet de droite (choix propre à ce volet). */
+  vector: VectorCharts;
 }
 
 /** Nombre maximal d'identifiants de cartes mémorisés. */
@@ -25,7 +28,7 @@ const MAX_HIDDEN = 256;
 const STORAGE_KEY = 'nautik.split';
 
 export function defaultSplit(): SplitState {
-  return { enabled: false, locked: true, hiddenCharts: [] };
+  return { enabled: false, locked: true, hiddenCharts: [], vector: { enc: true, cm93: true } };
 }
 
 export function loadSplit(
@@ -44,6 +47,11 @@ export function loadSplit(
       state.hiddenCharts = r.hiddenCharts
         .filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 256)
         .slice(0, MAX_HIDDEN);
+    }
+    if (typeof r.vector === 'object' && r.vector !== null) {
+      const v = r.vector as Record<string, unknown>;
+      if (typeof v.enc === 'boolean') state.vector.enc = v.enc;
+      if (typeof v.cm93 === 'boolean') state.vector.cm93 = v.cm93;
     }
     return state;
   } catch {

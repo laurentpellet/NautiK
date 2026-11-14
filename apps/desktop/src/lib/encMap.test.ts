@@ -106,7 +106,7 @@ describe('contrôleur des ENC', () => {
     const enc = new EncMapController(api);
     await enc.show(view);
     expect(enc.displayed.map((c) => c.name)).toEqual(['A']);
-    expect(enc.data.features).toHaveLength(1);
+    expect(enc.s57Data.features).toHaveLength(1);
     expect(enc.warnings).toEqual([]);
     await enc.show(view);
     expect(calls).toEqual(['A.000']);
@@ -131,12 +131,12 @@ describe('contrôleur des ENC', () => {
     const enc = new EncMapController(api);
     await enc.show(view);
     enc.hide();
-    expect(enc.data.features).toEqual([]);
+    expect(enc.s57Data.features).toEqual([]);
     expect(enc.displayed).toEqual([]);
 
     const down = new EncMapController(new EncApi(() => Promise.reject(new Error('moteur arrêté'))));
     await down.show(view);
-    expect(down.data.features).toEqual([]);
+    expect(down.s57Data.features).toEqual([]);
     expect(down.warnings).toEqual(['Cartes ENC indisponibles : moteur arrêté']);
   });
 
@@ -146,7 +146,7 @@ describe('contrôleur des ENC', () => {
     const first = enc.show(view);
     enc.hide();
     await first;
-    expect(enc.data.features).toEqual([]);
+    expect(enc.s57Data.features).toEqual([]);
   });
 });
 
@@ -248,7 +248,7 @@ describe('contrôleur CM93', () => {
     const { api, calls } = cm93Api([cm93Cell('A.F')]);
     const enc = new EncMapController(api);
     await enc.show(view);
-    const cells = enc.data.features.map((f) => f.properties.cell);
+    const cells = enc.layer({ enc: true, cm93: true }).features.map((f) => f.properties.cell);
     expect(cells).toEqual(['02100600/F/A.F', '02100600/F/A.F', 'S57']);
     expect(enc.displayed.map((c) => c.name)).toEqual(['S57']);
     expect(enc.warnings).toEqual([
@@ -263,7 +263,8 @@ describe('contrôleur CM93', () => {
     const { api } = cm93Api([cm93Cell('A.F'), cm93Cell('KO.F')], ['02100600/F/KO.F']);
     const enc = new EncMapController(api);
     await enc.show(view);
-    expect(enc.data.features).toHaveLength(3);
+    expect(enc.cm93Data.features).toHaveLength(2);
+    expect(enc.s57Data.features).toHaveLength(1);
     expect(enc.warnings).toContain('CM93 illisible : KO.F');
   });
 
@@ -272,5 +273,34 @@ describe('contrôleur CM93', () => {
     const enc = new EncMapController(api);
     await enc.show(view);
     expect(calls).toEqual(['A.000']);
+  });
+
+  it('compose la couche de chaque volet selon ses cartes', async () => {
+    const { api } = cm93Api([cm93Cell('A.F')]);
+    const enc = new EncMapController(api);
+    await enc.show(view);
+    const cellsOf = (enc93: { enc: boolean; cm93: boolean }) =>
+      enc.layer(enc93).features.map((f) => f.properties.cell);
+    expect(cellsOf({ enc: true, cm93: false })).toEqual(['S57']);
+    expect(cellsOf({ enc: false, cm93: true })).toEqual(['02100600/F/A.F', '02100600/F/A.F']);
+    expect(cellsOf({ enc: false, cm93: false })).toEqual([]);
+  });
+
+  it('ne charge ni ne signale les cartes voulues dans aucun volet', async () => {
+    const { api, calls } = cm93Api([cm93Cell('A.F')]);
+    const enc = new EncMapController(api);
+    await enc.show(view, { enc: true, cm93: false });
+    expect(calls).toEqual(['S57.000']);
+    expect(enc.cm93Data.features).toEqual([]);
+    expect(enc.warnings).toEqual([]);
+
+    const only93 = cm93Api([cm93Cell('A.F')]);
+    const enc93 = new EncMapController(only93.api);
+    await enc93.show(view, { enc: false, cm93: true });
+    expect(only93.calls).toEqual(['vue', '02100600/F/A.F']);
+    expect(enc93.s57Data.features).toEqual([]);
+    expect(enc93.displayed).toEqual([]);
+    expect(enc93.warnings).toHaveLength(1);
+    expect(enc93.warnings[0]).toContain('CM93 non officielles');
   });
 });

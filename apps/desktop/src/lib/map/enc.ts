@@ -32,9 +32,9 @@ export const SOUNDING_IMAGE_PREFIX = 'enc-snd-';
 /** Zoom à partir duquel les sondes sont dessinées. */
 export const SOUNDING_MIN_ZOOM = 12;
 
-type Collection = FeatureCollection<EncFeature['geometry'], EncFeature['properties']>;
+export type EncCollection = FeatureCollection<EncFeature['geometry'], EncFeature['properties']>;
 
-export function emptyEncCollection(): Collection {
+export function emptyEncCollection(): EncCollection {
   return { type: 'FeatureCollection', features: [] };
 }
 
@@ -71,7 +71,7 @@ export function cellsForView(
 export function encCollection(
   cells: EncMapCell[],
   features: Map<string, EncFeature[]>,
-): Collection {
+): EncCollection {
   return {
     type: 'FeatureCollection',
     features: cells.flatMap((c) => features.get(c.path) ?? []),

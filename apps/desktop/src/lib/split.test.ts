@@ -17,7 +17,12 @@ const cam = (lon: number, lat: number, zoom = 10, bearing = 0): MapCamera => ({
 
 describe('carte partagée', () => {
   it('démarre désactivée et verrouillée, et tolère un stockage invalide', () => {
-    expect(defaultSplit()).toEqual({ enabled: false, locked: true, hiddenCharts: [] });
+    expect(defaultSplit()).toEqual({
+      enabled: false,
+      locked: true,
+      hiddenCharts: [],
+      vector: { enc: true, cm93: true },
+    });
     expect(loadSplit(store(null))).toEqual(defaultSplit());
     expect(loadSplit(store('{oups'))).toEqual(defaultSplit());
     expect(loadSplit(store('42'))).toEqual(defaultSplit());
@@ -37,17 +42,29 @@ describe('carte partagée', () => {
           enabled: true,
           locked: 'oui',
           hiddenCharts: ['tahiti', 3, '', 'x'.repeat(300), 'monde'],
+          vector: { enc: 'non', cm93: false },
         }),
       ),
     );
-    expect(state).toEqual({ enabled: true, locked: true, hiddenCharts: ['tahiti', 'monde'] });
+    expect(state).toEqual({
+      enabled: true,
+      locked: true,
+      hiddenCharts: ['tahiti', 'monde'],
+      vector: { enc: true, cm93: false },
+    });
+    expect(loadSplit(store('{"vector":3}')).vector).toEqual({ enc: true, cm93: true });
     const many = loadSplit(store(JSON.stringify({ hiddenCharts: Array(1000).fill('c') })));
     expect(many.hiddenCharts).toHaveLength(256);
   });
 
   it('mémorise le choix et tolère un stockage plein', () => {
     let saved = '';
-    const state = { enabled: true, locked: false, hiddenCharts: ['tahiti'] };
+    const state = {
+      enabled: true,
+      locked: false,
+      hiddenCharts: ['tahiti'],
+      vector: { enc: false, cm93: true },
+    };
     saveSplit(state, { setItem: (_k: string, v: string) => (saved = v) });
     expect(loadSplit(store(saved))).toEqual(state);
     expect(() =>

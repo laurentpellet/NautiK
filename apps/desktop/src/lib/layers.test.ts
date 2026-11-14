@@ -9,6 +9,8 @@ import {
   saveHiddenCharts,
   saveLayers,
   toggleChart,
+  vectorKeys,
+  vectorLabel,
 } from './layers';
 
 const store = (value: string | null) => ({ getItem: () => value });
@@ -33,16 +35,29 @@ describe('calques', () => {
       tracks: true,
       ais: false,
       enc: true,
+      cm93: true,
     });
     expect(loadLayers(store('{"enc":false}')).enc).toBe(false);
+    expect(loadLayers(store('{"cm93":false}')).cm93).toBe(false);
   });
 
   it('mémorise et liste les calques masqués', () => {
     let saved = '';
-    const layers = { routes: true, tracks: false, ais: false, enc: false };
+    const layers = { routes: true, tracks: false, ais: false, enc: false, cm93: false };
     saveLayers(layers, { setItem: (_k, v) => (saved = v) });
     expect(JSON.parse(saved)).toEqual(layers);
     expect(hiddenLayers(layers)).toEqual(['Traces', 'Cibles AIS', 'Cartes ENC (S-57)']);
+    // CM93 rappelée seulement si une base est trouvée.
+    expect(hiddenLayers(layers, true)).toContain('Cartes CM93');
+  });
+
+  it('propose et résume les cartes vectorielles', () => {
+    expect(vectorKeys(false)).toEqual(['enc']);
+    expect(vectorKeys(true)).toEqual(['enc', 'cm93']);
+    expect(vectorLabel({ enc: true, cm93: true }, true)).toEqual(['ENC', 'CM93']);
+    expect(vectorLabel({ enc: true, cm93: true }, false)).toEqual(['ENC']);
+    expect(vectorLabel({ enc: false, cm93: true }, true)).toEqual(['CM93']);
+    expect(vectorLabel({ enc: false, cm93: false }, true)).toEqual([]);
   });
 });
 

@@ -6,16 +6,47 @@ export interface MapLayers {
   ais: boolean;
   /** Cartes ENC S-57 du dossier choisi. */
   enc: boolean;
+  /** Cartes CM93 de la base trouvée dans le dossier ENC. */
+  cm93: boolean;
 }
 
-export const DEFAULT_LAYERS: MapLayers = { routes: true, tracks: true, ais: true, enc: true };
+export const DEFAULT_LAYERS: MapLayers = {
+  routes: true,
+  tracks: true,
+  ais: true,
+  enc: true,
+  cm93: true,
+};
 
 export const LAYER_LABELS: Record<keyof MapLayers, string> = {
   routes: 'Routes et waypoints',
   tracks: 'Traces',
   ais: 'Cibles AIS',
   enc: 'Cartes ENC (S-57)',
+  cm93: 'Cartes CM93',
 };
+
+/** Cartes vectorielles d'un volet : ENC officielles et base CM93. */
+export type VectorCharts = Pick<MapLayers, 'enc' | 'cm93'>;
+
+/** Calques des cartes vectorielles (groupe « Cartes » du menu). */
+export const VECTOR_KEYS = ['enc', 'cm93'] as const;
+
+/** Calques d'objets (routes, traces, AIS). */
+export const OBJECT_KEYS = ['routes', 'tracks', 'ais'] as const;
+
+/** Cartes vectorielles proposées : ENC toujours, CM93 si une base est trouvée. */
+export function vectorKeys(cm93Available: boolean): (keyof VectorCharts)[] {
+  return cm93Available ? [...VECTOR_KEYS] : ['enc'];
+}
+
+/** Libellé court des cartes vectorielles affichées (« ENC, CM93 »). */
+export function vectorLabel(charts: VectorCharts, cm93Available: boolean): string[] {
+  const names: string[] = [];
+  if (charts.enc) names.push('ENC');
+  if (cm93Available && charts.cm93) names.push('CM93');
+  return names;
+}
 
 const STORAGE_KEY = 'nautik.layers';
 
@@ -36,6 +67,7 @@ export function loadLayers(
       tracks: flag('tracks'),
       ais: flag('ais'),
       enc: flag('enc'),
+      cm93: flag('cm93'),
     };
   } catch {
     return { ...DEFAULT_LAYERS };
@@ -53,10 +85,13 @@ export function saveLayers(
   }
 }
 
-/** Calques masqués, pour le rappel affiché sur la carte. */
-export function hiddenLayers(layers: MapLayers): string[] {
+/**
+ * Calques masqués, pour le rappel affiché sur la carte (CM93 seulement
+ * si une base est trouvée).
+ */
+export function hiddenLayers(layers: MapLayers, cm93Available = false): string[] {
   return (Object.keys(LAYER_LABELS) as (keyof MapLayers)[])
-    .filter((k) => !layers[k])
+    .filter((k) => !layers[k] && (k !== 'cm93' || cm93Available))
     .map((k) => LAYER_LABELS[k]);
 }
 

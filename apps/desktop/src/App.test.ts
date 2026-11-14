@@ -732,6 +732,91 @@ describe('App', () => {
     localStorage.removeItem('nautik.layers');
   });
 
+  it('choisit ENC et CM93 séparément dans chaque volet', async () => {
+    const cell = (path: string, usage: number) => ({
+      path,
+      name: path.split('/').pop(),
+      usage,
+      scale: 20000,
+      bounds: [-149.7, -17.7, -149.5, -17.5],
+      updatesApplied: 0,
+      updatesPending: 0,
+      updateError: null,
+      cancelled: null,
+      error: null,
+    });
+    const feature = (name: string) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [-149.6, -17.6] },
+      properties: { cat: 'danger', class: 'UWTROC', usage: 5, cell: name, depth: 1.2 },
+    });
+    localStorage.setItem('nautik.split', JSON.stringify({ enabled: true, locked: true }));
+    try {
+      render(App, {
+        invoke: fakeIpc({
+          get_engine_info: () => Promise.resolve(engine),
+          get_chart_catalog: () => Promise.resolve(emptyCatalog),
+          get_enc_map_index: () =>
+            Promise.resolve({
+              dir: 'D:\\Charts',
+              index: { cells: [cell('FR1.000', 5)], truncated: false },
+              error: null,
+              cm93: 'CM93',
+              cm93Error: null,
+            }),
+          get_enc_cell_features: () => Promise.resolve([feature('FR1')]),
+          get_cm93_view: () =>
+            Promise.resolve({
+              base: 'CM93',
+              cells: [cell('02100600/F/02170631.F', 7)],
+              omitted: 0,
+              truncated: false,
+            }),
+          get_cm93_cell_features: () =>
+            Promise.resolve({
+              features: [feature('CM'), feature('CM')],
+              dataDate: '20140602',
+              declaredOffsetM: 0,
+            }),
+        }),
+        listen: fakeListen().listen,
+      });
+      const counts = () => screen.getAllByTestId('enc-stub').map((e) => e.textContent);
+      await vi.waitFor(() => expect(counts()).toEqual(['3 entités ENC', '3 entités ENC']));
+
+      // Volet de droite : CM93 seule, puis aucune carte vectorielle.
+      const pane = screen.getByTestId('split-pane');
+      const menu = within(pane).getByRole('button', { name: 'Cartes du volet droit' });
+      expect(menu.textContent).toContain('Droite : ENC, CM93');
+      await fireEvent.click(menu);
+      await fireEvent.click(within(pane).getByRole('checkbox', { name: /Cartes ENC/ }));
+      expect(counts()).toEqual(['3 entités ENC', '2 entités ENC']);
+      expect(menu.textContent).toContain('Droite : CM93');
+      expect(menu.classList.contains('marked')).toBe(true);
+      await fireEvent.click(within(pane).getByRole('checkbox', { name: 'Cartes CM93' }));
+      expect(counts()).toEqual(['3 entités ENC', '0 entités ENC']);
+      expect(menu.textContent).toContain('Droite : aucune carte');
+      expect(JSON.parse(localStorage.getItem('nautik.split') ?? '{}').vector).toEqual({
+        enc: false,
+        cm93: false,
+      });
+
+      // Volet de gauche : ENC seules ; la CM93 masquée est rappelée.
+      await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
+      const layersMenu = screen.getByTestId('layers-menu');
+      await fireEvent.click(within(layersMenu).getByRole('checkbox', { name: 'Cartes CM93' }));
+      await vi.waitFor(() => expect(counts()).toEqual(['1 entités ENC', '0 entités ENC']));
+      expect(screen.getByTestId('hidden-layers').textContent).toContain('Cartes CM93');
+      // Plus de CM93 nulle part : ses avertissements disparaissent.
+      await vi.waitFor(() =>
+        expect(screen.queryByTestId('enc-warnings')?.textContent ?? '').not.toContain('CM93'),
+      );
+    } finally {
+      localStorage.removeItem('nautik.split');
+      localStorage.removeItem('nautik.layers');
+    }
+  });
+
   it('change le dossier des cartes depuis les Paramètres', async () => {
     const chosen = {
       ...emptyCatalog,
@@ -826,10 +911,10 @@ describe('App', () => {
     expect(boxes.map((b) => b.closest('label')?.textContent?.trim().split(/\s+/)[0])).toEqual([
       'Tahiti',
       'Monde',
+      'Cartes',
       'Routes',
       'Traces',
       'Cibles',
-      'Cartes',
     ]);
     expect(document.querySelector('[data-testid="layers-menu"] hr')).toBeTruthy();
 
@@ -884,7 +969,10 @@ describe('App', () => {
       await screen.findByTestId('chart-view-stub');
       await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
       expect(screen.getAllByRole('checkbox')).toHaveLength(4);
-      expect(document.querySelector('[data-testid="layers-menu"] hr')).toBeNull();
+      // Pas de choix de carte MBTiles : seulement les ENC, puis les objets.
+      expect(screen.getAllByRole('checkbox')[0]?.closest('label')?.textContent).toContain(
+        'Cartes ENC',
+      );
       // Carte seule toujours affichée, même masquée auparavant.
       expect(screen.getByTestId('hidden-charts-stub').textContent).toBe('');
       expect(screen.queryByTestId('hidden-layers')).toBeNull();
@@ -1295,6 +1383,7 @@ describe('App', () => {
         enabled: true,
         locked: false,
         hiddenCharts: ['tahiti'],
+        vector: { enc: true, cm93: true },
       });
 
       // Retour à une seule carte.

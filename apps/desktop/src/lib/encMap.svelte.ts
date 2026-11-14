@@ -17,7 +17,9 @@ import {
   emptyEncCollection,
   encCollection,
   MAX_DISPLAYED_CELLS,
+  type EncCollection,
 } from './map/enc';
+import type { VectorCharts } from './layers';
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -99,8 +101,10 @@ export function cm93Warnings(index: EncMapIndex | null, state: Cm93ViewState): s
 
 export class EncMapController {
   index = $state<EncMapIndex | null>(null);
-  /** Données de la couche ENC. */
-  data = $state.raw(emptyEncCollection());
+  /** Entités des ENC officielles (S-57) de la vue. */
+  s57Data = $state.raw(emptyEncCollection());
+  /** Entités de la base CM93 de la vue. */
+  cm93Data = $state.raw(emptyEncCollection());
   /** Cellules dessinées, de la moins à la plus détaillée. */
   displayed = $state.raw<EncMapCell[]>([]);
   warnings = $state<string[]>([]);
@@ -123,13 +127,30 @@ export class EncMapController {
     this.cache.clear();
   }
 
-  /** Affiche les cellules de la vue (chargées si nécessaire). */
-  async show(view: Bounds | null): Promise<void> {
+  /**
+   * Couche d'un volet : CM93 sous les ENC officielles, selon les cartes
+   * choisies pour ce volet.
+   */
+  layer(charts: VectorCharts): EncCollection {
+    if (charts.enc && !charts.cm93) return this.s57Data;
+    if (charts.cm93 && !charts.enc) return this.cm93Data;
+    if (!charts.enc) return emptyEncCollection();
+    return {
+      type: 'FeatureCollection',
+      features: [...this.cm93Data.features, ...this.s57Data.features],
+    };
+  }
+
+  /**
+   * Charge et prépare les cellules de la vue. `charts` : cartes voulues
+   * dans au moins un volet ; les autres ne sont ni chargées ni signalées.
+   */
+  async show(view: Bounds | null, charts: VectorCharts = { enc: true, cm93: true }): Promise<void> {
     const generation = ++this.generation;
     if (!this.index) await this.refresh();
     if (generation !== this.generation) return;
     const index = this.index;
-    const wanted = index ? cellsForView(index.cells, view) : [];
+    const wanted = index && charts.enc ? cellsForView(index.cells, view) : [];
     for (const cell of wanted) {
       if (this.cache.known(cell.path)) continue;
       try {
@@ -140,17 +161,17 @@ export class EncMapController {
       }
       if (generation !== this.generation) return;
     }
-    const cm93 = await this.loadCm93(index, view, generation);
+    const cm93 = await this.loadCm93(charts.cm93 ? index : null, view, generation);
     if (cm93 === null) return;
     this.cache.evict([...wanted, ...cm93.keyed], MAX_LOADED_CELLS);
     this.displayed = wanted.filter((c) => this.cache.features.has(c.path));
-    // CM93 dessinée sous les ENC officielles.
-    this.data = encCollection([...cm93.keyed, ...this.displayed], this.cache.features);
+    this.s57Data = encCollection(this.displayed, this.cache.features);
+    this.cm93Data = encCollection(cm93.keyed, this.cache.features);
     this.warnings = this.error
       ? [`Cartes ENC indisponibles : ${this.error}`]
       : [
-          ...encWarnings(index, view, this.displayed, this.cache.failed),
-          ...cm93Warnings(index, cm93.state),
+          ...(charts.enc ? encWarnings(index, view, this.displayed, this.cache.failed) : []),
+          ...(charts.cm93 ? cm93Warnings(index, cm93.state) : []),
         ];
   }
 
@@ -203,7 +224,8 @@ export class EncMapController {
   hide(): void {
     this.generation++;
     this.displayed = [];
-    this.data = emptyEncCollection();
+    this.s57Data = emptyEncCollection();
+    this.cm93Data = emptyEncCollection();
     this.warnings = [];
   }
 }

@@ -42,7 +42,9 @@
     loadLayers,
     saveHiddenCharts,
     saveLayers,
+    vectorLabel,
     type MapLayers,
+    type VectorCharts,
   } from './lib/layers';
   import { statusPills } from './lib/shell';
   import { applyFullscreen, currentWindow, fullscreenShortcut } from './lib/fullscreen';
@@ -118,11 +120,6 @@
   // Une carte seule est toujours affichée : rien à choisir, et aucune
   // carte ne doit rester masquée sans moyen de la réafficher.
   const shownHiddenCharts = $derived((catalog?.charts.length ?? 0) > 1 ? hiddenCharts : []);
-  /** Cartes et calques masqués, rappelés sur la carte. */
-  const hiddenOnMap = $derived([
-    ...hiddenChartNames(catalog?.charts ?? [], shownHiddenCharts),
-    ...hiddenLayers(layers),
-  ]);
   let ais = $state.raw<AisSnapshot | null>(null);
   let aisError = $state<string | null>(null);
   let selectedTarget = $state<string | null>(null);
@@ -161,11 +158,9 @@
   const rightHiddenCharts = $derived((catalog?.charts.length ?? 0) > 1 ? split.hiddenCharts : []);
   const rightChartsLabel = $derived.by(() => {
     const shown = (catalog?.charts ?? []).filter((c) => !rightHiddenCharts.includes(c.id));
-    if (shown.length === 0) return 'aucune carte';
-    return [...shown]
-      .reverse()
-      .map((c) => c.name)
-      .join(', ');
+    const names = [...shown].reverse().map((c) => c.name);
+    if (encFolderSet) names.unshift(...vectorLabel(rightVector, cm93Available));
+    return names.length === 0 ? 'aucune carte' : names.join(', ');
   });
 
   function setSplit(next: SplitState): void {
@@ -230,20 +225,41 @@
   /** Cartes ENC de la vue (cellules décodées par le moteur). */
   const encMap = new EncMapController(encApi);
 
+  /** Une base CM93 est trouvée dans le dossier ENC : son choix est proposé. */
+  const cm93Available = $derived(Boolean(encMap.index?.cm93));
+  /** Un dossier ENC est choisi : le choix ENC/CM93 a un sens. */
+  const encFolderSet = $derived(Boolean(encMap.index?.dir));
+  /** Cartes vectorielles de chaque volet (ENC officielles, CM93). */
+  const leftVector = $derived<VectorCharts>({ enc: layers.enc, cm93: layers.cm93 });
+  const rightVector = $derived<VectorCharts>(split.vector);
+  /** Cartes vectorielles voulues dans au moins un volet affiché. */
+  const wantedVector = $derived<VectorCharts>({
+    enc: leftVector.enc || (split.enabled && rightVector.enc),
+    cm93: leftVector.cm93 || (split.enabled && rightVector.cm93),
+  });
+  const leftEnc = $derived(encMap.layer(leftVector));
+  const rightEnc = $derived(encMap.layer(rightVector));
+  /** Cartes et calques masqués, rappelés sur la carte. */
+  const hiddenOnMap = $derived([
+    ...hiddenChartNames(catalog?.charts ?? [], shownHiddenCharts),
+    ...hiddenLayers(layers, cm93Available),
+  ]);
+
   // ENC de la zone affichée, après un court délai (déplacements rapides).
   $effect(() => {
     const view = mapView;
-    if (!layers.enc) {
+    const wanted = wantedVector;
+    if (!wanted.enc && !wanted.cm93) {
       encMap.hide();
       return;
     }
-    const timer = setTimeout(() => void encMap.show(view), 200);
+    const timer = setTimeout(() => void encMap.show(view, wanted), 200);
     return () => clearTimeout(timer);
   });
 
   async function reloadEnc(): Promise<void> {
     await encMap.refresh();
-    if (layers.enc) await encMap.show(mapView);
+    if (wantedVector.enc || wantedVector.cm93) await encMap.show(mapView, wantedVector);
   }
   const weatherApi = new WeatherApi((command, args) => invokeFn(command, args));
   const alarmsApi = new AlarmsApi((command, args) => invokeFn(command, args));
@@ -555,7 +571,7 @@
                 onaisclick={(mmsi) => (selectedTarget = mmsi)}
                 wind={weatherShown ? (windField?.points ?? null) : null}
                 onviewchange={(b) => (mapView = b)}
-                enc={encMap.data}
+                enc={leftEnc}
                 anchor={alarms?.anchor ?? null}
                 {anchorAlerting}
                 camera={followedCamera('left', split, leader, cameras)}
@@ -581,19 +597,21 @@
                   ais={layers.ais ? ais : null}
                   onaisclick={(mmsi) => (selectedTarget = mmsi)}
                   wind={weatherShown ? (windField?.points ?? null) : null}
-                  enc={encMap.data}
+                  enc={rightEnc}
                   anchor={alarms?.anchor ?? null}
                   {anchorAlerting}
                   camera={followedCamera('right', split, leader, cameras)}
                   oncamera={(c, user) => onCamera('right', c, user)}
                 />
-                {#if catalog.charts.length > 1}
+                {#if catalog.charts.length > 1 || encFolderSet}
                   <div class="pane-charts">
                     <Dropdown
                       label="Cartes du volet droit"
                       title="Choisir les cartes du volet droit"
                       variant="chip"
-                      marked={rightHiddenCharts.length > 0}
+                      marked={rightHiddenCharts.length > 0 ||
+                        (encFolderSet && !rightVector.enc) ||
+                        (cm93Available && !rightVector.cm93)}
                       testid="right-charts-menu"
                     >
                       {#snippet button()}
@@ -605,6 +623,9 @@
                         charts={catalog.charts}
                         hiddenCharts={rightHiddenCharts}
                         onchartschange={(hidden) => setSplit({ ...split, hiddenCharts: hidden })}
+                        vector={rightVector}
+                        onvectorchange={(vector) => setSplit({ ...split, vector })}
+                        cm93={cm93Available}
                         objects={false}
                       />
                     </Dropdown>
@@ -696,6 +717,7 @@
                   charts={catalog?.charts ?? []}
                   hiddenCharts={shownHiddenCharts}
                   onchartschange={setHiddenCharts}
+                  cm93={cm93Available}
                 />
               {/snippet}
             </MapBar>

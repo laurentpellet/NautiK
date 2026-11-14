@@ -1,8 +1,16 @@
 <script lang="ts">
   // Contenu du menu Calques (ouvert depuis la barre d'outils) : cartes
-  // MBTiles (quand plusieurs sont chargées), puis objets. Le rappel des
-  // calques masqués est affiché sur la carte par l'application.
-  import { LAYER_LABELS, toggleChart, type MapLayers } from '../layers';
+  // MBTiles (quand plusieurs sont chargées) et cartes vectorielles (ENC,
+  // CM93), puis objets. Le rappel des calques masqués est affiché sur la
+  // carte par l'application.
+  import {
+    LAYER_LABELS,
+    OBJECT_KEYS,
+    toggleChart,
+    vectorKeys,
+    type MapLayers,
+    type VectorCharts,
+  } from '../layers';
   import type { ChartInfo } from '../services/charts';
 
   interface Props {
@@ -13,6 +21,11 @@
     /** Identifiants des cartes masquées. */
     hiddenCharts?: string[];
     onchartschange?: (hidden: string[]) => void;
+    /** Cartes vectorielles du volet ; par défaut celles de `layers`. */
+    vector?: VectorCharts;
+    onvectorchange?: (vector: VectorCharts) => void;
+    /** Une base CM93 est trouvée : son choix est proposé. */
+    cm93?: boolean;
     /** Afficher aussi les objets (routes, traces, AIS). */
     objects?: boolean;
   }
@@ -23,18 +36,27 @@
     charts = [],
     hiddenCharts = [],
     onchartschange,
+    vector,
+    onvectorchange,
+    cm93 = false,
     objects = true,
   }: Props = $props();
 
-  const keys = Object.keys(LAYER_LABELS) as (keyof MapLayers)[];
   // Plus détaillée en tête, comme dans le panneau Cartes.
   const chartList = $derived([...charts].reverse());
+  const shownVector = $derived(vector ?? { enc: layers.enc, cm93: layers.cm93 });
+
+  function setVector(key: keyof VectorCharts, checked: boolean): void {
+    const next = { ...shownVector, [key]: checked };
+    if (onvectorchange) onvectorchange(next);
+    else onchange({ ...layers, ...next });
+  }
 </script>
 
 <fieldset>
   <legend class="sr">Calques affichés</legend>
+  <p class="group">Cartes</p>
   {#if chartList.length > 1}
-    <p class="group">Cartes</p>
     {#each chartList as chart (chart.id)}
       <label title={chart.description ?? chart.fileName}>
         <input
@@ -47,13 +69,21 @@
         <span class="zoom">z{chart.minZoom}–{chart.maxZoom}</span>
       </label>
     {/each}
-    {#if objects}
-      <hr />
-      <p class="group">Objets</p>
-    {/if}
   {/if}
+  {#each vectorKeys(cm93) as key (key)}
+    <label>
+      <input
+        type="checkbox"
+        checked={shownVector[key]}
+        onchange={(e) => setVector(key, e.currentTarget.checked)}
+      />
+      {LAYER_LABELS[key]}
+    </label>
+  {/each}
   {#if objects}
-    {#each keys as key (key)}
+    <hr />
+    <p class="group">Objets</p>
+    {#each OBJECT_KEYS as key (key)}
       <label>
         <input
           type="checkbox"

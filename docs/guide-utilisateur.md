@@ -110,8 +110,10 @@ dossier** redessine la carte.
 de ses sous-dossiers sur deux niveaux, est reconnue : le panneau
 **Paramètres → Cartes** indique « Base CM93 trouvée ». Ses cartes sont
 dessinées **sous** les ENC officielles, avec la même symbologie, de la
-moins à la plus détaillée selon le zoom (16 cellules au plus) ; le
-calque **Cartes ENC (S-57)** les masque aussi. Ce ne
+moins à la plus détaillée selon le zoom (16 cellules au plus). Le
+calque **Cartes CM93** du menu **Calques** les masque, indépendamment
+des ENC : on peut ainsi afficher les ENC seules, la CM93 seule ou les
+deux. Ce ne
 sont pas des cartes officielles et elles sont souvent anciennes : la
 note de la carte le rappelle toujours, avec la date des données. Elle
 signale aussi le décalage WGS 84 déclaré par certaines cellules (il
@@ -130,16 +132,18 @@ Sur la carte :
 
 - flèche **Nord en haut** (rotation libre quand elle est relâchée) et
   viseur **Centrer sur le bateau** (inactif sans position) ;
-- menu **Calques ▾** (icône des calques) : quand plusieurs cartes sont
-  chargées, choisit celles qui sont affichées (la plus détaillée en
-  tête), puis, après un séparateur, affiche ou masque routes, traces et
-  cibles AIS. Le menu se ferme par Échap ou un clic ailleurs. Une carte ou
+- menu **Calques ▾** (icône des calques) : groupe **Cartes** (cartes
+  MBTiles quand plusieurs sont chargées, la plus détaillée en tête, puis
+  **Cartes ENC (S-57)** et, si une base est trouvée, **Cartes CM93**),
+  puis, après un séparateur, routes, traces et cibles AIS. Le menu se ferme par Échap ou un clic ailleurs. Une carte ou
   un calque masqués sont rappelés en haut à droite de la carte (« Masqué :
   … ») et par une pastille sur le bouton ; une carte seule est toujours
   affichée ;
 - **Deux cartes côte à côte** : partage la carte en deux volets (l'un
   au-dessus de l'autre dans une fenêtre étroite). Le volet de droite a son
-  propre choix de cartes (étiquette « Droite : … » en haut du volet) et
+  propre choix de cartes, ENC et CM93 comprises (étiquette « Droite :
+  … » en haut du volet, par exemple « Droite : CM93 » pour comparer la
+  CM93 aux ENC affichées à gauche ; choix mémorisé) et
   affiche les mêmes objets que celui de gauche (bateau, routes, traces,
   AIS, mouillage) ;
 - cadenas **Verrouiller les deux cartes** (visible avec les deux volets,

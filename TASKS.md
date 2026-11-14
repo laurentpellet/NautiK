@@ -563,6 +563,11 @@ Critères (TEST_PLAN.md §7) :
       symbologie ; avertissements permanents : carte non officielle et
       date des données, décalage déclaré non corrigé, cellules omises
       (« zoomez ») ou illisibles, base illisible ;
+    - choix séparé des ENC et de la CM93 : calque « Cartes CM93 » du
+      menu Calques (proposé si une base est trouvée) et choix propre au
+      volet de droite des cartes côte à côte (mémorisé), pour comparer
+      les deux ; seules les cartes voulues dans un volet sont chargées
+      et signalées ;
     - tests : dictionnaires, cellule fabriquée par un encodeur de test,
       chaque troncature, octets corrompus, attributs, coordonnées,
       noms et échelles, antiméridien, parcours, vues, parseurs et
