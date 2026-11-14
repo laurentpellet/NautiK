@@ -29,6 +29,7 @@ const chart = (patch: Partial<ChartInfo> = {}): ChartInfo => ({
 
 const catalog = (charts: ChartInfo[]): ChartCatalog => ({
   chartsDir: '/charts',
+  chartsDirSource: 'default',
   tileUrlBase: 'http://nautik-tiles.localhost',
   charts,
   failures: [],

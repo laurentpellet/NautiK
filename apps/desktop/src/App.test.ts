@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import App from './App.svelte';
 
 // MapLibre requiert WebGL, absent de jsdom.
@@ -16,6 +16,7 @@ const engine = {
 
 const emptyCatalog = {
   chartsDir: 'C:\\NautiK\\charts',
+  chartsDirSource: 'default',
   tileUrlBase: 'http://nautik-tiles.localhost',
   charts: [],
   failures: [],
@@ -124,7 +125,7 @@ const navigationStatus = {
 };
 
 describe('App', () => {
-  it("affiche la version du moteur et l'avertissement de sûreté", async () => {
+  it("affiche la version du moteur, l'heure locale, sans bandeau sur la carte", async () => {
     render(App, {
       invoke: fakeIpc({
         get_engine_info: () => Promise.resolve(engine),
@@ -134,7 +135,11 @@ describe('App', () => {
     });
     const status = await screen.findByTestId('engine-status');
     expect(status.textContent).toContain('Moteur 0.1.0');
-    expect(screen.getByRole('note').textContent).toContain('ECDIS');
+    expect(screen.queryByText(/ECDIS/)).toBeNull();
+    const clock = screen.getByTestId('clock');
+    expect(clock.getAttribute('aria-label')).toBe('Heure locale');
+    expect(clock.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
+    expect(clock.getAttribute('title')).toMatch(/UTC/);
   });
 
   it("signale clairement l'indisponibilité du moteur", async () => {
@@ -166,7 +171,7 @@ describe('App', () => {
       }),
       listen: events.listen,
     });
-    expect(await screen.findByText('Aucune position')).toBeTruthy();
+    expect(await screen.findAllByText('Aucune position')).toBeTruthy();
 
     events.emit(
       snapshotWith({
@@ -189,7 +194,7 @@ describe('App', () => {
       }),
       listen: events.listen,
     });
-    await screen.findByText('Aucune position');
+    await screen.findAllByText('Aucune position');
     const now = new Date().toISOString();
     events.emit(
       snapshotWith(
@@ -230,7 +235,14 @@ describe('App', () => {
     const sog = instruments.querySelector('[data-tile="sog"]');
     expect(sog?.textContent).toMatch(/8\.0\s*kn/);
     expect(sog?.classList.contains('stale')).toBe(true);
-    expect(screen.getByLabelText('donnée obsolète')).toBeTruthy();
+    expect(within(instruments).getByLabelText('donnée obsolète')).toBeTruthy();
+    // Barre de la carte : mêmes valeurs, obsolescence signalée.
+    const bar = screen.getByTestId('map-bar');
+    const barSog = bar.querySelector('[data-metric="sog"]');
+    expect(barSog?.textContent).toMatch(/8\.0\s*kn/);
+    expect(barSog?.classList.contains('stale')).toBe(true);
+    expect(bar.querySelector('[data-metric="depth"]')?.textContent).toMatch(/12\.5\s*m/);
+    expect(bar.querySelector('[data-metric="position"]')?.classList.contains('stale')).toBe(true);
     // En-tête : la position obsolète est une alerte active.
     expect(screen.getByTestId('pill-position').textContent).toContain('Obsolète');
     expect(screen.getByTestId('header-alerts').textContent).toMatch(/alerte/);
@@ -326,7 +338,7 @@ describe('App', () => {
       }),
       listen: events.listen,
     });
-    await screen.findByText('Aucune position');
+    await screen.findAllByText('Aucune position');
     events.emit({ state: 'flying' }, 'source-status');
     expect((await screen.findByText(/État de la source rejeté/)).textContent).toContain('flying');
   });
@@ -405,7 +417,7 @@ describe('App', () => {
       }),
       listen: events.listen,
     });
-    await screen.findByText('Aucune position');
+    await screen.findAllByText('Aucune position');
     const s = snapshotWith({
       position: { latitudeDeg: -14.968, longitudeDeg: -147.638 },
       source: 'replay',
@@ -426,7 +438,7 @@ describe('App', () => {
       }),
       listen: events.listen,
     });
-    await screen.findByText('Aucune position');
+    await screen.findAllByText('Aucune position');
     events.emit(
       snapshotWith({
         position: { latitudeDeg: 95, longitudeDeg: 0 },
@@ -448,6 +460,166 @@ describe('App', () => {
     const hint = await screen.findByTestId('no-charts');
     expect(hint.textContent).toContain('C:\\NautiK\\charts');
     expect(await screen.findByTestId('chart-view-stub')).toBeTruthy();
+  });
+
+  it('change le dossier des cartes depuis les Paramètres', async () => {
+    const chosen = {
+      ...emptyCatalog,
+      chartsDir: 'D:\\Documents\\Charts',
+      chartsDirSource: 'settings',
+    };
+    const calls: string[] = [];
+    const base = fakeIpc({
+      get_engine_info: () => Promise.resolve(engine),
+      get_chart_catalog: () => Promise.resolve(emptyCatalog),
+      choose_charts_dir: () => Promise.resolve(chosen),
+      reset_charts_dir: () => Promise.resolve(emptyCatalog),
+    });
+    const invoke = (command: string) => {
+      calls.push(command);
+      return base(command);
+    };
+    render(App, { invoke, listen: fakeListen().listen });
+    await openSettings();
+    const panel = await screen.findByTestId('charts-folder');
+    expect(screen.getByTestId('charts-dir').textContent).toBe('C:\\NautiK\\charts');
+    expect(panel.textContent).toContain("dossier par défaut de l'application");
+    const reset = screen.getByRole('button', { name: 'Dossier par défaut' }) as HTMLButtonElement;
+    expect(reset.disabled).toBe(true);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Choisir un dossier…' }));
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('charts-dir').textContent).toBe('D:\\Documents\\Charts'),
+    );
+    expect(panel.textContent).toContain('dossier choisi');
+    // Le chemin affiché dans le panneau Carte suit le nouveau dossier.
+    expect(screen.getByTestId('no-charts').textContent).toContain('D:\\Documents\\Charts');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Dossier par défaut' }));
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('charts-dir').textContent).toBe('C:\\NautiK\\charts'),
+    );
+    expect(calls).toContain('choose_charts_dir');
+    expect(calls).toContain('reset_charts_dir');
+  });
+
+  it('signale un dossier de cartes imposé ou introuvable', async () => {
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () =>
+          Promise.resolve({
+            ...emptyCatalog,
+            chartsDirSource: 'environment',
+            error: 'répertoire introuvable',
+          }),
+      }),
+      listen: fakeListen().listen,
+    });
+    await openSettings();
+    const panel = await screen.findByTestId('charts-folder');
+    expect(panel.textContent).toContain('NAUTIK_CHARTS_DIR');
+    expect(panel.textContent).toContain('Cartes indisponibles : répertoire introuvable');
+    const choose = screen.getByRole('button', { name: 'Choisir un dossier…' }) as HTMLButtonElement;
+    expect(choose.disabled).toBe(true);
+  });
+
+  it('choisit les cartes affichées dans le menu Calques', async () => {
+    const chart = (id: string, name: string, minZoom: number, maxZoom: number) => ({
+      id,
+      name,
+      fileName: `${id}.mbtiles`,
+      description: null,
+      format: 'png',
+      minZoom,
+      maxZoom,
+      bounds: null,
+      center: null,
+      attribution: null,
+      warnings: [],
+    });
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () =>
+          Promise.resolve({
+            ...emptyCatalog,
+            charts: [chart('monde', 'Monde', 0, 6), chart('tahiti', 'Tahiti', 8, 14)],
+          }),
+      }),
+      listen: fakeListen().listen,
+    });
+    await screen.findByTestId('chart-view-stub');
+    await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
+    const boxes = screen.getAllByRole('checkbox');
+    // Cartes (la plus détaillée en tête), séparateur, puis objets.
+    expect(boxes.map((b) => b.closest('label')?.textContent?.trim().split(/\s+/)[0])).toEqual([
+      'Tahiti',
+      'Monde',
+      'Routes',
+      'Traces',
+      'Cibles',
+    ]);
+    expect(document.querySelector('[data-testid="layers-menu"] hr')).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole('checkbox', { name: /Tahiti/ }));
+    expect(screen.getByTestId('hidden-charts-stub').textContent).toBe('tahiti');
+    expect(screen.getByTestId('hidden-layers').textContent).toContain('Tahiti');
+    const menuButton = screen.getByRole('button', { name: 'Calques' });
+    expect(menuButton.classList.contains('marked')).toBe(true);
+    await fireEvent.click(screen.getByRole('checkbox', { name: /Tahiti/ }));
+    expect(screen.getByTestId('hidden-charts-stub').textContent).toBe('');
+    expect(screen.queryByTestId('hidden-layers')).toBeNull();
+    expect(menuButton.classList.contains('marked')).toBe(false);
+
+    // Fermeture : Échap, puis clic en dehors du menu.
+    expect(menuButton.getAttribute('aria-expanded')).toBe('true');
+    await fireEvent.keyDown(screen.getByRole('checkbox', { name: /Tahiti/ }), { key: 'Escape' });
+    expect(screen.queryByTestId('layers-menu')).toBeNull();
+    await fireEvent.click(menuButton);
+    expect(screen.getByTestId('layers-menu')).toBeTruthy();
+    await fireEvent.pointerDown(document.body);
+    expect(screen.queryByTestId('layers-menu')).toBeNull();
+  });
+
+  it('ne propose pas de choix de carte quand une seule est chargée', async () => {
+    localStorage.setItem('nautik.hiddenCharts', '["tahiti"]');
+    try {
+      render(App, {
+        invoke: fakeIpc({
+          get_engine_info: () => Promise.resolve(engine),
+          get_chart_catalog: () =>
+            Promise.resolve({
+              ...emptyCatalog,
+              charts: [
+                {
+                  id: 'tahiti',
+                  name: 'Tahiti',
+                  fileName: 'tahiti.mbtiles',
+                  description: null,
+                  format: 'png',
+                  minZoom: 5,
+                  maxZoom: 11,
+                  bounds: null,
+                  center: null,
+                  attribution: null,
+                  warnings: [],
+                },
+              ],
+            }),
+        }),
+        listen: fakeListen().listen,
+      });
+      await screen.findByTestId('chart-view-stub');
+      await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
+      expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+      expect(document.querySelector('[data-testid="layers-menu"] hr')).toBeNull();
+      // Carte seule toujours affichée, même masquée auparavant.
+      expect(screen.getByTestId('hidden-charts-stub').textContent).toBe('');
+      expect(screen.queryByTestId('hidden-layers')).toBeNull();
+    } finally {
+      localStorage.removeItem('nautik.hiddenCharts');
+    }
   });
 
   it('affiche les cartes chargées et signale les cartes rejetées', async () => {
@@ -527,7 +699,7 @@ describe('App', () => {
       }),
       listen: events.listen,
     });
-    await screen.findByText('Aucune position');
+    await screen.findAllByText('Aucune position');
     events.emit(navigationStatus, 'navigation-status');
     const data = await screen.findByTestId('navigation-data');
     expect(data.textContent).toContain('1.0 NM');
@@ -548,7 +720,7 @@ describe('App', () => {
       }),
       listen: events.listen,
     });
-    await screen.findByText('Aucune position');
+    await screen.findAllByText('Aucune position');
     events.emit({ ...navigationStatus, distanceToTargetM: 'loin' }, 'navigation-status');
     expect(await screen.findByText(/État de navigation rejeté/)).toBeTruthy();
     expect(screen.queryByTestId('navigation-data')).toBeNull();
@@ -711,7 +883,7 @@ describe('App', () => {
     expect(screen.getByTestId('compass').getAttribute('aria-label')).toBe('Cap inconnu');
 
     // Calques : un calque masqué reste signalé.
-    await fireEvent.click(screen.getByRole('button', { name: /Calques/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Cibles AIS' }));
     expect(screen.getByTestId('hidden-layers').textContent).toContain('Cibles AIS');
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Cibles AIS' }));
@@ -759,7 +931,7 @@ describe('App', () => {
     await fireEvent.change(screen.getByLabelText('Vitesse'), { target: { value: 'kn' } });
   });
 
-  it('bascule le plein écran : panneau masqué, alertes conservées', async () => {
+  it('bascule le plein écran en conservant en-tête, heure et alertes', async () => {
     render(App, {
       invoke: fakeIpc({
         get_engine_info: () => Promise.resolve(engine),
@@ -767,17 +939,154 @@ describe('App', () => {
       }),
       listen: fakeListen().listen,
     });
-    const button = await screen.findByRole('button', { name: 'Plein écran' });
-    expect(screen.queryByTestId('fullscreen-status')).toBeNull();
-    await fireEvent.click(button);
-    await vi.waitFor(() =>
-      expect(screen.getByTestId('fullscreen-status').textContent).toContain('AUCUNE POSITION'),
-    );
-    expect(screen.getByRole('complementary', { hidden: true }).hidden).toBe(true);
-    await fireEvent.keyDown(window, { key: 'Escape' });
-    await vi.waitFor(() => expect(screen.queryByTestId('fullscreen-status')).toBeNull());
+    await fireEvent.click(await screen.findByRole('button', { name: 'Plein écran' }));
+    const exit = await screen.findByRole('button', { name: 'Quitter le plein écran' });
+    // En-tête conservé : état des données (connecteurs) et heure.
+    expect(screen.getByTestId('pill-position').textContent).toContain('Aucune');
+    expect(screen.getByTestId('pill-link')).toBeTruthy();
+    expect(screen.getByTestId('clock')).toBeTruthy();
+    expect(screen.getByTestId('map-bar')).toBeTruthy();
+    await fireEvent.click(exit);
+    await screen.findByRole('button', { name: 'Plein écran' });
     await fireEvent.keyDown(window, { key: 'F11' });
-    await vi.waitFor(() => expect(screen.getByTestId('fullscreen-status')).toBeTruthy());
+    await screen.findByRole('button', { name: 'Quitter le plein écran' });
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    await screen.findByRole('button', { name: 'Plein écran' });
+  });
+
+  it('affiche deux cartes côte à côte, verrouillées ou libres', async () => {
+    localStorage.removeItem('nautik.split');
+    const chart = (id: string, name: string, minZoom: number, maxZoom: number) => ({
+      id,
+      name,
+      fileName: `${id}.mbtiles`,
+      description: null,
+      format: 'png',
+      minZoom,
+      maxZoom,
+      bounds: null,
+      center: null,
+      attribution: null,
+      warnings: [],
+    });
+    try {
+      render(App, {
+        invoke: fakeIpc({
+          get_engine_info: () => Promise.resolve(engine),
+          get_chart_catalog: () =>
+            Promise.resolve({
+              ...emptyCatalog,
+              charts: [chart('monde', 'Monde', 0, 6), chart('tahiti', 'Tahiti', 8, 14)],
+            }),
+        }),
+        listen: fakeListen().listen,
+      });
+      await screen.findByTestId('chart-view-stub');
+      const bar = screen.getByTestId('map-bar');
+      expect(screen.queryByTestId('split-pane')).toBeNull();
+      // Le verrou n'apparaît qu'avec les deux volets.
+      expect(within(bar).queryByRole('button', { name: 'Verrouiller les deux cartes' })).toBeNull();
+
+      await fireEvent.click(within(bar).getByRole('button', { name: 'Deux cartes côte à côte' }));
+      expect(screen.getAllByTestId('chart-view-stub')).toHaveLength(2);
+      const lock = within(bar).getByRole('button', { name: 'Verrouiller les deux cartes' });
+      expect(lock.getAttribute('aria-pressed')).toBe('true');
+
+      // Verrouillées : la carte manipulée mène, l'autre suit.
+      const [left, right] = screen.getAllByRole('button', { name: 'Simuler un déplacement' });
+      const [leftCam, rightCam] = screen.getAllByTestId('camera-stub');
+      await fireEvent.click(left as HTMLElement);
+      expect((rightCam as HTMLElement).textContent).toContain('-147.7,-15 z12');
+      expect((leftCam as HTMLElement).textContent).toContain('libre');
+      await fireEvent.click(right as HTMLElement);
+      expect((leftCam as HTMLElement).textContent).toContain('-147.7,-15 z12');
+      expect((rightCam as HTMLElement).textContent).toContain('libre');
+
+      // Libres : aucune ne suit l'autre.
+      await fireEvent.click(lock);
+      expect(lock.getAttribute('aria-pressed')).toBe('false');
+      expect((leftCam as HTMLElement).textContent).toContain('libre');
+      expect((rightCam as HTMLElement).textContent).toContain('libre');
+
+      // Cartes propres au volet de droite, signalées sur son étiquette.
+      const pane = screen.getByTestId('split-pane');
+      const menu = within(pane).getByRole('button', { name: 'Cartes du volet droit' });
+      expect(menu.textContent).toContain('Droite : Tahiti, Monde');
+      await fireEvent.click(menu);
+      expect(within(pane).queryByRole('checkbox', { name: /Routes/ })).toBeNull();
+      await fireEvent.click(within(pane).getByRole('checkbox', { name: /Tahiti/ }));
+      const [leftHidden, rightHidden] = screen.getAllByTestId('hidden-charts-stub');
+      expect((rightHidden as HTMLElement).textContent).toBe('tahiti');
+      expect((leftHidden as HTMLElement).textContent).toBe('');
+      expect(menu.textContent).toContain('Droite : Monde');
+      expect(menu.classList.contains('marked')).toBe(true);
+      expect(JSON.parse(localStorage.getItem('nautik.split') ?? '{}')).toEqual({
+        enabled: true,
+        locked: false,
+        hiddenCharts: ['tahiti'],
+      });
+
+      // Retour à une seule carte.
+      await fireEvent.click(within(bar).getByRole('button', { name: 'Deux cartes côte à côte' }));
+      expect(screen.getAllByTestId('chart-view-stub')).toHaveLength(1);
+      expect(screen.queryByTestId('split-pane')).toBeNull();
+    } finally {
+      localStorage.removeItem('nautik.split');
+    }
+  });
+
+  it('masque, réaffiche et remet en place les panneaux de la carte', async () => {
+    localStorage.removeItem('nautik.panels');
+    try {
+      render(App, {
+        invoke: fakeIpc({
+          get_engine_info: () => Promise.resolve(engine),
+          get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        }),
+        listen: fakeListen().listen,
+      });
+      const bar = await screen.findByTestId('map-bar');
+      // Sans position : rien à centrer, et l'absence est affichée.
+      expect(within(bar).getByRole('button', { name: /Centrer/ })).toHaveProperty('disabled', true);
+      expect(bar.querySelector('[data-metric="position"]')?.textContent).toContain(
+        'Aucune position',
+      );
+      // Nord en haut / rotation libre, depuis la barre.
+      const north = within(bar).getByRole('button', { name: /Nord en haut/ });
+      await fireEvent.click(north);
+      expect(north.getAttribute('aria-pressed')).toBe('false');
+
+      // Masquer par le × du panneau, réafficher par la barre.
+      await fireEvent.click(screen.getByRole('button', { name: 'Masquer Mouillage' }));
+      expect(screen.queryByTestId('anchor-card')).toBeNull();
+      const toggle = within(bar).getByRole('button', { name: 'Mouillage' });
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(JSON.parse(localStorage.getItem('nautik.panels') ?? '{}').anchor.visible).toBe(false);
+      await fireEvent.click(toggle);
+      expect(screen.getByTestId('anchor-card')).toBeTruthy();
+
+      // Panneau latéral masqué : gardé monté, mais caché.
+      await fireEvent.click(within(bar).getByRole('button', { name: 'Panneau' }));
+      expect(
+        screen.getByRole('complementary', { hidden: true }).closest('[hidden]'),
+      ).not.toBeNull();
+
+      // Déplacement au clavier, puis remise en place générale.
+      const handle = screen.getByRole('button', { name: 'Déplacer Navigation' });
+      await fireEvent.keyDown(handle, { key: 'ArrowDown' });
+      expect(JSON.parse(localStorage.getItem('nautik.panels') ?? '{}').live.y).not.toBeNull();
+      await fireEvent.click(within(bar).getByRole('button', { name: /Disposition/ }));
+      expect(screen.getByRole('complementary').closest('[hidden]')).toBeNull();
+      expect(JSON.parse(localStorage.getItem('nautik.panels') ?? '{}').live.y).toBeNull();
+
+      // La barre elle-même : masquée, un bouton permet toujours de la rappeler.
+      await fireEvent.click(screen.getByRole('button', { name: 'Masquer Barre' }));
+      expect(screen.queryByTestId('map-bar')).toBeNull();
+      await fireEvent.click(screen.getByRole('button', { name: /Barre/ }));
+      expect(screen.getByTestId('map-bar')).toBeTruthy();
+    } finally {
+      localStorage.removeItem('nautik.panels');
+    }
   });
 
   it('affiche un fichier GRIB sur la carte depuis l’onglet Météo', async () => {
@@ -902,7 +1211,7 @@ describe('App', () => {
       },
       listen: events.listen,
     });
-    await screen.findByText('Aucune position');
+    await screen.findAllByText('Aucune position');
     events.emit(dragging('active'), 'alarms');
 
     const banner = await screen.findByTestId('alarm-banner');

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AlarmView } from './services/alarms';
 import type { PositionStatus } from './services/instruments';
-import { activeAlerts, statusPills, utcClock, type ShellInputs } from './shell';
+import { activeAlerts, localClock, statusPills, utcClock, type ShellInputs } from './shell';
 
 const position = (over: Partial<PositionStatus> = {}, source = 'nmea0183'): PositionStatus => ({
   fix: {
@@ -124,5 +124,18 @@ describe('horloge', () => {
     expect(clock.time).toBe('14:05:09 UTC');
     expect(clock.date).toContain('2026');
     expect(clock.date).toContain('12');
+  });
+
+  it("affiche l'heure locale et son décalage", () => {
+    const t = Date.UTC(2026, 10, 12, 4, 5, 9);
+    const tahiti = localClock(t, 'Pacific/Tahiti');
+    expect(tahiti.time).toBe('18:05:09');
+    expect(tahiti.zone).toMatch(/UTC.10/);
+    expect(tahiti.date).toContain('11');
+    const paris = localClock(t, 'Europe/Paris');
+    expect(paris.time).toBe('05:05:09');
+    expect(paris.zone).toMatch(/UTC.1/);
+    // Fuseau du système par défaut : toujours une heure lisible.
+    expect(localClock(t).time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
   });
 });

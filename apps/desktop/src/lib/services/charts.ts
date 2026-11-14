@@ -46,8 +46,12 @@ export interface ChartLoadFailure {
 }
 
 /** Catalogue des cartes (miroir de `ChartCatalogView`). */
+/** Origine du dossier des cartes. */
+export type ChartsDirSource = 'environment' | 'settings' | 'default';
+
 export interface ChartCatalog {
   chartsDir: string;
+  chartsDirSource: ChartsDirSource;
   tileUrlBase: string;
   charts: ChartInfo[];
   failures: ChartLoadFailure[];
@@ -108,6 +112,14 @@ export function parseChartInfo(value: unknown): ChartInfo {
   };
 }
 
+function parseDirSource(value: unknown): ChartsDirSource {
+  const source = expectString(value, 'chartsDirSource');
+  if (source !== 'environment' && source !== 'settings' && source !== 'default') {
+    throw new EngineProtocolError(`origine du dossier des cartes inconnue : ${source}`);
+  }
+  return source;
+}
+
 export function parseChartCatalog(value: unknown): ChartCatalog {
   const r = expectRecord(value, 'catalogue');
   const tileUrlBase = expectString(r.tileUrlBase, 'tileUrlBase');
@@ -116,6 +128,7 @@ export function parseChartCatalog(value: unknown): ChartCatalog {
   }
   return {
     chartsDir: expectString(r.chartsDir, 'chartsDir'),
+    chartsDirSource: parseDirSource(r.chartsDirSource),
     tileUrlBase,
     charts: expectArray(r.charts, 'charts', parseChartInfo),
     failures: expectArray(r.failures, 'failures', (v) => {
@@ -132,4 +145,28 @@ export function parseChartCatalog(value: unknown): ChartCatalog {
 /** Charge le catalogue des cartes depuis le moteur. */
 export async function fetchChartCatalog(call: InvokeFn = invoke): Promise<ChartCatalog> {
   return parseChartCatalog(await call('get_chart_catalog'));
+}
+
+/**
+ * Choix du dossier des cartes. Le dossier est choisi par le dialogue du
+ * système côté moteur : aucun chemin n'est transmis par l'interface.
+ */
+export class ChartsApi {
+  constructor(private readonly invokeFn: InvokeFn = invoke) {}
+
+  /** Ouvre le dialogue ; `null` si l'utilisateur annule. */
+  async chooseDir(): Promise<ChartCatalog | null> {
+    const value = await this.invokeFn('choose_charts_dir');
+    return value === null ? null : parseChartCatalog(value);
+  }
+
+  /** Revient au dossier par défaut de l'application. */
+  async resetDir(): Promise<ChartCatalog> {
+    return parseChartCatalog(await this.invokeFn('reset_charts_dir'));
+  }
+
+  /** Relit le dossier (cartes ajoutées ou retirées). */
+  async reload(): Promise<ChartCatalog> {
+    return parseChartCatalog(await this.invokeFn('reload_charts'));
+  }
 }

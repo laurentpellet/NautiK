@@ -17,6 +17,7 @@ mod simulator;
 mod sources;
 mod weather;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -25,7 +26,9 @@ use nav_storage::Db;
 use tauri::Manager;
 use tracing_subscriber::EnvFilter;
 
-use crate::charts::{resolve_charts_dir, to_http_response, ChartState, TILE_SCHEME};
+use crate::charts::{
+    resolve_charts_dir, to_http_response, ChartState, CHARTS_DIR_SETTING, TILE_SCHEME,
+};
 use crate::secrets::KeyringStore;
 
 /// État géré par Tauri : le moteur partagé.
@@ -97,12 +100,23 @@ pub fn run() -> anyhow::Result<()> {
                 .path()
                 .app_data_dir()
                 .context("répertoire de données de l'application")?;
-            let charts_dir = resolve_charts_dir(&data_dir)?;
-            tracing::info!(dir = %charts_dir.display(), "répertoire des cartes");
-            app.manage(ChartState::new(charts_dir));
             app.manage(weather::WeatherStore::new(data_dir.join("weather")));
 
             let db = open_database(app)?;
+            // Dossier de cartes choisi dans les Paramètres ; un réglage
+            // illisible est signalé et le dossier par défaut utilisé.
+            let chosen = tauri::async_runtime::block_on(
+                db.get_setting::<Option<String>>(CHARTS_DIR_SETTING),
+            )
+            .unwrap_or_else(|error| {
+                tracing::error!(%error, "réglage du dossier des cartes illisible");
+                None
+            })
+            .flatten()
+            .map(PathBuf::from);
+            let (charts_dir, source) = resolve_charts_dir(&data_dir, chosen)?;
+            tracing::info!(dir = %charts_dir.display(), ?source, "répertoire des cartes");
+            app.manage(ChartState::new(charts_dir, source));
             let start =
                 position::simulated_start_position().context("position simulée invalide")?;
             let secrets = Arc::new(KeyringStore::new(&app.config().identifier));
@@ -129,6 +143,9 @@ pub fn run() -> anyhow::Result<()> {
         .invoke_handler(tauri::generate_handler![
             commands::get_engine_info,
             commands::get_chart_catalog,
+            commands::choose_charts_dir,
+            commands::reset_charts_dir,
+            commands::reload_charts,
             routing::list_routes,
             routing::create_route,
             routing::reverse_route,

@@ -1,76 +1,101 @@
 <script lang="ts">
-  // Menu des calques de la carte. Un calque masqué reste signalé sur la
-  // carte : rien n'est caché silencieusement.
-  import { LAYER_LABELS, hiddenLayers, type MapLayers } from '../layers';
+  // Contenu du menu Calques (ouvert depuis la barre d'outils) : cartes
+  // MBTiles (quand plusieurs sont chargées), puis objets. Le rappel des
+  // calques masqués est affiché sur la carte par l'application.
+  import { LAYER_LABELS, toggleChart, type MapLayers } from '../layers';
+  import type { ChartInfo } from '../services/charts';
 
   interface Props {
     layers: MapLayers;
     onchange: (layers: MapLayers) => void;
+    /** Cartes du catalogue, de la moins à la plus détaillée. */
+    charts?: ChartInfo[];
+    /** Identifiants des cartes masquées. */
+    hiddenCharts?: string[];
+    onchartschange?: (hidden: string[]) => void;
+    /** Afficher aussi les objets (routes, traces, AIS). */
+    objects?: boolean;
   }
 
-  let { layers, onchange }: Props = $props();
+  let {
+    layers,
+    onchange,
+    charts = [],
+    hiddenCharts = [],
+    onchartschange,
+    objects = true,
+  }: Props = $props();
 
-  let open = $state(false);
   const keys = Object.keys(LAYER_LABELS) as (keyof MapLayers)[];
-  const hidden = $derived(hiddenLayers(layers));
+  // Plus détaillée en tête, comme dans le panneau Cartes.
+  const chartList = $derived([...charts].reverse());
 </script>
 
-<div class="layers">
-  <button type="button" aria-expanded={open} onclick={() => (open = !open)}>Calques ▾</button>
-  {#if open}
-    <fieldset>
-      <legend class="sr">Calques affichés</legend>
-      {#each keys as key (key)}
-        <label>
-          <input
-            type="checkbox"
-            checked={layers[key]}
-            onchange={(e) => onchange({ ...layers, [key]: e.currentTarget.checked })}
-          />
-          {LAYER_LABELS[key]}
-        </label>
-      {/each}
-    </fieldset>
+<fieldset>
+  <legend class="sr">Calques affichés</legend>
+  {#if chartList.length > 1}
+    <p class="group">Cartes</p>
+    {#each chartList as chart (chart.id)}
+      <label title={chart.description ?? chart.fileName}>
+        <input
+          type="checkbox"
+          checked={!hiddenCharts.includes(chart.id)}
+          onchange={(e) =>
+            onchartschange?.(toggleChart(hiddenCharts, chart.id, e.currentTarget.checked))}
+        />
+        {chart.name}
+        <span class="zoom">z{chart.minZoom}–{chart.maxZoom}</span>
+      </label>
+    {/each}
+    {#if objects}
+      <hr />
+      <p class="group">Objets</p>
+    {/if}
   {/if}
-  {#if hidden.length > 0}
-    <p class="hidden-note" role="status" data-testid="hidden-layers">
-      Masqué : {hidden.join(', ')}
-    </p>
+  {#if objects}
+    {#each keys as key (key)}
+      <label>
+        <input
+          type="checkbox"
+          checked={layers[key]}
+          onchange={(e) => onchange({ ...layers, [key]: e.currentTarget.checked })}
+        />
+        {LAYER_LABELS[key]}
+      </label>
+    {/each}
   {/if}
-</div>
+</fieldset>
 
 <style>
-  .layers {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.3rem;
-  }
-
-  button {
-    padding: 0.3rem 0.7rem;
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    background: var(--card-bg);
-    color: var(--fg);
-    font: inherit;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  }
-
   fieldset {
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
     margin: 0;
     padding: 0.5rem 0.8rem;
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    background: var(--card-bg);
-    color: var(--fg);
+    border: 0;
     font-size: 0.85rem;
+  }
+
+  .group {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  hr {
+    width: 100%;
+    margin: 0.3rem 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .zoom {
+    color: var(--muted);
+    font-size: 0.75rem;
   }
 
   .sr {
@@ -79,15 +104,5 @@
     height: 1px;
     overflow: hidden;
     clip: rect(0 0 0 0);
-  }
-
-  .hidden-note {
-    margin: 0;
-    padding: 0.15rem 0.5rem;
-    border-radius: 0.3rem;
-    background: var(--warn-bg);
-    color: var(--warn-fg);
-    font-size: 0.75rem;
-    font-weight: 600;
   }
 </style>

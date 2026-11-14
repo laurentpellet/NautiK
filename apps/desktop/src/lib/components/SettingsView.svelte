@@ -22,9 +22,11 @@
     sources: Snippet;
     /** Alarmes (surveillance et historique). */
     alarms?: Snippet;
+    /** Dossier des cartes. */
+    charts?: Snippet;
   }
 
-  let { simulator, status, sources, alarms }: Props = $props();
+  let { simulator, status, sources, alarms, charts }: Props = $props();
 
   let speedText = $state('');
   let speedError = $state<string | null>(null);
@@ -142,6 +144,12 @@
     {#if alarms}
       <section class="card sources">
         {@render alarms()}
+      </section>
+    {/if}
+
+    {#if charts}
+      <section class="card">
+        {@render charts()}
       </section>
     {/if}
   </div>

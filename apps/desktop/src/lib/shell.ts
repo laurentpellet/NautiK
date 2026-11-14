@@ -153,3 +153,35 @@ export function utcClock(now: number): { date: string; time: string } {
   const time = d.toISOString().slice(11, 19);
   return { date, time: `${time} UTC` };
 }
+
+/**
+ * Date et heure locales de l'en-tête, avec le décalage horaire
+ * (« UTC−10 »). L'heure UTC reste disponible par `utcClock`.
+ * `timeZone` : fuseau imposé (tests) ; par défaut celui du système.
+ */
+export function localClock(
+  now: number,
+  timeZone?: string,
+): { date: string; time: string; zone: string } {
+  const d = new Date(now);
+  const tz = timeZone ? { timeZone } : {};
+  const date = new Intl.DateTimeFormat('fr-FR', {
+    ...tz,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(d);
+  const time = new Intl.DateTimeFormat('fr-FR', {
+    ...tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).format(d);
+  const zone =
+    new Intl.DateTimeFormat('fr-FR', { ...tz, timeZoneName: 'shortOffset' })
+      .formatToParts(d)
+      .find((p) => p.type === 'timeZoneName')?.value ?? '';
+  return { date, time, zone };
+}

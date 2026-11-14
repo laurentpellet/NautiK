@@ -43,8 +43,9 @@ enregistrées en simulation sont préfixées « SIMULATION — ».
 L'écran se compose :
 
 - d'une **barre d'en-tête** : onglets, pastilles d'état (Position,
-  Liaison, AIS, Moteur, Alarmes), heure UTC, thème jour / nuit et plein
-  écran (bouton, F11 ; Échap pour sortir) ;
+  Liaison, AIS, Moteur, Alarmes), heure locale avec son décalage (l'heure
+  UTC s'affiche en infobulle), thème jour / nuit et plein écran (bouton,
+  F11 ; Échap pour sortir). L'en-tête reste affiché en plein écran ;
 - de quatre onglets : **Carte**, **Instruments**, **Météo**,
   **Paramètres**.
 
@@ -54,23 +55,62 @@ tous les onglets et en plein écran.
 ## 3. Cartes
 
 NautiK affiche les cartes raster au format **MBTiles** (un fichier par
-carte). Copiez vos fichiers `.mbtiles` dans le dossier des cartes puis
-relancez l'application :
+carte), lues dans un dossier :
 
-- Windows : `%APPDATA%\io.github.laurentpellet.nautik\charts` ;
-- ou le dossier indiqué par la variable d'environnement
-  `NAUTIK_CHARTS_DIR`.
+- **Paramètres → Cartes → Choisir un dossier…** : n'importe quel dossier,
+  par exemple `Documents\Charts` ou une clé USB ; le choix est conservé ;
+- **Relire le dossier** après y avoir copié ou retiré des cartes ;
+- **Dossier par défaut** : `%APPDATA%\io.github.laurentpellet.nautik\charts`
+  sous Windows ;
+- la variable d'environnement `NAUTIK_CHARTS_DIR`, si elle est définie,
+  impose le dossier (il n'est alors pas modifiable dans l'interface).
 
-Le chemin exact est affiché tant qu'aucune carte n'est chargée. Un
-fichier illisible ou corrompu est signalé sans empêcher le chargement des
-autres.
+Un dossier choisi qui a disparu (clé USB retirée) est signalé, jamais
+remplacé en silence. Un fichier illisible ou corrompu est signalé sans
+empêcher le chargement des autres.
 
 Sur la carte :
 
-- molette ou pincement : zoom ; clic droit glissé : rotation ;
-- bouton **Nord en haut** : remet la carte droite ;
-- menu **Calques ▾** : affiche ou masque cartes, routes, traces, AIS,
-  vent ; un calque masqué reste signalé.
+- molette ou pincement : zoom ; clic droit glissé : rotation.
+
+**Barre d'outils de la carte** (en bas, icônes avec infobulles) :
+
+- flèche **Nord en haut** (rotation libre quand elle est relâchée) et
+  viseur **Centrer sur le bateau** (inactif sans position) ;
+- menu **Calques ▾** (icône des calques) : quand plusieurs cartes sont
+  chargées, choisit celles qui sont affichées (la plus détaillée en
+  tête), puis, après un séparateur, affiche ou masque routes, traces et
+  cibles AIS. Le menu se ferme par Échap ou un clic ailleurs. Une carte ou
+  un calque masqués sont rappelés en haut à droite de la carte (« Masqué :
+  … ») et par une pastille sur le bouton ; une carte seule est toujours
+  affichée ;
+- **Deux cartes côte à côte** : partage la carte en deux volets (l'un
+  au-dessus de l'autre dans une fenêtre étroite). Le volet de droite a son
+  propre choix de cartes (étiquette « Droite : … » en haut du volet) et
+  affiche les mêmes objets que celui de gauche (bateau, routes, traces,
+  AIS, mouillage) ;
+- cadenas **Verrouiller les deux cartes** (visible avec les deux volets,
+  verrouillé par défaut) : même zoom, même position et même orientation
+  dans les deux volets ; le volet que vous déplacez entraîne l'autre.
+  Cadenas ouvert : chaque volet est libre. Au verrouillage, le volet de
+  droite rejoint celui de gauche ;
+- métriques de base : SOG, COG, CAP, FOND et position. Une valeur
+  obsolète est estompée et marquée ⚠ ; sans position, « Aucune position »
+  est affiché ;
+- icônes **Panneau**, **Mouillage** (ancre), **Navigation**
+  (cadran) : affichent ou masquent chaque panneau (estompée = masqué) ;
+- **↺ Disposition par défaut** : remet tous les panneaux en place et les
+  réaffiche.
+
+**Panneaux déplaçables.** Chaque panneau (y compris la barre) se déplace
+par sa poignée ⠿ (souris, doigt ou flèches du clavier) et se masque par
+son **×**. Double-clic sur la poignée : retour à sa place. Une barre
+masquée se rappelle par le bouton **▴ Barre**, en bas à gauche. La
+disposition est conservée d'un lancement à l'autre ; un panneau ne peut
+pas sortir de la fenêtre. Masquer un panneau ne masque jamais une alarme :
+le bandeau d'alarme, les pastilles d'en-tête et les alertes de position
+et de liaison restent toujours visibles, et la surveillance du mouillage
+continue même si son panneau est masqué.
 
 ## 4. Sources de données
 

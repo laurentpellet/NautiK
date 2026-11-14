@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchChartCatalog, parseChartCatalog, parseChartInfo } from './charts';
+import { ChartsApi, fetchChartCatalog, parseChartCatalog, parseChartInfo } from './charts';
 import { EngineProtocolError } from './validate';
 
 export const validChart = {
@@ -18,6 +18,7 @@ export const validChart = {
 
 export const validCatalog = {
   chartsDir: 'C:\\charts',
+  chartsDirSource: 'default',
   tileUrlBase: 'http://nautik-tiles.localhost',
   charts: [validChart],
   failures: [{ fileName: 'bad.mbtiles', reason: 'corrompu' }],
@@ -70,7 +71,14 @@ describe('parseChartCatalog', () => {
     expect(c.error).toBe('introuvable');
   });
 
-  it.each([null, [], 'x', { ...validCatalog, charts: null }])('rejette %s', (raw) => {
+  it.each([
+    null,
+    [],
+    'x',
+    { ...validCatalog, charts: null },
+    { ...validCatalog, chartsDirSource: 'cloud' },
+    { ...validCatalog, chartsDirSource: undefined },
+  ])('rejette %s', (raw) => {
     expect(() => parseChartCatalog(raw)).toThrow(EngineProtocolError);
   });
 });
@@ -80,5 +88,41 @@ describe('fetchChartCatalog', () => {
     const call = vi.fn().mockResolvedValue(validCatalog);
     await expect(fetchChartCatalog(call)).resolves.toEqual(validCatalog);
     expect(call).toHaveBeenCalledWith('get_chart_catalog');
+  });
+});
+
+describe('ChartsApi', () => {
+  const chosen = {
+    ...validCatalog,
+    chartsDir: 'C:\\Users\\x\\Documents\\Charts',
+    chartsDirSource: 'settings',
+  };
+
+  it('choisit un dossier sans transmettre de chemin', async () => {
+    const call = vi.fn().mockResolvedValue(chosen);
+    await expect(new ChartsApi(call).chooseDir()).resolves.toEqual(chosen);
+    expect(call).toHaveBeenCalledWith('choose_charts_dir');
+  });
+
+  it('retourne null si le dialogue est annulé', async () => {
+    const call = vi.fn().mockResolvedValue(null);
+    await expect(new ChartsApi(call).chooseDir()).resolves.toBeNull();
+  });
+
+  it('revient au dossier par défaut et relit le dossier', async () => {
+    const call = vi.fn().mockResolvedValue(validCatalog);
+    const api = new ChartsApi(call);
+    await expect(api.resetDir()).resolves.toEqual(validCatalog);
+    await expect(api.reload()).resolves.toEqual(validCatalog);
+    expect(call.mock.calls).toEqual([['reset_charts_dir'], ['reload_charts']]);
+  });
+
+  it('propage le refus du moteur et rejette une réponse invalide', async () => {
+    await expect(
+      new ChartsApi(vi.fn().mockRejectedValue('dossier imposé')).chooseDir(),
+    ).rejects.toBe('dossier imposé');
+    await expect(new ChartsApi(vi.fn().mockResolvedValue({})).resetDir()).rejects.toThrow(
+      EngineProtocolError,
+    );
   });
 });

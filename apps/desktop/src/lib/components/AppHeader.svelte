@@ -1,8 +1,8 @@
 <script lang="ts">
   // Barre d'en-tête : onglets, état des chaînes de données, alertes,
-  // heure UTC, thème et plein écran. Affichage seul : les états sont
+  // heure locale (UTC en infobulle), thème et plein écran. Affichage seul : les états sont
   // calculés par `shell.ts` à partir des données reçues.
-  import { activeAlerts, utcClock, type StatusPill } from '../shell';
+  import { activeAlerts, localClock, utcClock, type StatusPill } from '../shell';
   import type { Theme } from '../map/style';
 
   interface Props {
@@ -21,7 +21,8 @@
     $props();
 
   const alerts = $derived(activeAlerts(pills));
-  const clock = $derived(utcClock(now));
+  const clock = $derived(localClock(now));
+  const utc = $derived(utcClock(now));
 </script>
 
 <header class="bar" data-testid="app-header">
@@ -60,9 +61,14 @@
         ⚠ {alerts.length} alerte{alerts.length > 1 ? 's' : ''} active{alerts.length > 1 ? 's' : ''}
       </span>
     {/if}
-    <span class="clock" aria-label="Heure UTC">
+    <span
+      class="clock"
+      aria-label="Heure locale"
+      title="{utc.time} — {utc.date}"
+      data-testid="clock"
+    >
       <span class="date">{clock.date}</span>
-      <span class="time">{clock.time}</span>
+      <span class="time">{clock.time} <small>{clock.zone}</small></span>
     </span>
     <button
       type="button"
@@ -234,6 +240,12 @@
     font-size: 1.05rem;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+  }
+
+  .time small {
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 600;
   }
 
   .icon {

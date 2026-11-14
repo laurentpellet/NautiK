@@ -1,15 +1,46 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { untrack } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import AisPanel from './lib/components/AisPanel.svelte';
   import AppHeader from './lib/components/AppHeader.svelte';
   import InstrumentsView from './lib/components/InstrumentsView.svelte';
   import LiveNavCard from './lib/components/LiveNavCard.svelte';
   import MapLayersMenu from './lib/components/MapLayersMenu.svelte';
+  import ChartsFolderPanel from './lib/components/ChartsFolderPanel.svelte';
+  import FloatingPanel from './lib/components/FloatingPanel.svelte';
+  import MapBar from './lib/components/MapBar.svelte';
+  import {
+    PANEL_LABELS,
+    defaultLayout,
+    loadLayout,
+    saveLayout,
+    type PanelId,
+    type PanelLayout,
+    type PanelState,
+    type Rect,
+  } from './lib/panels';
+  import Dropdown from './lib/components/Dropdown.svelte';
+  import {
+    followedCamera,
+    loadSplit,
+    saveSplit,
+    type MapCamera,
+    type Pane,
+    type SplitState,
+  } from './lib/split';
   import SettingsView from './lib/components/SettingsView.svelte';
   import StatusStrip from './lib/components/StatusStrip.svelte';
   import { recordSnapshot, type History } from './lib/history';
-  import { loadLayers, saveLayers, type MapLayers } from './lib/layers';
+  import {
+    hiddenChartNames,
+    hiddenLayers,
+    loadHiddenCharts,
+    loadLayers,
+    saveHiddenCharts,
+    saveLayers,
+    type MapLayers,
+  } from './lib/layers';
   import { statusPills } from './lib/shell';
   import { applyFullscreen, currentWindow, fullscreenShortcut } from './lib/fullscreen';
   import { SimulatorApi } from './lib/services/simulator';
@@ -40,7 +71,7 @@
   import { describeConnection, isEngineSilent } from './lib/format';
   import type { Theme } from './lib/map/style';
   import { subscribeAis, type AisSnapshot } from './lib/services/ais';
-  import { fetchChartCatalog, type ChartCatalog } from './lib/services/charts';
+  import { ChartsApi, fetchChartCatalog, type ChartCatalog } from './lib/services/charts';
   import { fetchEngineInfo, type EngineInfo, type InvokeFn } from './lib/services/engine';
   import {
     SourcesApi,
@@ -80,6 +111,15 @@
   /** Mesures fraîches reçues depuis le lancement (mémoire seule). */
   let history = $state.raw<History>({});
   let layers = $state<MapLayers>(loadLayers());
+  let hiddenCharts = $state<string[]>(loadHiddenCharts());
+  // Une carte seule est toujours affichée : rien à choisir, et aucune
+  // carte ne doit rester masquée sans moyen de la réafficher.
+  const shownHiddenCharts = $derived((catalog?.charts.length ?? 0) > 1 ? hiddenCharts : []);
+  /** Cartes et calques masqués, rappelés sur la carte. */
+  const hiddenOnMap = $derived([
+    ...hiddenChartNames(catalog?.charts ?? [], shownHiddenCharts),
+    ...hiddenLayers(layers),
+  ]);
   let ais = $state.raw<AisSnapshot | null>(null);
   let aisError = $state<string | null>(null);
   let selectedTarget = $state<string | null>(null);
@@ -94,7 +134,7 @@
   let windError = $state<string | null>(null);
   /** Nombre maximal de flèches de vent affichées. */
   const WIND_MAX_POINTS = 1_500;
-  /** Fenêtre en plein écran : panneau latéral masqué, alertes conservées. */
+  /** Fenêtre en plein écran : en-tête, panneaux et alertes conservés. */
   let fullscreen = $state(false);
   let fullscreenError = $state<string | null>(null);
   const TABS = [
@@ -107,10 +147,82 @@
   let theme = $state<Theme>(loadTheme());
   let northUp = $state(true);
   let chartView = $state<{ recenter: () => void } | null>(null);
+  let chartViewRight = $state<{ recenter: () => void } | null>(null);
+
+  /** Deux cartes côte à côte (mémorisé). */
+  let split = $state<SplitState>(loadSplit());
+  /** Dernière vue de chaque volet, et volet manipulé en dernier. */
+  let cameras = $state.raw<Record<Pane, MapCamera | null>>({ left: null, right: null });
+  let leader = $state<Pane>('left');
+  // Une carte seule est toujours affichée, dans les deux volets.
+  const rightHiddenCharts = $derived((catalog?.charts.length ?? 0) > 1 ? split.hiddenCharts : []);
+  const rightChartsLabel = $derived.by(() => {
+    const shown = (catalog?.charts ?? []).filter((c) => !rightHiddenCharts.includes(c.id));
+    if (shown.length === 0) return 'aucune carte';
+    return [...shown]
+      .reverse()
+      .map((c) => c.name)
+      .join(', ');
+  });
+
+  function setSplit(next: SplitState): void {
+    split = next;
+    saveSplit(next);
+  }
+
+  function toggleSplit(): void {
+    // À l'ouverture, le volet de droite part de la vue de gauche.
+    leader = 'left';
+    setSplit({ ...split, enabled: !split.enabled });
+  }
+
+  function toggleLock(): void {
+    // Au verrouillage, le volet de droite rejoint celui de gauche.
+    leader = 'left';
+    setSplit({ ...split, locked: !split.locked });
+  }
+
+  function onCamera(pane: Pane, camera: MapCamera, user: boolean): void {
+    // Appelé depuis les événements de la carte : lecture non suivie.
+    cameras = { ...untrack(() => cameras), [pane]: camera };
+    if (user) leader = pane;
+  }
+
+  function recenter(): void {
+    leader = 'left';
+    chartView?.recenter();
+    if (split.enabled && !split.locked) chartViewRight?.recenter();
+  }
+  /** Disposition des panneaux de l'onglet Carte (mémorisée). */
+  let layout = $state<PanelLayout>(loadLayout());
+  let stageElement = $state<HTMLElement | null>(null);
+  const mapArea = (): Rect | null => stageElement?.getBoundingClientRect() ?? null;
+
+  function setLayout(next: PanelLayout): void {
+    layout = next;
+    saveLayout(next);
+  }
+
+  function updatePanel(id: PanelId, patch: Partial<PanelState>): void {
+    setLayout({ ...layout, [id]: { ...layout[id], ...patch } });
+  }
+
+  /** Propriétés communes d'un panneau déplaçable. */
+  function panel(id: PanelId) {
+    return {
+      title: PANEL_LABELS[id],
+      panel: layout[id],
+      area: mapArea,
+      onmove: (x: number, y: number) => updatePanel(id, { x, y }),
+      onreset: () => updatePanel(id, { x: null, y: null }),
+      onhide: () => updatePanel(id, { visible: false }),
+    };
+  }
 
   // Fermetures : les appels utilisent toujours la fonction IPC courante.
   const sourcesApi = new SourcesApi((command, args) => invokeFn(command, args));
   const simulator = new SimulatorApi((command, args) => invokeFn(command, args));
+  const chartsApi = new ChartsApi((command, args) => invokeFn(command, args));
   const weatherApi = new WeatherApi((command, args) => invokeFn(command, args));
   const alarmsApi = new AlarmsApi((command, args) => invokeFn(command, args));
 
@@ -232,6 +344,11 @@
   function setLayers(next: MapLayers): void {
     layers = next;
     saveLayers(next);
+  }
+
+  function setHiddenCharts(next: string[]): void {
+    hiddenCharts = next;
+    saveHiddenCharts(next);
   }
 
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -377,47 +494,111 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="app">
-  {#if !fullscreen}
-    <AppHeader
-      tabs={TABS}
-      {tab}
-      onselect={(id) => (tab = id as typeof tab)}
-      {pills}
-      {now}
-      {theme}
-      ontheme={() => (theme = theme === 'day' ? 'night' : 'day')}
-      {fullscreen}
-      onfullscreen={() => setFullscreen(true)}
-    />
-  {/if}
-  <div class="stage">
+  <!-- En-tête conservé en plein écran : onglets, état des données, heure. -->
+  <AppHeader
+    tabs={TABS}
+    {tab}
+    onselect={(id) => (tab = id as typeof tab)}
+    {pills}
+    {now}
+    {theme}
+    ontheme={() => (theme = theme === 'day' ? 'night' : 'day')}
+    {fullscreen}
+    onfullscreen={() => setFullscreen(!fullscreen)}
+  />
+  <div class="stage" bind:this={stageElement}>
     {#if catalog}
-      {#await import('./lib/components/ChartView.svelte') then { default: ChartView }}
-        <ChartView
-          bind:this={chartView}
-          {catalog}
-          {fix}
-          {stale}
-          {theme}
-          {northUp}
-          routes={layers.routes ? nav.routes : []}
-          targetIndex={nav.status?.targetIndex ?? null}
-          draft={nav.draft}
-          tracks={layers.tracks ? nav.displayedTracks : []}
-          drawing={nav.drawing}
-          onmapclick={(p) => nav.addPoint(p)}
-          ais={layers.ais ? ais : null}
-          onaisclick={(mmsi) => (selectedTarget = mmsi)}
-          wind={weatherShown ? (windField?.points ?? null) : null}
-          onviewchange={(b) => (mapView = b)}
-          anchor={alarms?.anchor ?? null}
-          {anchorAlerting}
-        />
-      {/await}
+      <!-- Nouveau dossier de cartes : la carte est reconstruite. -->
+      {#key catalog}
+        {#await import('./lib/components/ChartView.svelte') then { default: ChartView }}
+          <!-- Un volet, ou deux côte à côte ; le volet de droite a son propre
+               choix de cartes et les mêmes objets (bateau, routes, AIS…). -->
+          <div class="maps" class:split={split.enabled}>
+            <div class="pane">
+              <ChartView
+                bind:this={chartView}
+                {catalog}
+                hiddenCharts={shownHiddenCharts}
+                {fix}
+                {stale}
+                {theme}
+                {northUp}
+                routes={layers.routes ? nav.routes : []}
+                targetIndex={nav.status?.targetIndex ?? null}
+                draft={nav.draft}
+                tracks={layers.tracks ? nav.displayedTracks : []}
+                drawing={nav.drawing}
+                onmapclick={(p) => nav.addPoint(p)}
+                ais={layers.ais ? ais : null}
+                onaisclick={(mmsi) => (selectedTarget = mmsi)}
+                wind={weatherShown ? (windField?.points ?? null) : null}
+                onviewchange={(b) => (mapView = b)}
+                anchor={alarms?.anchor ?? null}
+                {anchorAlerting}
+                camera={followedCamera('left', split, leader, cameras)}
+                oncamera={(c, user) => onCamera('left', c, user)}
+              />
+            </div>
+            {#if split.enabled}
+              <div class="pane" data-testid="split-pane">
+                <ChartView
+                  bind:this={chartViewRight}
+                  {catalog}
+                  hiddenCharts={rightHiddenCharts}
+                  {fix}
+                  {stale}
+                  {theme}
+                  {northUp}
+                  routes={layers.routes ? nav.routes : []}
+                  targetIndex={nav.status?.targetIndex ?? null}
+                  draft={nav.draft}
+                  tracks={layers.tracks ? nav.displayedTracks : []}
+                  drawing={nav.drawing}
+                  onmapclick={(p) => nav.addPoint(p)}
+                  ais={layers.ais ? ais : null}
+                  onaisclick={(mmsi) => (selectedTarget = mmsi)}
+                  wind={weatherShown ? (windField?.points ?? null) : null}
+                  anchor={alarms?.anchor ?? null}
+                  {anchorAlerting}
+                  camera={followedCamera('right', split, leader, cameras)}
+                  oncamera={(c, user) => onCamera('right', c, user)}
+                />
+                {#if catalog.charts.length > 1}
+                  <div class="pane-charts">
+                    <Dropdown
+                      label="Cartes du volet droit"
+                      title="Choisir les cartes du volet droit"
+                      variant="chip"
+                      marked={rightHiddenCharts.length > 0}
+                      testid="right-charts-menu"
+                    >
+                      {#snippet button()}
+                        <span class="pane-label">Droite : {rightChartsLabel}</span>
+                      {/snippet}
+                      <MapLayersMenu
+                        {layers}
+                        onchange={setLayers}
+                        charts={catalog.charts}
+                        hiddenCharts={rightHiddenCharts}
+                        onchartschange={(hidden) => setSplit({ ...split, hiddenCharts: hidden })}
+                        objects={false}
+                      />
+                    </Dropdown>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+        {/await}
+      {/key}
     {/if}
 
     {#snippet statusStrip()}
       <StatusStrip {position} {silent} {connection} />
+    {/snippet}
+
+    {#snippet chartsSection()}
+      <ChartsFolderPanel api={chartsApi} {catalog} onchange={(c) => (catalog = c)} />
     {/snippet}
 
     {#snippet alarmsSection()}
@@ -426,7 +607,7 @@
 
     <!-- Alarmes : visibles dans tous les onglets, en plein écran compris. -->
     <AlarmBanner
-      --banner-top={fullscreen ? '3.4rem' : '0.6rem'}
+      --banner-top="0.6rem"
       alarms={alerting}
       simulated={alarms?.simulated ?? false}
       {soundUnavailable}
@@ -434,45 +615,73 @@
       error={alarmsError}
     />
 
-    {#if fullscreen}
-      <!-- Plein écran : en-tête masqué, onglets et sortie toujours accessibles. -->
-      <div class="tabs compact">
-        <div role="tablist" aria-label="Affichage">
-          {#each TABS as t (t.id)}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === t.id}
-              onclick={() => (tab = t.id)}
-            >
-              {t.label}
-            </button>
-          {/each}
-        </div>
-        <button
-          type="button"
-          class="fullscreen"
-          aria-pressed="true"
-          title="Quitter le plein écran (Échap)"
-          onclick={() => setFullscreen(false)}
-        >
-          Quitter le plein écran
-        </button>
-      </div>
-    {/if}
     {#if tab === 'chart'}
       <div class="map-side">
-        <MapLayersMenu {layers} onchange={setLayers} />
-        <AnchorCard
-          {alarms}
-          canDrop={fix !== null && !stale}
-          ondrop={dropAnchor}
-          onraise={raiseAnchor}
-        />
-        <LiveNavCard {snapshot} {silent} />
+        <!-- Rappel des calques masqués : toujours visible, pas un panneau. -->
+        {#if hiddenOnMap.length > 0}
+          <p class="hidden-note" role="status" data-testid="hidden-layers">
+            Masqué : {hiddenOnMap.join(', ')}
+          </p>
+        {/if}
+        {#if layout.anchor.visible}
+          <FloatingPanel {...panel('anchor')} bare>
+            <AnchorCard
+              {alarms}
+              canDrop={fix !== null && !stale}
+              ondrop={dropAnchor}
+              onraise={raiseAnchor}
+            />
+          </FloatingPanel>
+        {/if}
+        {#if layout.live.visible}
+          <FloatingPanel {...panel('live')} bare>
+            <LiveNavCard {snapshot} {silent} />
+          </FloatingPanel>
+        {/if}
       </div>
+      {#if layout.bar.visible}
+        <div class="bar-slot">
+          <FloatingPanel {...panel('bar')} compact>
+            <MapBar
+              {snapshot}
+              {silent}
+              {northUp}
+              canCenter={fix !== null}
+              {layout}
+              layersHidden={hiddenOnMap.length > 0}
+              onnorthup={() => (northUp = !northUp)}
+              oncenter={recenter}
+              split={split.enabled}
+              locked={split.locked}
+              onsplit={toggleSplit}
+              onlock={toggleLock}
+              ontoggle={(id) => updatePanel(id, { visible: !layout[id].visible })}
+              onresetlayout={() => setLayout(defaultLayout())}
+            >
+              {#snippet layersMenu()}
+                <MapLayersMenu
+                  {layers}
+                  onchange={setLayers}
+                  charts={catalog?.charts ?? []}
+                  hiddenCharts={shownHiddenCharts}
+                  onchartschange={setHiddenCharts}
+                />
+              {/snippet}
+            </MapBar>
+          </FloatingPanel>
+        </div>
+      {:else}
+        <button
+          type="button"
+          class="show-bar"
+          title="Afficher la barre de la carte"
+          onclick={() => updatePanel('bar', { visible: true })}
+        >
+          ▴ Barre
+        </button>
+      {/if}
       {#if weatherShown}
-        <div class="wind-bar">
+        <div class="wind-bar" class:above-bar={layout.bar.visible && layout.bar.x === null}>
           <WindTimeBar
             file={weatherShown}
             step={weatherStep}
@@ -510,7 +719,7 @@
         listen={listenFn}
       />
     {:else if tab === 'settings'}
-      <SettingsView {simulator} status={statusStrip} alarms={alarmsSection}>
+      <SettingsView {simulator} status={statusStrip} alarms={alarmsSection} charts={chartsSection}>
         {#snippet sources()}
           <SourcePanel api={sourcesApi} {connection} {rejections} />
           {#if connectionError}
@@ -518,106 +727,96 @@
           {/if}
         {/snippet}
       </SettingsView>
-    {:else if fullscreen}
-      <div class="fs-status" data-testid="fullscreen-status">
-        <StatusStrip {position} {silent} {connection} compact />
-      </div>
     {/if}
 
-    <aside class="panel" hidden={tab !== 'chart' || fullscreen}>
-      <header>
-        {#if engine}
-          <span class="version" data-testid="engine-status">
-            Moteur {engine.version} — protocole v{engine.protocolVersion}
-          </span>
-        {/if}
-      </header>
+    <!-- Panneau latéral toujours monté (brouillon de route, sélection). -->
+    <div class="side-slot" hidden={tab !== 'chart' || !layout.side.visible}>
+      <FloatingPanel {...panel('side')}>
+        <aside class="panel">
+          <header>
+            {#if engine}
+              <span class="version" data-testid="engine-status">
+                Moteur {engine.version} — protocole v{engine.protocolVersion}
+              </span>
+            {/if}
+          </header>
 
-      {#if engineError}
-        <p class="error" role="alert">Moteur indisponible : {engineError}</p>
-      {/if}
-
-      <PositionPanel {position} {silent} error={snapshotError} />
-
-      <div class="toolbar">
-        <button type="button" aria-pressed={northUp} onclick={() => (northUp = !northUp)}>
-          {northUp ? 'Nord en haut ✓' : 'Rotation libre'}
-        </button>
-        <button type="button" disabled={!fix} onclick={() => chartView?.recenter()}>
-          Centrer
-        </button>
-      </div>
-
-      {#if nav.status}
-        <NavigationPanel status={nav.status} {now} ondeactivate={() => nav.deactivate()} />
-      {/if}
-      {#if navEventError}
-        <p class="error" role="alert">État de navigation rejeté : {navEventError}</p>
-      {/if}
-      {#if nav.error}
-        <p class="error" role="alert">{nav.error}</p>
-      {/if}
-      {#if nav.notice}
-        <p class="notice" role="status">{nav.notice}</p>
-      {/if}
-
-      {#if linkAlert}
-        <p class="error" role="alert" data-testid="link-alert">Liaison : {linkAlert}</p>
-      {/if}
-      {#if connectionError}
-        <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
-      {/if}
-
-      <AisPanel
-        snapshot={ais}
-        {silent}
-        selected={selectedTarget}
-        onselect={(mmsi) => (selectedTarget = mmsi)}
-      />
-      {#if aisError}
-        <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
-      {/if}
-
-      <RoutesPanel {nav} />
-      <TracksPanel {nav} />
-
-      <section class="charts" aria-label="Cartes">
-        <h2>Cartes</h2>
-        {#if catalogError}
-          <p class="error" role="alert">Catalogue indisponible : {catalogError}</p>
-        {:else if catalog}
-          {#if catalog.error}
-            <p class="error" role="alert">Cartes indisponibles : {catalog.error}</p>
-          {:else if catalog.charts.length === 0}
-            <p class="hint" data-testid="no-charts">
-              Aucune carte. Déposez des fichiers <code>.mbtiles</code> dans :
-              <code class="path">{catalog.chartsDir}</code>
-              puis redémarrez NautiK.
-            </p>
-          {:else}
-            <ul>
-              {#each [...catalog.charts].reverse() as chart (chart.id)}
-                <li title={chart.description ?? chart.fileName}>
-                  {chart.name} <span class="muted">z{chart.minZoom}–{chart.maxZoom}</span>
-                  {#if chart.warnings.length > 0}
-                    <span class="warn" title={chart.warnings.join('\n')}>⚠</span>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
+          {#if engineError}
+            <p class="error" role="alert">Moteur indisponible : {engineError}</p>
           {/if}
-          {#each catalog.failures as failure (failure.fileName)}
-            <p class="error" role="alert">Carte ignorée {failure.fileName} : {failure.reason}</p>
-          {/each}
-        {:else}
-          <p class="muted">Chargement des cartes…</p>
-        {/if}
-      </section>
-    </aside>
 
-    {#if engine}
-      <footer class="safety" role="note">{engine.safetyNotice}</footer>
-    {/if}
+          <PositionPanel {position} {silent} error={snapshotError} />
+
+          {#if nav.status}
+            <NavigationPanel status={nav.status} {now} ondeactivate={() => nav.deactivate()} />
+          {/if}
+          {#if navEventError}
+            <p class="error" role="alert">État de navigation rejeté : {navEventError}</p>
+          {/if}
+          {#if nav.error}
+            <p class="error" role="alert">{nav.error}</p>
+          {/if}
+          {#if nav.notice}
+            <p class="notice" role="status">{nav.notice}</p>
+          {/if}
+
+          {#if linkAlert}
+            <p class="error" role="alert" data-testid="link-alert">Liaison : {linkAlert}</p>
+          {/if}
+          {#if connectionError}
+            <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
+          {/if}
+
+          <AisPanel
+            snapshot={ais}
+            {silent}
+            selected={selectedTarget}
+            onselect={(mmsi) => (selectedTarget = mmsi)}
+          />
+          {#if aisError}
+            <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
+          {/if}
+
+          <RoutesPanel {nav} />
+          <TracksPanel {nav} />
+
+          <section class="charts" aria-label="Cartes">
+            <h2>Cartes</h2>
+            {#if catalogError}
+              <p class="error" role="alert">Catalogue indisponible : {catalogError}</p>
+            {:else if catalog}
+              {#if catalog.error}
+                <p class="error" role="alert">Cartes indisponibles : {catalog.error}</p>
+              {:else if catalog.charts.length === 0}
+                <p class="hint" data-testid="no-charts">
+                  Aucune carte. Déposez des fichiers <code>.mbtiles</code> dans :
+                  <code class="path">{catalog.chartsDir}</code>
+                  ou choisissez un autre dossier dans Paramètres → Cartes.
+                </p>
+              {:else}
+                <ul>
+                  {#each [...catalog.charts].reverse() as chart (chart.id)}
+                    <li title={chart.description ?? chart.fileName}>
+                      {chart.name} <span class="muted">z{chart.minZoom}–{chart.maxZoom}</span>
+                      {#if chart.warnings.length > 0}
+                        <span class="warn" title={chart.warnings.join('\n')}>⚠</span>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              {#each catalog.failures as failure (failure.fileName)}
+                <p class="error" role="alert">
+                  Carte ignorée {failure.fileName} : {failure.reason}
+                </p>
+              {/each}
+            {:else}
+              <p class="muted">Chargement des cartes…</p>
+            {/if}
+          </section>
+        </aside>
+      </FloatingPanel>
+    </div>
   </div>
 </div>
 
@@ -637,80 +836,95 @@
     overflow: hidden;
   }
 
+  .maps {
+    position: absolute;
+    inset: 0;
+    display: flex;
+  }
+
+  .pane {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .maps.split .pane + .pane {
+    border-left: 2px solid var(--border);
+  }
+
+  /* Volet droit : échelle et zoom en bas à droite, hors de la barre. */
+  .maps.split .pane + .pane :global(.maplibregl-ctrl-bottom-left) {
+    right: 0;
+    bottom: 1.6rem;
+    left: auto;
+  }
+
+  .maps.split .pane + .pane :global(.zoom-level) {
+    right: 10px;
+    bottom: 3.8rem;
+    left: auto;
+  }
+
+  .pane-charts {
+    position: absolute;
+    top: 0.6rem;
+    left: 0.6rem;
+    z-index: 2;
+    max-width: calc(100% - 4rem);
+  }
+
+  .pane-label {
+    overflow: hidden;
+    max-width: 18rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Fenêtre étroite : volets l'un au-dessus de l'autre. */
+  @media (max-width: 700px) {
+    .maps.split {
+      flex-direction: column;
+    }
+
+    .maps.split .pane + .pane {
+      border-top: 2px solid var(--border);
+      border-left: 0;
+    }
+  }
+
   .map-side {
     position: absolute;
     top: 0.75rem;
     right: 3.2rem;
-    z-index: 2;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
     gap: 0.5rem;
-    max-height: calc(100% - 4rem);
+    max-height: calc(100% - 6.5rem);
     overflow: auto;
+  }
+
+  .hidden-note {
+    margin: 0;
+    padding: 0.15rem 0.5rem;
+    border-radius: 0.3rem;
+    background: var(--warn-bg);
+    color: var(--warn-fg);
+    font-size: 0.75rem;
+    font-weight: 600;
   }
 
   .wind-bar {
     position: absolute;
-    bottom: 2.2rem;
+    bottom: 0.75rem;
     left: 50%;
     z-index: 2;
     transform: translateX(-50%);
   }
 
-  .tabs {
-    position: absolute;
-    top: 0.6rem;
-    left: 50%;
-    z-index: 4;
-    display: flex;
-    gap: 0.4rem;
-    transform: translateX(-50%);
-  }
-
-  .tabs [role='tablist'] {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  }
-
-  .tabs button {
-    padding: 0.4rem 1.1rem;
-    border: 0;
-    border-radius: 0;
-    background: var(--panel-bg);
-    font-size: 0.95rem;
-    font-weight: 600;
-  }
-
-  .tabs button[aria-selected='true'] {
-    background: var(--fg);
-    color: var(--bg);
-  }
-
-  .tabs .fullscreen {
-    border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  }
-
-  .tabs.compact {
-    opacity: 0.75;
-  }
-
-  .tabs.compact:hover,
-  .tabs.compact:focus-within {
-    opacity: 1;
-  }
-
-  .fs-status {
-    position: absolute;
-    top: 3.2rem;
-    left: 0.75rem;
-    z-index: 2;
-    max-width: calc(100% - 5rem);
+  .wind-bar.above-bar {
+    bottom: 4.2rem;
   }
 
   .floating {
@@ -723,23 +937,49 @@
     background: var(--panel-bg);
   }
 
-  .panel[hidden] {
+  .side-slot[hidden] {
     display: none;
   }
 
-  .panel {
+  .side-slot {
     position: absolute;
     top: 0.75rem;
     left: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100% - 6.5rem);
+  }
+
+  .panel {
+    width: min(20rem, calc(100vw - 5rem));
+    padding: 0.5rem 1rem 0.75rem;
+  }
+
+  /* Barre centrée en bas, au-dessus de l'avertissement de sûreté. Pas de
+     transform : un panneau déplacé est positionné dans la fenêtre. */
+  .bar-slot {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0.6rem;
+    width: fit-content;
+    max-width: calc(100% - 1.5rem);
+    margin: 0 auto;
+  }
+
+  .show-bar {
+    position: absolute;
+    left: 0.75rem;
+    bottom: 0.4rem;
     z-index: 2;
-    width: min(20rem, calc(100% - 5rem));
-    max-height: calc(100% - 5rem);
-    overflow: auto;
-    padding: 0.75rem 1rem;
-    border-radius: 0.5rem;
-    background: var(--panel-bg);
-    color: var(--fg);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+    padding: 0.15rem 0.5rem;
+    font-size: 0.75rem;
+    opacity: 0.8;
+  }
+
+  .show-bar:hover,
+  .show-bar:focus-visible {
+    opacity: 1;
   }
 
   header {
@@ -753,13 +993,6 @@
   .muted {
     color: var(--muted);
     font-size: 0.75rem;
-  }
-
-  .toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    margin: 0.5rem 0;
   }
 
   button {
@@ -816,20 +1049,5 @@
     color: var(--error-fg);
     font-size: 0.85rem;
     font-weight: 600;
-  }
-
-  .safety {
-    position: absolute;
-    left: 50%;
-    bottom: 0.4rem;
-    z-index: 2;
-    transform: translateX(-50%);
-    max-width: min(40rem, calc(100% - 14rem));
-    padding: 0.2rem 0.6rem;
-    border-radius: 0.3rem;
-    background: var(--warn-bg);
-    color: var(--warn-fg);
-    font-size: 0.7rem;
-    text-align: center;
   }
 </style>

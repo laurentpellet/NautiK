@@ -26,6 +26,7 @@
   import type { Bounds, WindVector } from '../services/weather';
   import { ANCHOR_SOURCE, anchorData, anchorLayers } from '../map/anchor';
   import type { AnchorView } from '../services/alarms';
+  import type { MapCamera } from '../split';
   import {
     DRAFT_SOURCE,
     ROUTES_SOURCE,
@@ -77,6 +78,12 @@
     anchor?: AnchorView | null;
     /** L'alarme de mouillage est déclenchée. */
     anchorAlerting?: boolean;
+    /** Cartes MBTiles masquées (identifiants du catalogue). */
+    hiddenCharts?: string[];
+    /** Vue imposée (carte partagée verrouillée) ; `null` : carte libre. */
+    camera?: MapCamera | null;
+    /** Vue après chaque mouvement ; `user` : mouvement fait par l'utilisateur. */
+    oncamera?: (camera: MapCamera, user: boolean) => void;
   }
 
   let {
@@ -97,6 +104,9 @@
     onviewchange,
     anchor = null,
     anchorAlerting = false,
+    hiddenCharts = [],
+    camera = null,
+    oncamera,
   }: Props = $props();
 
   function emitView(m: MapLibreMap): void {
@@ -114,6 +124,25 @@
   let centeredOnBoat = false;
   /** L'utilisateur a déplacé la carte : plus de recentrage automatique. */
   let userMoved = false;
+  /** Mouvement en cours commencé par l'utilisateur (souris, doigt, clavier). */
+  let userMoving = false;
+  /** Vue imposée en cours d'application : pas de réémission. */
+  let applying = false;
+  /** Dernier geste sur cette carte (molette, pointeur, clavier, doigt). */
+  let lastInput = -Infinity;
+  let pointerHeld = false;
+  /** Délai pendant lequel un mouvement suit encore un geste (animation de zoom). */
+  const INPUT_WINDOW_MS = 600;
+
+  /** Mouvement dû à l'utilisateur : ce volet mène l'autre (cartes verrouillées). */
+  function byUser(): boolean {
+    return userMoving || pointerHeld || performance.now() - lastInput < INPUT_WINDOW_MS;
+  }
+
+  function cameraOf(m: MapLibreMap): MapCamera {
+    const c = m.getCenter();
+    return { center: [c.lng, c.lat], zoom: m.getZoom(), bearing: m.getBearing() };
+  }
 
   // Création unique de la carte : les changements ultérieurs passent par
   // des mises à jour ciblées, sans reconstruire le style.
@@ -137,10 +166,36 @@
     m.addControl(new ScaleControl({ unit: 'nautical' }), 'bottom-left');
     m.addControl(new AttributionControl({ compact: true }), 'bottom-right');
     m.touchPitch.disable();
+    // Gestes de l'utilisateur, repérés sur le conteneur : certains
+    // mouvements MapLibre (molette) ne portent pas l'événement d'origine.
+    const markInput = (): void => {
+      lastInput = performance.now();
+    };
+    const press = (): void => {
+      pointerHeld = true;
+      markInput();
+    };
+    const release = (): void => {
+      if (!pointerHeld) return;
+      pointerHeld = false;
+      markInput();
+    };
+    const capture = { capture: true, passive: true };
+    container.addEventListener('wheel', markInput, capture);
+    container.addEventListener('keydown', markInput, capture);
+    container.addEventListener('pointerdown', press, capture);
+    container.addEventListener('touchstart', press, capture);
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    window.addEventListener('touchend', release);
     // Une emprise de carte étendue donnerait un zoom trop faible.
     m.jumpTo({ zoom: startZoom(m.getZoom()) });
     m.on('movestart', (event) => {
-      if (event.originalEvent) userMoved = true;
+      userMoving = !applying && event.originalEvent !== undefined;
+      if (userMoving) userMoved = true;
+    });
+    m.on('move', () => {
+      if (!applying) oncamera?.(cameraOf(m), byUser());
     });
     m.on('load', () => {
       for (const source of [ROUTES_SOURCE, DRAFT_SOURCE, TRACKS_SOURCE]) {
@@ -171,8 +226,12 @@
       }
       loaded = true;
       emitView(m);
+      oncamera?.(cameraOf(m), false);
     });
-    m.on('moveend', () => emitView(m));
+    m.on('moveend', () => {
+      userMoving = false;
+      emitView(m);
+    });
     m.on('click', AIS_SYMBOL_LAYER, (event) => {
       const mmsi = event.features?.[0]?.properties.mmsi;
       if (!drawing && typeof mmsi === 'string') onaisclick?.(mmsi);
@@ -195,12 +254,32 @@
     });
     map = m;
     return () => {
+      container.removeEventListener('wheel', markInput, capture);
+      container.removeEventListener('keydown', markInput, capture);
+      container.removeEventListener('pointerdown', press, capture);
+      container.removeEventListener('touchstart', press, capture);
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+      window.removeEventListener('touchend', release);
       marker?.remove();
       marker = null;
       m.remove();
       map = null;
       loaded = false;
     };
+  });
+
+  // Vue imposée par l'autre volet (cartes verrouillées).
+  $effect(() => {
+    const m = map;
+    const c = camera;
+    if (!m || !c) return;
+    applying = true;
+    try {
+      m.jumpTo({ center: c.center, zoom: c.zoom, bearing: c.bearing });
+    } finally {
+      applying = false;
+    }
   });
 
   // Thème jour / nuit.
@@ -214,6 +293,21 @@
       for (const property of Object.keys(paint) as (keyof typeof paint)[]) {
         m.setPaintProperty(chartLayerId(chart), property, paint[property]);
       }
+    }
+  });
+
+  // Cartes masquées : visibilité des couches raster, sans reconstruire
+  // le style.
+  $effect(() => {
+    const m = map;
+    const hidden = hiddenCharts;
+    if (!m || !loaded) return;
+    for (const chart of untrack(() => catalog.charts)) {
+      m.setLayoutProperty(
+        chartLayerId(chart),
+        'visibility',
+        hidden.includes(chart.id) ? 'none' : 'visible',
+      );
     }
   });
 
