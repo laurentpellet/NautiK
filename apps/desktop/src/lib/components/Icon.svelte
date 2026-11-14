@@ -20,6 +20,13 @@
     split: ['M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z', 'M12 4v16'],
     lock: ['M6 11h12v9H6z', 'M8.5 11V8a3.5 3.5 0 0 1 7 0v3'],
     unlock: ['M6 11h12v9H6z', 'M8.5 11V8a3.5 3.5 0 0 1 6.8-1.2'],
+    route: [
+      'M5 19L10 9L15 14L19 5',
+      'M5 17a2 2 0 1 0 0 4a2 2 0 1 0 0-4',
+      'M19 3a2 2 0 1 0 0 4a2 2 0 1 0 0-4',
+    ],
+    routebar: ['M3 8h18v8H3z', 'M6 12h3', 'M11 12h2', 'M15 12h3'],
+    stop: ['M7 7h10v10H7z'],
   } as const;
 
   export type IconName = keyof typeof PATHS;

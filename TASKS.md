@@ -577,6 +577,25 @@ Critères (TEST_PLAN.md §7) :
       3 cellules incohérentes refusées ; Papeete (`02170631.F`, 2 417
       objets) affichée jour et nuit. Outil :
       `cargo run --release -p nav-charts --example cm93_summary -- BASE`.
+- [x] Panneau Route et barre de route :
+  - panneau **Route** dédié (navigation active, routes, tracé, GPX),
+    déplaçable et masquable, gardé monté pendant un tracé ; erreur d'état
+    de navigation toujours visible sur la carte, hors panneau ;
+  - **barre de route** en bas de la carte, empilée avec la barre d'outils
+    et la barre météo (pas de recouvrement quand elles passent sur
+    plusieurs lignes) : route, waypoint visé, DTW, BTW, XTE, temps et ETA
+    au waypoint, distance restante, durée et ETA de fin (valeurs du
+    moteur ; seuls les temps restants ETA − maintenant sont déduits) ;
+    valeurs estompées et marquées ⚠ si la position est obsolète ou
+    absente ou si le moteur est muet ; boutons panneau Route et arrêt ;
+  - icônes Route et Barre de route dans la barre d'outils ; dispositions
+    mémorisées antérieures complétées ;
+  - tests : durées et heures, éléments de la barre (valeurs, ETA
+    inconnue, obsolescence), disposition, application (commandes,
+    masquage, arrêt) ; vérifié dans le navigateur (jour, nuit, 1366×768,
+    téléphone).
+  - Reste : durée écoulée du trajet (heure d'activation à fournir par le
+    moteur).
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).

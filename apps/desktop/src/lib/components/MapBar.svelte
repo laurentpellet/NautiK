@@ -54,6 +54,8 @@
     { id: 'side', icon: 'panel' },
     { id: 'anchor', icon: 'anchor' },
     { id: 'live', icon: 'gauge' },
+    { id: 'route', icon: 'route' },
+    { id: 'routeBar', icon: 'routebar' },
   ];
 
   const metrics = $derived.by(() => {

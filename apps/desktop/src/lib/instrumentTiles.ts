@@ -10,8 +10,10 @@ import {
   depthParts,
   distanceParts,
   formatAge,
+  formatDuration,
   formatLatitude,
   formatLongitude,
+  formatUtcClock,
   speedParts,
 } from './format';
 import { DEPTH_UNITS, DISTANCE_UNITS, SPEED_UNITS, units } from './units.svelte';
@@ -312,5 +314,80 @@ export function navigationTiles(status: NavigationStatus | null, positionStale: 
     ),
     tile('xte', 'ÉCART ROUTE', xte === null ? MISSING : distance(Math.abs(xte)), xteUnit, null),
     tile('eta', 'ETA WP', eta, 'UTC', status.finished ? 'route terminée' : target),
+  ];
+}
+
+/**
+ * Éléments de la barre de route : distance, relèvement, écart, temps et
+ * heures d'arrivée au waypoint puis en fin de route. Les valeurs viennent
+ * du moteur ; seuls les temps restants (ETA − maintenant) sont déduits pour
+ * l'affichage. `positionStale` : valeurs obsolètes, estompées et signalées.
+ */
+export function routeBarTiles(
+  status: NavigationStatus | null,
+  now: number,
+  positionStale: boolean,
+): Tile[] {
+  if (!status) return [];
+  const tile = (
+    id: string,
+    label: string,
+    value: string,
+    unit: string,
+    detail: string | null,
+  ): Tile => ({
+    id,
+    label,
+    value,
+    unit,
+    stale: positionStale && value !== MISSING,
+    missing: value === MISSING,
+    detail: positionStale ? `calculé il y a ${formatAge(now - status.computedAt)}` : detail,
+  });
+  const dist = DISTANCE_UNITS[units.distance].label;
+  const xte = status.crossTrackM;
+  const xteUnit = xte === null || xte === 0 ? dist : xte > 0 ? `${dist} D` : `${dist} G`;
+  const clock = (time: number | null) => (time === null ? MISSING : formatUtcClock(time));
+  const togo = (time: number | null) => (time === null ? MISSING : formatDuration(time - now));
+  const noSpeed = 'vitesse fond nulle ou inconnue';
+  return [
+    tile('dtw', 'DTW', distance(status.distanceToTargetM), dist, 'Distance au waypoint'),
+    tile(
+      'btw',
+      'BTW',
+      status.bearingToTargetRad === null ? MISSING : degrees(status.bearingToTargetRad),
+      '°',
+      'Relèvement vrai du waypoint',
+    ),
+    tile(
+      'xte',
+      'XTE',
+      xte === null ? MISSING : distance(Math.abs(xte)),
+      xteUnit,
+      'Écart de route (D : à droite, G : à gauche)',
+    ),
+    tile(
+      'ttg',
+      'TEMPS WP',
+      togo(status.etaTarget),
+      '',
+      status.etaTarget === null ? noSpeed : 'Temps restant jusqu’au waypoint',
+    ),
+    tile('eta', 'ETA WP', clock(status.etaTarget), 'UTC', 'Heure d’arrivée au waypoint'),
+    tile(
+      'remaining',
+      'RESTE',
+      distance(status.remainingDistanceM),
+      dist,
+      'Distance restante jusqu’à la fin de la route',
+    ),
+    tile(
+      'ttgEnd',
+      'DURÉE',
+      togo(status.etaEnd),
+      '',
+      status.etaEnd === null ? noSpeed : 'Durée restante jusqu’à la fin de la route',
+    ),
+    tile('etaEnd', 'ETA FIN', clock(status.etaEnd), 'UTC', 'Heure d’arrivée en fin de route'),
   ];
 }

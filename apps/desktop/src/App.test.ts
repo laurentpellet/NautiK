@@ -1064,10 +1064,78 @@ describe('App', () => {
     expect(data.textContent).toContain('1.0 NM');
     expect(data.textContent).toContain('180°');
     expect(data.textContent).toContain('0.05 NM G');
-    expect(screen.getByText('SIMULATION')).toBeTruthy();
+    // Panneau Route et barre de route : badge dans les deux.
+    expect(screen.getAllByText('SIMULATION')).toHaveLength(2);
 
     events.emit(null, 'navigation-status');
     await vi.waitFor(() => expect(screen.queryByTestId('navigation-data')).toBeNull());
+    expect(screen.queryByTestId('route-bar')).toBeNull();
+  });
+
+  it('affiche la barre de route, ses éléments et ses commandes', async () => {
+    localStorage.removeItem('nautik.panels');
+    const events = fakeListen();
+    const calls: string[] = [];
+    const now = Date.now();
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.reject(new Error('x')),
+        deactivate_route: () => {
+          calls.push('deactivate_route');
+          return Promise.resolve(null);
+        },
+      }),
+      listen: events.listen,
+    });
+    await screen.findAllByText('Aucune position');
+    expect(screen.queryByTestId('route-bar')).toBeNull();
+    events.emit(
+      {
+        ...navigationStatus,
+        etaTarget: new Date(now + 25 * 60_000).toISOString(),
+        etaEnd: new Date(now + 3 * 3_600_000 + 5 * 60_000).toISOString(),
+      },
+      'navigation-status',
+    );
+    const bar = await screen.findByTestId('route-bar');
+    expect(bar.textContent).toContain('Tiputa → Avatoru');
+    expect(bar.textContent).toContain('WP001');
+    expect(bar.textContent).toContain('1/2');
+    const metric = (id: string) =>
+      bar.querySelector(`[data-metric="${id}"] .value`)?.textContent?.replace('⚠', '').trim();
+    expect(metric('dtw')).toBe('1.0NM');
+    expect(metric('btw')).toBe('180°');
+    expect(metric('xte')).toBe('0.05NM G');
+    expect(metric('ttg')).toMatch(/^2[45] min$/);
+    expect(metric('remaining')).toBe('10.0NM');
+    expect(metric('ttgEnd')).toMatch(/^3 h 0[45]$/);
+    // Aucune position : valeurs signalées obsolètes, jamais présentées comme fraîches.
+    expect(bar.querySelectorAll('.metric.stale').length).toBeGreaterThan(0);
+    expect(bar.querySelector('[data-metric="dtw"] [aria-label="donnée obsolète"]')).toBeTruthy();
+
+    // Le bouton Route masque puis réaffiche le panneau Route.
+    const routeButton = within(bar).getByRole('button', { name: 'Panneau Route' });
+    expect(routeButton.getAttribute('aria-pressed')).toBe('true');
+    await fireEvent.click(routeButton);
+    expect(
+      screen.getByLabelText('Panneau Route', { selector: 'section' }).closest('[hidden]'),
+    ).toBeTruthy();
+    await fireEvent.click(routeButton);
+    expect(
+      screen.getByLabelText('Panneau Route', { selector: 'section' }).closest('[hidden]'),
+    ).toBeNull();
+
+    // La barre se masque depuis la barre d'outils, puis se réaffiche.
+    const mapBar = screen.getByTestId('map-bar');
+    await fireEvent.click(within(mapBar).getByRole('button', { name: 'Barre de route' }));
+    expect(screen.queryByTestId('route-bar')).toBeNull();
+    await fireEvent.click(within(mapBar).getByRole('button', { name: 'Barre de route' }));
+    const again = await screen.findByTestId('route-bar');
+
+    await fireEvent.click(within(again).getByRole('button', { name: 'Arrêter la navigation' }));
+    await vi.waitFor(() => expect(calls).toEqual(['deactivate_route']));
+    localStorage.removeItem('nautik.panels');
   });
 
   it('rejette visiblement un état de navigation invalide', async () => {

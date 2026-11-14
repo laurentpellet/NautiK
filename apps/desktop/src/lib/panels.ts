@@ -5,7 +5,7 @@
  * toujours visibles.
  */
 
-export type PanelId = 'side' | 'anchor' | 'live' | 'bar';
+export type PanelId = 'side' | 'anchor' | 'live' | 'bar' | 'route' | 'routeBar';
 
 export interface PanelState {
   visible: boolean;
@@ -16,13 +16,15 @@ export interface PanelState {
 
 export type PanelLayout = Record<PanelId, PanelState>;
 
-export const PANEL_IDS: PanelId[] = ['side', 'anchor', 'live', 'bar'];
+export const PANEL_IDS: PanelId[] = ['side', 'anchor', 'live', 'bar', 'route', 'routeBar'];
 
 export const PANEL_LABELS: Record<PanelId, string> = {
   side: 'Panneau',
   anchor: 'Mouillage',
   live: 'Navigation',
   bar: 'Barre',
+  route: 'Route',
+  routeBar: 'Barre de route',
 };
 
 const DEFAULT_STATE: PanelState = { visible: true, x: null, y: null };

@@ -155,7 +155,8 @@ Sur la carte :
   obsolète est estompée et marquée ⚠ ; sans position, « Aucune position »
   est affiché ;
 - icônes **Panneau**, **Mouillage** (ancre), **Navigation**
-  (cadran) : affichent ou masquent chaque panneau (estompée = masqué) ;
+  (cadran), **Route** (tracé) et **Barre de route** : affichent ou
+  masquent chaque panneau (estompée = masqué) ;
 - **↺ Disposition par défaut** : remet tous les panneaux en place et les
   réaffiche.
 
@@ -217,12 +218,36 @@ depuis le lancement. Les unités se règlent dans **Paramètres → Unités**.
 
 ## 6. Routes, navigation et traces
 
+Les routes ont leur propre **panneau Route** (à droite de la carte, sous
+Mouillage et Navigation ; la colonne défile si la fenêtre est basse) :
+navigation active, liste des routes, tracé et import GPX. Les traces
+restent dans le panneau de gauche.
+
 - **Nouvelle route** : cliquez les points de passage sur la carte, puis
   **Enregistrer**.
 - **Naviguer** : active la route ; NautiK affiche la distance et le
   relèvement du prochain point, l'écart de route (XTE), la distance
   restante et l'heure d'arrivée estimée. Un point est considéré atteint à
   0,1 mille. **Arrêter la navigation** la désactive.
+- **Barre de route** : pendant la navigation, une barre s'affiche en bas
+  de la carte, au-dessus de la barre d'outils. Elle rappelle la route,
+  le waypoint visé (rang / nombre de points) et la mention SIMULATION le
+  cas échéant, puis :
+  - **DTW** : distance au waypoint ; **BTW** : son relèvement vrai ;
+  - **XTE** : écart de route (D : à droite, G : à gauche) ;
+  - **TEMPS WP** et **ETA WP** : temps restant et heure UTC d'arrivée au
+    waypoint ;
+  - **RESTE** : distance jusqu'à la fin de la route ;
+  - **DURÉE** et **ETA FIN** : temps restant et heure UTC d'arrivée en fin
+    de route.
+
+  Les temps et heures sont estimés à la vitesse fond courante ; vitesse
+  nulle ou inconnue : « — ». Si la position est obsolète ou absente, ou
+  si le moteur ne répond plus, toutes les valeurs sont estompées et
+  marquées ⚠ (l'infobulle donne l'âge du calcul). Ses boutons affichent
+  ou masquent le panneau Route et arrêtent la navigation. Comme les
+  autres panneaux, elle se déplace par sa poignée et se masque par **×**
+  (icône **Barre de route** de la barre d'outils pour la réafficher).
 - Une route peut être inversée ou supprimée.
 - **Traces** : **Enregistrer** démarre l'enregistrement (un point toutes
   les 5 s au plus, et seulement après 10 m parcourus). Une trace

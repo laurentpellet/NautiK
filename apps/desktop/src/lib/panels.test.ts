@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   KEEP_VISIBLE_PX,
+  PANEL_IDS,
+  PANEL_LABELS,
   clampPosition,
   defaultLayout,
   hiddenPanels,
@@ -49,6 +51,25 @@ describe('disposition des panneaux', () => {
     expect('layers' in layout).toBe(false);
     expect(hiddenPanels(layout)).toEqual(['Panneau']);
     expect(isCustomized(layout)).toBe(true);
+  });
+
+  it('ajoute le panneau Route et la barre de route, affichés par défaut', () => {
+    const d = defaultLayout();
+    expect(PANEL_IDS).toContain('route');
+    expect(PANEL_IDS).toContain('routeBar');
+    expect(d.route).toEqual({ visible: true, x: null, y: null });
+    expect(d.routeBar).toEqual({ visible: true, x: null, y: null });
+    expect(PANEL_LABELS.route).toBe('Route');
+    expect(PANEL_LABELS.routeBar).toBe('Barre de route');
+    // Disposition mémorisée avant leur ajout : ils sont affichés à leur place.
+    const old = loadLayout(store(JSON.stringify({ side: { visible: false, x: null, y: null } })));
+    expect(old.route).toEqual({ visible: true, x: null, y: null });
+    expect(old.routeBar).toEqual({ visible: true, x: null, y: null });
+    const hidden = loadLayout(
+      store(JSON.stringify({ routeBar: { visible: false, x: 12, y: 34 } })),
+    );
+    expect(hidden.routeBar).toEqual({ visible: false, x: 12, y: 34 });
+    expect(hiddenPanels(hidden)).toEqual(['Barre de route']);
   });
 
   it('mémorise la disposition et tolère un stockage indisponible', () => {

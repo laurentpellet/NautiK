@@ -3,6 +3,7 @@ import {
   cardinal,
   instrumentTiles,
   navigationTiles,
+  routeBarTiles,
   positionTile,
   systemTiles,
 } from './instrumentTiles';
@@ -181,5 +182,60 @@ describe('tuiles de navigation', () => {
     expect(byId(tiles, 'btw')).toMatchObject({ value: '—', missing: true });
     expect(byId(tiles, 'eta')).toMatchObject({ value: '—', missing: true });
     expect(navigationTiles(null, false)).toEqual([]);
+  });
+});
+
+describe('barre de route', () => {
+  const now = Date.UTC(2026, 10, 12, 13, 40);
+
+  it('distance, relèvement, écart, temps et heures d’arrivée', () => {
+    const tiles = routeBarTiles(
+      { ...status, etaEnd: Date.UTC(2026, 10, 12, 16, 45), computedAt: now },
+      now,
+      false,
+    );
+    expect(tiles.map((t) => t.id)).toEqual([
+      'dtw',
+      'btw',
+      'xte',
+      'ttg',
+      'eta',
+      'remaining',
+      'ttgEnd',
+      'etaEnd',
+    ]);
+    expect(byId(tiles, 'dtw')).toMatchObject({ value: '1.5', unit: 'NM', stale: false });
+    expect(byId(tiles, 'btw')).toMatchObject({ value: '180', unit: '°' });
+    expect(byId(tiles, 'xte')).toMatchObject({ value: '0.05', unit: 'NM G' });
+    expect(byId(tiles, 'ttg')).toMatchObject({ value: '25 min', unit: '' });
+    expect(byId(tiles, 'eta')).toMatchObject({ value: '14:05', unit: 'UTC' });
+    expect(byId(tiles, 'remaining')).toMatchObject({ value: '2.7', unit: 'NM' });
+    expect(byId(tiles, 'ttgEnd')).toMatchObject({ value: '3 h 05' });
+    expect(byId(tiles, 'etaEnd')).toMatchObject({ value: '16:45', unit: 'UTC' });
+    expect(byId(routeBarTiles({ ...status, crossTrackM: 50 }, now, false), 'xte')?.unit).toBe(
+      'NM D',
+    );
+    expect(routeBarTiles(null, now, false)).toEqual([]);
+  });
+
+  it('ETA inconnue : « — » et raison, jamais une durée inventée', () => {
+    const tiles = routeBarTiles(
+      { ...status, etaTarget: null, etaEnd: null, bearingToTargetRad: null, crossTrackM: null },
+      now,
+      false,
+    );
+    for (const id of ['ttg', 'eta', 'ttgEnd', 'etaEnd', 'btw', 'xte']) {
+      expect(byId(tiles, id)).toMatchObject({ value: '—', missing: true, stale: false });
+    }
+    expect(byId(tiles, 'ttg')?.detail).toBe('vitesse fond nulle ou inconnue');
+    expect(byId(tiles, 'ttgEnd')?.detail).toBe('vitesse fond nulle ou inconnue');
+  });
+
+  it('position obsolète : valeurs signalées avec l’âge du calcul', () => {
+    const tiles = routeBarTiles({ ...status, computedAt: now - 90_000 }, now, true);
+    expect(byId(tiles, 'dtw')).toMatchObject({ stale: true });
+    expect(byId(tiles, 'dtw')?.detail).toContain('calculé il y a');
+    // Une valeur absente n'est pas « obsolète » : elle reste « — ».
+    expect(byId(tiles, 'etaEnd')).toMatchObject({ value: '—', stale: false, missing: true });
   });
 });

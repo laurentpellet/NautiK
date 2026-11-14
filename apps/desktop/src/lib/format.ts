@@ -126,17 +126,28 @@ export function formatCrossTrack(meters: number | null): string {
   return `${formatDistance(Math.abs(meters))}${side}`;
 }
 
+/** Heure UTC `HH:MM` (sans le suffixe UTC). */
+export function formatUtcClock(time: number): string {
+  const d = new Date(time);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * Durée arrondie à la minute : `45 min`, `1 h 05`, `2 j 03 h` (au-delà de
+ * 48 h). Négative : 0 min.
+ */
+export function formatDuration(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h ${String(minutes % 60).padStart(2, '0')}`;
+  return `${Math.floor(hours / 24)} j ${String(hours % 24).padStart(2, '0')} h`;
+}
+
 /** Heure UTC `HH:MM` et durée restante : `14:32 UTC (dans 1 h 05)`. */
 export function formatEta(eta: number | null, now: number): string {
   if (eta === null) return '—';
-  const d = new Date(eta);
-  const clock = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
-  const minutes = Math.max(0, Math.round((eta - now) / 60_000));
-  const remaining =
-    minutes < 60
-      ? `${minutes} min`
-      : `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')}`;
-  return `${clock} (dans ${remaining})`;
+  return `${formatUtcClock(eta)} UTC (dans ${formatDuration(eta - now)})`;
 }
 
 /** Gravité d'un état de connexion, pour l'affichage. */

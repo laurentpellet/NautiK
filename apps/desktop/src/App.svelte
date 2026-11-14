@@ -71,6 +71,7 @@
   import NavigationPanel from './lib/components/NavigationPanel.svelte';
   import PositionPanel from './lib/components/PositionPanel.svelte';
   import RoutesPanel from './lib/components/RoutesPanel.svelte';
+  import RouteBar from './lib/components/RouteBar.svelte';
   import SourcePanel from './lib/components/SourcePanel.svelte';
   import TracksPanel from './lib/components/TracksPanel.svelte';
   import { describeConnection, isEngineSilent } from './lib/format';
@@ -376,6 +377,12 @@
   const position = $derived(snapshot?.position ?? null);
   const fix = $derived(position?.fix ?? null);
   const stale = $derived(fix !== null && (silent || (position?.stale ?? false)));
+  /** Navigation calculée sur une position obsolète ou absente : signalée. */
+  const navStale = $derived(silent || position === null || position.stale);
+  /** Barre de route à sa place par défaut, en bas : colonnes raccourcies. */
+  const routeBarDocked = $derived(
+    nav.status !== null && layout.routeBar.visible && layout.routeBar.x === null,
+  );
 
   const pills = $derived(statusPills({ position, silent, connection, ais, alarms }));
 
@@ -662,7 +669,7 @@
     />
 
     {#if tab === 'chart'}
-      <div class="map-side">
+      <div class="map-side" class:short={routeBarDocked}>
         <!-- Rappel des calques masqués : toujours visible, pas un panneau. -->
         {#if hiddenOnMap.length > 0}
           <p class="hidden-note" role="status" data-testid="hidden-layers">
@@ -685,45 +692,100 @@
             />
           </FloatingPanel>
         {/if}
+        <!-- État de navigation rejeté : jamais masqué avec un panneau. -->
+        {#if navEventError}
+          <p class="hidden-note nav-error" role="alert">
+            État de navigation rejeté : {navEventError}
+          </p>
+        {/if}
         {#if layout.live.visible}
           <FloatingPanel {...panel('live')} bare>
             <LiveNavCard {snapshot} {silent} />
           </FloatingPanel>
         {/if}
-      </div>
-      {#if layout.bar.visible}
-        <div class="bar-slot">
-          <FloatingPanel {...panel('bar')} compact>
-            <MapBar
-              {snapshot}
-              {silent}
-              {northUp}
-              canCenter={fix !== null}
-              {layout}
-              layersHidden={hiddenOnMap.length > 0}
-              onnorthup={() => (northUp = !northUp)}
-              oncenter={recenter}
-              split={split.enabled}
-              locked={split.locked}
-              onsplit={toggleSplit}
-              onlock={toggleLock}
-              ontoggle={(id) => updatePanel(id, { visible: !layout[id].visible })}
-              onresetlayout={() => setLayout(defaultLayout())}
-            >
-              {#snippet layersMenu()}
-                <MapLayersMenu
-                  {layers}
-                  onchange={setLayers}
-                  charts={catalog?.charts ?? []}
-                  hiddenCharts={shownHiddenCharts}
-                  onchartschange={setHiddenCharts}
-                  cm93={cm93Available}
-                />
-              {/snippet}
-            </MapBar>
+        <!-- Panneau Route gardé monté (brouillon de route en cours). -->
+        <div class="route-slot" hidden={!layout.route.visible}>
+          <FloatingPanel {...panel('route')}>
+            <section class="panel" aria-label="Panneau Route">
+              {#if nav.status}
+                <NavigationPanel status={nav.status} {now} ondeactivate={() => nav.deactivate()} />
+              {/if}
+              {#if nav.error}
+                <p class="error" role="alert">{nav.error}</p>
+              {/if}
+              {#if nav.notice}
+                <p class="notice" role="status">{nav.notice}</p>
+              {/if}
+              <RoutesPanel {nav} />
+            </section>
           </FloatingPanel>
         </div>
-      {:else}
+      </div>
+      <!-- Barres du bas empilées (vent, route, outils) : une barre qui passe
+           sur plusieurs lignes repousse les autres, sans recouvrement. -->
+      <div class="bottom-bars">
+        {#if weatherShown}
+          <div class="wind-bar">
+            <WindTimeBar
+              file={weatherShown}
+              step={weatherStep}
+              field={windField}
+              error={windError}
+              {now}
+              onstep={(s) => (weatherStep = s)}
+              onclose={() => showWeather(null)}
+            />
+          </div>
+        {/if}
+        {#if nav.status && layout.routeBar.visible}
+          <div class="route-bar-slot">
+            <FloatingPanel {...panel('routeBar')} compact>
+              <RouteBar
+                status={nav.status}
+                {now}
+                stale={navStale}
+                routePanel={layout.route.visible}
+                ontoggleroute={() => updatePanel('route', { visible: !layout.route.visible })}
+                ondeactivate={() => nav.deactivate()}
+              />
+            </FloatingPanel>
+          </div>
+        {/if}
+        {#if layout.bar.visible}
+          <div class="bar-slot">
+            <FloatingPanel {...panel('bar')} compact>
+              <MapBar
+                {snapshot}
+                {silent}
+                {northUp}
+                canCenter={fix !== null}
+                {layout}
+                layersHidden={hiddenOnMap.length > 0}
+                onnorthup={() => (northUp = !northUp)}
+                oncenter={recenter}
+                split={split.enabled}
+                locked={split.locked}
+                onsplit={toggleSplit}
+                onlock={toggleLock}
+                ontoggle={(id) => updatePanel(id, { visible: !layout[id].visible })}
+                onresetlayout={() => setLayout(defaultLayout())}
+              >
+                {#snippet layersMenu()}
+                  <MapLayersMenu
+                    {layers}
+                    onchange={setLayers}
+                    charts={catalog?.charts ?? []}
+                    hiddenCharts={shownHiddenCharts}
+                    onchartschange={setHiddenCharts}
+                    cm93={cm93Available}
+                  />
+                {/snippet}
+              </MapBar>
+            </FloatingPanel>
+          </div>
+        {/if}
+      </div>
+      {#if !layout.bar.visible}
         <button
           type="button"
           class="show-bar"
@@ -732,19 +794,6 @@
         >
           ▴ Barre
         </button>
-      {/if}
-      {#if weatherShown}
-        <div class="wind-bar" class:above-bar={layout.bar.visible && layout.bar.x === null}>
-          <WindTimeBar
-            file={weatherShown}
-            step={weatherStep}
-            field={windField}
-            error={windError}
-            {now}
-            onstep={(s) => (weatherStep = s)}
-            onclose={() => showWeather(null)}
-          />
-        </div>
       {/if}
     {/if}
     {#if fullscreenError}
@@ -783,7 +832,11 @@
     {/if}
 
     <!-- Panneau latéral toujours monté (brouillon de route, sélection). -->
-    <div class="side-slot" hidden={tab !== 'chart' || !layout.side.visible}>
+    <div
+      class="side-slot"
+      class:short={routeBarDocked}
+      hidden={tab !== 'chart' || !layout.side.visible}
+    >
       <FloatingPanel {...panel('side')}>
         <aside class="panel">
           <header>
@@ -799,19 +852,6 @@
           {/if}
 
           <PositionPanel {position} {silent} error={snapshotError} />
-
-          {#if nav.status}
-            <NavigationPanel status={nav.status} {now} ondeactivate={() => nav.deactivate()} />
-          {/if}
-          {#if navEventError}
-            <p class="error" role="alert">État de navigation rejeté : {navEventError}</p>
-          {/if}
-          {#if nav.error}
-            <p class="error" role="alert">{nav.error}</p>
-          {/if}
-          {#if nav.notice}
-            <p class="notice" role="status">{nav.notice}</p>
-          {/if}
 
           {#if linkAlert}
             <p class="error" role="alert" data-testid="link-alert">Liaison : {linkAlert}</p>
@@ -830,8 +870,11 @@
             <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
           {/if}
 
-          <RoutesPanel {nav} />
           <TracksPanel {nav} />
+          <!-- Erreur des routes et traces : dans le panneau Route, ici s'il est masqué. -->
+          {#if nav.error && !layout.route.visible}
+            <p class="error" role="alert">{nav.error}</p>
+          {/if}
 
           <section class="charts" aria-label="Cartes">
             <h2>Cartes</h2>
@@ -972,16 +1015,26 @@
     max-width: 28rem;
   }
 
-  .wind-bar {
+  /* Barres du bas (vent, route, outils), centrées et empilées. Pas de
+     transform : un panneau déplacé est positionné dans la fenêtre. */
+  .bottom-bars {
     position: absolute;
-    bottom: 0.75rem;
-    left: 50%;
+    left: 0;
+    right: 0;
+    bottom: 0.6rem;
     z-index: 2;
-    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0 0.75rem;
+    /* Les côtés vides laissent passer les gestes sur la carte. */
+    pointer-events: none;
   }
 
-  .wind-bar.above-bar {
-    bottom: 4.2rem;
+  .bottom-bars > * {
+    max-width: 100%;
+    pointer-events: auto;
   }
 
   .floating {
@@ -1012,16 +1065,32 @@
     padding: 0.5rem 1rem 0.75rem;
   }
 
-  /* Barre centrée en bas, au-dessus de l'avertissement de sûreté. Pas de
-     transform : un panneau déplacé est positionné dans la fenêtre. */
-  .bar-slot {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0.6rem;
-    width: fit-content;
-    max-width: calc(100% - 1.5rem);
-    margin: 0 auto;
+  .route-slot[hidden] {
+    display: none;
+  }
+
+  /* Colonne de droite : Mouillage et Navigation gardent leur taille, le
+     panneau Route se réduit et défile (aucun recouvrement). */
+  .map-side > :global(.floating) {
+    flex-shrink: 0;
+  }
+
+  .route-slot {
+    display: flex;
+    flex-direction: column;
+    /* Au moins le début du panneau reste visible ; la colonne défile. */
+    min-height: 10rem;
+  }
+
+  .nav-error {
+    background: var(--warn-bg);
+    color: var(--error-fg);
+  }
+
+  /* Barre de route affichée en bas : colonnes raccourcies d'autant. */
+  .map-side.short,
+  .side-slot.short {
+    max-height: calc(100% - 10rem);
   }
 
   .show-bar {

@@ -6,7 +6,9 @@ import {
   formatCrossTrack,
   formatDepth,
   formatDistance,
+  formatDuration,
   formatEta,
+  formatUtcClock,
   formatLatitude,
   formatLongitude,
   formatRelativeAngle,
@@ -103,6 +105,16 @@ describe('formatage navigation', () => {
     expect(formatEta(Date.parse('2026-11-12T10:25:00Z'), now)).toBe('10:25 UTC (dans 25 min)');
     expect(formatEta(Date.parse('2026-11-12T11:05:00Z'), now)).toBe('11:05 UTC (dans 1 h 05)');
     expect(formatEta(null, now)).toBe('—');
+  });
+
+  it('formate une durée et une heure UTC', () => {
+    expect(formatDuration(0)).toBe('0 min');
+    expect(formatDuration(-5 * 60_000)).toBe('0 min');
+    expect(formatDuration(59 * 60_000)).toBe('59 min');
+    expect(formatDuration(65 * 60_000)).toBe('1 h 05');
+    expect(formatDuration(47 * 3_600_000 + 59 * 60_000)).toBe('47 h 59');
+    expect(formatDuration(50 * 3_600_000)).toBe('2 j 02 h');
+    expect(formatUtcClock(Date.parse('2026-11-12T03:07:59Z'))).toBe('03:07');
   });
 });
 
