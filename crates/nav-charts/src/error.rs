@@ -55,4 +55,8 @@ pub enum ChartError {
     /// Erreur de lecture d'une tuile.
     #[error("erreur de lecture de tuile")]
     TileRead(#[source] sqlx::Error),
+
+    /// Chemin de cellule ENC refusé (hors du dossier, mal formé, absent).
+    #[error("cellule ENC refusée ({0})")]
+    InvalidCellPath(String),
 }

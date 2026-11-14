@@ -13,15 +13,21 @@
 //! La base de l'application reste du ressort de `nav-storage`.
 
 pub mod catalog;
+pub mod enc;
 pub mod error;
 pub mod mbtiles;
 pub mod metadata;
+pub mod s57;
 pub mod tile;
 
 pub use catalog::{ChartCatalog, ChartInfo, ChartLoadFailure, TileReply};
+pub use enc::{resolve_cell_path, scan_enc_dir, EncCell, EncInventory};
 pub use error::ChartError;
 pub use mbtiles::{MbTiles, Tile};
 pub use metadata::{Bounds, Center, ChartMetadata};
+pub use s57::{
+    decode_cell, decode_cell_file, S57Cell, S57CellSummary, S57Error, S57Feature, S57Geometry,
+};
 pub use tile::{ChartId, TileCoord, TileFormat};
 
 /// Nom du composant, utilisé comme identifiant de source dans les logs.

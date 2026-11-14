@@ -8,6 +8,8 @@
   import LiveNavCard from './lib/components/LiveNavCard.svelte';
   import MapLayersMenu from './lib/components/MapLayersMenu.svelte';
   import ChartsFolderPanel from './lib/components/ChartsFolderPanel.svelte';
+  import EncFolderPanel from './lib/components/EncFolderPanel.svelte';
+  import { EncApi } from './lib/services/enc';
   import FloatingPanel from './lib/components/FloatingPanel.svelte';
   import MapBar from './lib/components/MapBar.svelte';
   import {
@@ -223,6 +225,7 @@
   const sourcesApi = new SourcesApi((command, args) => invokeFn(command, args));
   const simulator = new SimulatorApi((command, args) => invokeFn(command, args));
   const chartsApi = new ChartsApi((command, args) => invokeFn(command, args));
+  const encApi = new EncApi((command, args) => invokeFn(command, args));
   const weatherApi = new WeatherApi((command, args) => invokeFn(command, args));
   const alarmsApi = new AlarmsApi((command, args) => invokeFn(command, args));
 
@@ -599,6 +602,7 @@
 
     {#snippet chartsSection()}
       <ChartsFolderPanel api={chartsApi} {catalog} onchange={(c) => (catalog = c)} />
+      <EncFolderPanel api={encApi} />
     {/snippet}
 
     {#snippet alarmsSection()}

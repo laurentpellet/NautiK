@@ -452,7 +452,47 @@ Critères (TEST_PLAN.md §7) :
 
 ## Phase 9 — Évolutions
 
-- [ ] Cartes ENC S-57.
+- [ ] Cartes ENC S-57 (en cours).
+  - [x] Dossier ENC : choix dans Paramètres → Cartes (dialogue du
+    système, mémorisé dans la base, réglage `enc_dir`), dossier disparu
+    signalé ; inventaire `nav_charts::enc` : cellules `.000`, mises à jour
+    `.001`…, catalogues `CATALOG.031`, parcours borné (profondeur 8,
+    50 000 entrées, liens symboliques ignorés).
+  - [x] Décodage ISO 8211 / S-57 des cellules de base (`nav_charts::s57`) :
+    - lecteur ISO 8211 borné (guide, répertoire, DDR, contrôles de
+      format) ; implémentation binaire ENC seule (ASCII refusée) ;
+    - DSID/DSSI/DSPM : fichier de mise à jour (EXPP 2) refusé, WGS 84
+      (HDAT 2) et mètres (DUNI 1) imposés, COMF/SOMF non nuls ; nombres
+      d'enregistrements DSSI vérifiés (cellule tronquée entre deux
+      enregistrements détectée) ;
+    - vecteurs (VRID, VRPT, SG2D, SG3D) et objets (FRID, ATTF, NATF en
+      Latin-1 ou UCS-2, FSPT) ; géométrie WGS 84 `[lon, lat]` : points,
+      sondes (m), lignes (arcs enchaînés, arcs masqués non tracés),
+      surfaces (contours fermés, extérieur d'abord, trous) ;
+    - objet incohérent (référence manquante, contour non fermé,
+      coordonnée hors limites, instruction de mise à jour) écarté et
+      compté, jamais de position inventée ; 20 problèmes détaillés au
+      plus ; fichier de 64 Mio au plus, lu hors du runtime ;
+    - tests : cellule fabriquée par un encodeur ISO 8211 de test, chaque
+      troncature rejetée, octets corrompus sans panique (≈ 4 000
+      variantes), formats invalides.
+    - Application : bouton « Lire » par cellule (commande
+      `inspect_enc_cell`, chemin relatif vérifié par
+      `resolve_cell_path` : ni `..`, ni chemin absolu, ni sortie du
+      dossier par lien) ; résumé (édition, date, usage, échelle, classes,
+      sondes, emprise), objets écartés et mises à jour non appliquées
+      signalés.
+    - Vérifié sur deux cellules NOAA réelles (US5MA1AM, port, 1 538
+      objets, 1 177 sondes ; US4MA23M, approche, 1 748 objets) : aucun
+      objet écarté, emprise et attributs cohérents (bouées nommées,
+      DRVAL1/DRVAL2, VALSOU), ≈ 70 ms par cellule ; `.001` et
+      `CATALOG.031` refusés comme cellules de base. Outil :
+      `cargo run -p nav-charts --example enc_summary -- CELLULE.000`
+      (`NAUTIK_ENC_CLASS=n` pour lister les attributs d'une classe).
+  - [ ] Application des mises à jour `.001`… (RUIN, FSPC, VRPC, SGCC,
+    contrôle RVER/UPDN).
+  - [ ] Affichage sur la carte, symbologie S-52 simplifiée (profondeurs,
+    dangers).
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).

@@ -9,6 +9,7 @@
 mod alarms;
 mod charts;
 mod commands;
+mod enc;
 mod events;
 mod gpx_io;
 mod routing;
@@ -146,6 +147,10 @@ pub fn run() -> anyhow::Result<()> {
             commands::choose_charts_dir,
             commands::reset_charts_dir,
             commands::reload_charts,
+            enc::get_enc_folder,
+            enc::choose_enc_dir,
+            enc::clear_enc_dir,
+            enc::inspect_enc_cell,
             routing::list_routes,
             routing::create_route,
             routing::reverse_route,

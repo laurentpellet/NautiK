@@ -34,6 +34,7 @@ const routingDefaults: Record<string, () => Promise<unknown>> = {
   get_simulator_settings: () => Promise.resolve({ speedMps: 4.115 }),
   get_alarms: () => Promise.resolve(alarmsSnapshot()),
   list_alarm_events: () => Promise.resolve([]),
+  get_enc_folder: () => Promise.resolve({ dir: null, inventory: null, error: null }),
 };
 
 function alarmsSnapshot(patch: Record<string, unknown> = {}) {
@@ -70,10 +71,12 @@ function sourcesView(patch: Record<string, unknown> = {}) {
   };
 }
 
-function fakeIpc(responses: Record<string, () => Promise<unknown>>) {
-  const all = { ...routingDefaults, ...responses };
-  return (command: string) =>
-    all[command]?.() ?? Promise.reject(new Error(`commande inattendue ${command}`));
+type IpcHandler = (args?: Record<string, unknown>) => Promise<unknown>;
+
+function fakeIpc(responses: Record<string, IpcHandler>) {
+  const all: Record<string, IpcHandler> = { ...routingDefaults, ...responses };
+  return (command: string, args?: Record<string, unknown>) =>
+    all[command]?.(args) ?? Promise.reject(new Error(`commande inattendue ${command}`));
 }
 
 function fakeListen() {
@@ -460,6 +463,146 @@ describe('App', () => {
     const hint = await screen.findByTestId('no-charts');
     expect(hint.textContent).toContain('C:\\NautiK\\charts');
     expect(await screen.findByTestId('chart-view-stub')).toBeTruthy();
+  });
+
+  it('choisit le dossier des cartes ENC et en affiche l’inventaire', async () => {
+    const chosen = {
+      dir: 'D:\\ENC_ROOT',
+      inventory: {
+        cells: [
+          { name: 'FR401140', path: 'FR401140/FR401140.000', sizeBytes: 2048, updates: 0 },
+          { name: 'FR501130', path: 'FR501130/1/0/FR501130.000', sizeBytes: 4096, updates: 2 },
+        ],
+        catalogs: 1,
+        unreadableDirs: 1,
+        truncated: true,
+      },
+      error: null,
+    };
+    let stored: unknown = { dir: null, inventory: null, error: null };
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        get_enc_folder: () => Promise.resolve(stored),
+        choose_enc_dir: () => Promise.resolve((stored = chosen)),
+        clear_enc_dir: () =>
+          Promise.resolve((stored = { dir: null, inventory: null, error: null })),
+      }),
+      listen: fakeListen().listen,
+    });
+    await openSettings();
+    const panel = await screen.findByTestId('enc-folder');
+    await vi.waitFor(() =>
+      expect(within(panel).getByTestId('enc-dir').textContent).toContain('Aucun dossier ENC'),
+    );
+    expect(within(panel).queryByRole('button', { name: 'Retirer' })).toBeNull();
+
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Choisir le dossier ENC…' }));
+    await vi.waitFor(() =>
+      expect(within(panel).getByTestId('enc-dir').textContent).toBe('D:\\ENC_ROOT'),
+    );
+    const count = within(panel).getByTestId('enc-count').textContent ?? '';
+    expect(count).toContain('2 cellules trouvées, dont 1 avec mises à jour');
+    expect(count).toContain('CATALOG.031 présent');
+    // Inventaire incomplet et sous-dossier illisible : signalés.
+    expect(panel.textContent).toContain('Inventaire incomplet');
+    expect(panel.textContent).toContain('1 sous-dossier illisible');
+    expect(within(panel).getByTestId('enc-cells').textContent).toContain('2 mises à jour');
+
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Retirer' }));
+    await vi.waitFor(() =>
+      expect(within(panel).getByTestId('enc-dir').textContent).toContain('Aucun dossier ENC'),
+    );
+  });
+
+  it('signale un dossier ENC disparu sans l’oublier', async () => {
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        get_enc_folder: () =>
+          Promise.resolve({
+            dir: 'E:\\ENC_ROOT',
+            inventory: null,
+            error: 'répertoire de cartes inaccessible : E:\\ENC_ROOT',
+          }),
+      }),
+      listen: fakeListen().listen,
+    });
+    await openSettings();
+    const panel = await screen.findByTestId('enc-folder');
+    const alert = await within(panel).findByRole('alert');
+    expect(alert.textContent).toContain('Dossier ENC inaccessible');
+    expect(within(panel).getByTestId('enc-dir').textContent).toBe('E:\\ENC_ROOT');
+    expect(within(panel).getByRole('button', { name: 'Relire le dossier' })).toBeTruthy();
+  });
+
+  it('lit une cellule ENC et signale les mises à jour non appliquées', async () => {
+    const asked: unknown[] = [];
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        get_enc_folder: () =>
+          Promise.resolve({
+            dir: 'D:\\ENC_ROOT',
+            inventory: {
+              cells: [
+                { name: 'FR501130', path: 'FR501130/FR501130.000', sizeBytes: 4096, updates: 2 },
+                { name: 'BROKEN01', path: 'BROKEN01.000', sizeBytes: 10, updates: 0 },
+              ],
+              catalogs: 1,
+              unreadableDirs: 0,
+              truncated: false,
+            },
+            error: null,
+          }),
+        inspect_enc_cell: (args) => {
+          asked.push(args?.path);
+          if (args?.path === 'BROKEN01.000') {
+            return Promise.reject(new Error('fichier S-57 tronqué (enregistrement à l’octet 0)'));
+          }
+          return Promise.resolve({
+            datasetName: 'FR501130.000',
+            edition: '3',
+            updateNumber: '0',
+            issueDate: '20261101',
+            intendedUsage: 5,
+            compilationScale: 22000,
+            features: 1234,
+            classes: { SOUNDG: 40, DEPARE: 12, WRECKS: 2 },
+            soundings: 512,
+            bounds: [-149.6, -17.55, -149.5, -17.4],
+            skippedFeatures: 1,
+            problems: ['objet OBSTRN 105 : enregistrement vecteur 110/99 introuvable'],
+          });
+        },
+      }),
+      listen: fakeListen().listen,
+    });
+    await openSettings();
+    const panel = await screen.findByTestId('enc-folder');
+    await fireEvent.click(await within(panel).findByRole('button', { name: 'Lire FR501130' }));
+    const summary = await within(panel).findByTestId('enc-summary');
+    await vi.waitFor(() => expect(summary.textContent).toContain('FR501130.000'));
+    const text = summary.textContent ?? '';
+    expect(text).toContain('édition 3');
+    expect(text).toContain('publiée le 01/11/2026');
+    expect(text).toContain('Usage : port');
+    expect(text).toContain('1234 objets');
+    expect(text).toContain('512 sondes');
+    expect(text).toContain('SOUNDG 40 · DEPARE 12 · WRECKS 2');
+    // Mises à jour non appliquées et objet écarté : signalés.
+    expect(text).toContain('2 mises à jour non appliquées');
+    expect(text).toContain('1 objet écarté');
+    expect(text).toContain('OBSTRN 105');
+
+    await fireEvent.click(within(panel).getByRole('button', { name: 'Lire BROKEN01' }));
+    const alert = await within(panel).findByRole('alert');
+    expect(alert.textContent).toContain('BROKEN01 illisible');
+    expect(alert.textContent).toContain('tronqué');
+    expect(asked).toEqual(['FR501130/FR501130.000', 'BROKEN01.000']);
   });
 
   it('change le dossier des cartes depuis les Paramètres', async () => {

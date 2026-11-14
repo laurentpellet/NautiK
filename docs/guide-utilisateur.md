@@ -69,6 +69,22 @@ Un dossier choisi qui a disparu (clé USB retirée) est signalé, jamais
 remplacé en silence. Un fichier illisible ou corrompu est signalé sans
 empêcher le chargement des autres.
 
+**Cartes ENC (S-57)** — en préparation. **Paramètres → Cartes → Cartes
+ENC → Choisir le dossier ENC…** indique où se trouve votre jeu d'échange
+ENC (en général le dossier `ENC_ROOT`, avec `CATALOG.031` et les
+cellules `.000`). NautiK affiche le nombre de cellules trouvées, celles
+qui ont des mises à jour (`.001`, `.002`…) et la présence du catalogue.
+Dans la liste **Cellules**, **Lire** décode une cellule et en affiche le
+résumé : édition, date de publication, usage (port, approche…),
+échelle, nombre d'objets et de sondes, emprise et principales classes
+d'objets. Seules les cellules en WGS 84 sont acceptées. Les mises à
+jour ne sont pas encore appliquées : le résumé le rappelle quand la
+cellule en a. Un objet incohérent est écarté et signalé, jamais
+deviné. L'affichage des ENC sur la carte viendra dans une version
+suivante. Un
+dossier ENC disparu est signalé ; **Retirer** l'oublie sans toucher aux
+fichiers.
+
 Sur la carte :
 
 - molette ou pincement : zoom ; clic droit glissé : rotation.
