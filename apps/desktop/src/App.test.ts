@@ -538,7 +538,7 @@ describe('App', () => {
     expect(within(panel).getByRole('button', { name: 'Relire le dossier' })).toBeTruthy();
   });
 
-  it('lit une cellule ENC et signale les mises à jour non appliquées', async () => {
+  it('lit une cellule ENC et signale les mises à jour refusées', async () => {
     const asked: unknown[] = [];
     render(App, {
       invoke: fakeIpc({
@@ -566,7 +566,7 @@ describe('App', () => {
           return Promise.resolve({
             datasetName: 'FR501130.000',
             edition: '3',
-            updateNumber: '0',
+            updateNumber: '1',
             issueDate: '20261101',
             intendedUsage: 5,
             compilationScale: 22000,
@@ -576,6 +576,11 @@ describe('App', () => {
             bounds: [-149.6, -17.55, -149.5, -17.4],
             skippedFeatures: 1,
             problems: ['objet OBSTRN 105 : enregistrement vecteur 110/99 introuvable'],
+            updatesApplied: 1,
+            updatesPending: 1,
+            updateIssueDate: '20261105',
+            updateError: 'mise à jour .002 : objet WRECKS 7 : version 3 inattendue',
+            cancelled: null,
           });
         },
       }),
@@ -593,8 +598,11 @@ describe('App', () => {
     expect(text).toContain('1234 objets');
     expect(text).toContain('512 sondes');
     expect(text).toContain('SOUNDG 40 · DEPARE 12 · WRECKS 2');
-    // Mises à jour non appliquées et objet écarté : signalés.
-    expect(text).toContain('2 mises à jour non appliquées');
+    // Mise à jour appliquée, mise à jour refusée et objet écarté : signalés.
+    expect(text).toContain('1 mise à jour appliquée, la dernière publiée le 05/11/2026');
+    expect(text).toContain('Cellule pas à jour : 1 mise à jour non appliquée');
+    expect(text).toContain('version 3 inattendue');
+    expect(within(panel).queryByTestId('enc-cancelled')).toBeNull();
     expect(text).toContain('1 objet écarté');
     expect(text).toContain('OBSTRN 105');
 
@@ -603,6 +611,58 @@ describe('App', () => {
     expect(alert.textContent).toContain('BROKEN01 illisible');
     expect(alert.textContent).toContain('tronqué');
     expect(asked).toEqual(['FR501130/FR501130.000', 'BROKEN01.000']);
+  });
+
+  it('signale une cellule ENC annulée par son producteur', async () => {
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        get_enc_folder: () =>
+          Promise.resolve({
+            dir: 'D:\\ENC_ROOT',
+            inventory: {
+              cells: [{ name: 'US5MA1AM', path: 'US5MA1AM.000', sizeBytes: 4096, updates: 8 }],
+              catalogs: 1,
+              unreadableDirs: 0,
+              truncated: false,
+            },
+            error: null,
+          }),
+        inspect_enc_cell: () =>
+          Promise.resolve({
+            datasetName: 'US5MA1AM.000',
+            edition: '3',
+            updateNumber: '7',
+            issueDate: '20180312',
+            intendedUsage: 5,
+            compilationScale: 12000,
+            features: 1552,
+            classes: { DEPARE: 211 },
+            soundings: 1177,
+            bounds: null,
+            skippedFeatures: 0,
+            problems: [],
+            updatesApplied: 7,
+            updatesPending: 0,
+            updateIssueDate: '20210316',
+            updateError: null,
+            cancelled: '20221230',
+          }),
+      }),
+      listen: fakeListen().listen,
+    });
+    await openSettings();
+    const panel = await screen.findByTestId('enc-folder');
+    await fireEvent.click(await within(panel).findByRole('button', { name: 'Lire US5MA1AM' }));
+    const cancelled = await within(panel).findByTestId('enc-cancelled');
+    expect(cancelled.getAttribute('role')).toBe('alert');
+    expect(cancelled.textContent).toContain('annulée par son producteur le 30/12/2022');
+    expect(cancelled.textContent).toContain('ne plus l');
+    expect(within(panel).getByTestId('enc-updates').textContent).toContain(
+      '7 mises à jour appliquées, la dernière publiée le 16/03/2021',
+    );
+    expect(panel.textContent).not.toContain('Cellule pas à jour');
   });
 
   it('change le dossier des cartes depuis les Paramètres', async () => {

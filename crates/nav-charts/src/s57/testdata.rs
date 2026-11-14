@@ -42,6 +42,14 @@ fn description(tag: &'static str, array: &str, format: &str) -> FieldData {
     (tag, data)
 }
 
+/// Champ de contrôle de mise à jour de liste (VRPC, SGCC, FSPC).
+fn control((instruction, index, count): (u8, u16, u16)) -> Vec<u8> {
+    let mut out = vec![instruction];
+    out.extend(index.to_le_bytes());
+    out.extend(count.to_le_bytes());
+    out
+}
+
 /// Texte variable terminé.
 fn text(out: &mut Vec<u8>, value: &str) {
     out.extend(
@@ -63,6 +71,12 @@ pub struct Vector {
     pub depths: Vec<i32>,
     /// Nœuds (RCNM, RCID, TOPI).
     pub nodes: Vec<(u8, u32, u8)>,
+    /// Version (RVER).
+    pub version: u16,
+    /// Instruction VRPC (instruction, position, nombre).
+    pub pointer_update: Option<(u8, u16, u16)>,
+    /// Instruction SGCC (instruction, position, nombre).
+    pub coord_update: Option<(u8, u16, u16)>,
 }
 
 /// Objet à écrire.
@@ -76,11 +90,17 @@ pub struct Feature {
     pub national: Vec<(u16, String)>,
     /// (RCNM, RCID, ORNT, USAG, MASK).
     pub pointers: Vec<(u8, u32, u8, u8, u8)>,
+    /// Version (RVER).
+    pub version: u16,
+    /// Instruction FSPC (instruction, position, nombre).
+    pub pointer_update: Option<(u8, u16, u16)>,
 }
 
 /// Cellule de test paramétrable.
 pub struct CellBuilder {
     pub expp: u8,
+    pub edition: &'static str,
+    pub update: String,
     pub hdat: u8,
     pub duni: u8,
     pub comf: u32,
@@ -107,6 +127,8 @@ impl CellBuilder {
     pub fn new() -> Self {
         Self {
             expp: 1,
+            edition: "1",
+            update: "0".into(),
             hdat: 2,
             duni: 1,
             comf: COMF,
@@ -117,6 +139,16 @@ impl CellBuilder {
             declared_features: None,
             vectors: Vec::new(),
             features: Vec::new(),
+        }
+    }
+
+    /// Fichier de mise à jour n° `number` de la cellule d'exemple, vide.
+    pub fn update(number: u32) -> Self {
+        Self {
+            expp: 2,
+            update: number.to_string(),
+            with_dspm: false,
+            ..Self::new()
         }
     }
 
@@ -132,6 +164,9 @@ impl CellBuilder {
             coords: vec![(deg(lon), deg(lat))],
             depths: Vec::new(),
             nodes: Vec::new(),
+            version: 1,
+            pointer_update: None,
+            coord_update: None,
         };
         let edge = |rcid, begin, end, inner: &[(f64, f64)]| Vector {
             rcnm: 130,
@@ -140,6 +175,9 @@ impl CellBuilder {
             coords: inner.iter().map(|&(x, y)| (deg(x), deg(y))).collect(),
             depths: Vec::new(),
             nodes: vec![(120, begin, 1), (120, end, 2)],
+            version: 1,
+            pointer_update: None,
+            coord_update: None,
         };
         cell.vectors = vec![
             node(1, -149.6, -17.5),
@@ -164,6 +202,9 @@ impl CellBuilder {
                 ],
                 depths: vec![55, 120, 3],
                 nodes: Vec::new(),
+                version: 1,
+                pointer_update: None,
+                coord_update: None,
             },
             Vector {
                 rcnm: 110,
@@ -172,6 +213,9 @@ impl CellBuilder {
                 coords: vec![(deg(-149.52), deg(-17.42))],
                 depths: Vec::new(),
                 nodes: Vec::new(),
+                version: 1,
+                pointer_update: None,
+                coord_update: None,
             },
         ];
         let feature = |rcid, prim, objl, pointers: Vec<(u8, u32, u8, u8, u8)>| Feature {
@@ -182,6 +226,8 @@ impl CellBuilder {
             attributes: Vec::new(),
             national: Vec::new(),
             pointers,
+            version: 1,
+            pointer_update: None,
         };
         let mut depare = feature(
             100,
@@ -231,6 +277,9 @@ impl CellBuilder {
                     "(b11,b14,3b11,b14,4b11,2b14,A)",
                 ),
                 description("VRID", "RCNM!RCID!RVER!RUIN", "(b11,b14,b12,b11)"),
+                description("VRPC", "VPUI!VPIX!NVPT", "(b11,2b12)"),
+                description("SGCC", "CCUI!CCIX!CCNC", "(b11,2b12)"),
+                description("FSPC", "FSUI!FSIX!NSPT", "(b11,2b12)"),
                 description("VRPT", "*NAME!ORNT!USAG!TOPI!MASK", "(B(40),4b11)"),
                 description("SG2D", "*YCOO!XCOO", self.sg2d_format),
                 description("SG3D", "*YCOO!XCOO!VE3D", "(3b24)"),
@@ -256,8 +305,8 @@ impl CellBuilder {
         dsid.extend(1u32.to_le_bytes());
         dsid.extend([self.expp, 5]);
         text(&mut dsid, "TEST0001.000");
-        text(&mut dsid, "1");
-        text(&mut dsid, "0");
+        text(&mut dsid, self.edition);
+        text(&mut dsid, &self.update);
         dsid.extend(b"2026110120261102");
         dsid.extend(b"03.1");
         dsid.push(1);
@@ -288,9 +337,12 @@ impl CellBuilder {
         for v in &self.vectors {
             let mut vrid = vec![v.rcnm];
             vrid.extend(v.rcid.to_le_bytes());
-            vrid.extend(1u16.to_le_bytes());
+            vrid.extend(v.version.to_le_bytes());
             vrid.push(v.ruin);
             let mut fields = vec![next(), ("VRID", vrid)];
+            if let Some(c) = v.pointer_update {
+                fields.push(("VRPC", control(c)));
+            }
             if !v.nodes.is_empty() {
                 let mut vrpt = Vec::new();
                 for &(rcnm, rcid, topi) in &v.nodes {
@@ -299,6 +351,9 @@ impl CellBuilder {
                     vrpt.extend([255, 255, topi, 255]);
                 }
                 fields.push(("VRPT", vrpt));
+            }
+            if let Some(c) = v.coord_update {
+                fields.push(("SGCC", control(c)));
             }
             if !v.coords.is_empty() {
                 let mut sg = Vec::new();
@@ -319,7 +374,7 @@ impl CellBuilder {
             frid.extend(f.rcid.to_le_bytes());
             frid.extend([f.prim, 2]);
             frid.extend(f.objl.to_le_bytes());
-            frid.extend(1u16.to_le_bytes());
+            frid.extend(f.version.to_le_bytes());
             frid.push(f.ruin);
             let mut foid = 550u16.to_le_bytes().to_vec();
             foid.extend(f.rcid.to_le_bytes());
@@ -347,6 +402,9 @@ impl CellBuilder {
                     }
                 }
                 fields.push(("NATF", natf));
+            }
+            if let Some(c) = f.pointer_update {
+                fields.push(("FSPC", control(c)));
             }
             if !f.pointers.is_empty() {
                 let mut fspt = Vec::new();

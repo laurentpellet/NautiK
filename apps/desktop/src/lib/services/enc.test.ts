@@ -66,10 +66,17 @@ describe('résumé de cellule ENC', () => {
     bounds: [-149.6, -17.5, -149.5, -17.4],
     skippedFeatures: 0,
     problems: [],
+    updatesApplied: 2,
+    updatesPending: 0,
+    updateIssueDate: '20261105',
+    updateError: null,
+    cancelled: null,
   };
 
   it('lit un résumé valide, avec ou sans emprise', () => {
     expect(parseEncCellSummary(summary)).toEqual(summary);
+    const cancelled = { ...summary, cancelled: '20221230', updateError: 'refusée' };
+    expect(parseEncCellSummary(cancelled)).toEqual(cancelled);
     expect(parseEncCellSummary({ ...summary, bounds: null }).bounds).toBeNull();
   });
 
@@ -82,6 +89,12 @@ describe('résumé de cellule ENC', () => {
     expect(() => parseEncCellSummary({ ...summary, bounds: [0, 0, 'e', 0] })).toThrow();
     expect(() => parseEncCellSummary({ ...summary, problems: [1] })).toThrow();
     expect(() => parseEncCellSummary({ ...summary, intendedUsage: 300 })).toThrow();
+    expect(() => parseEncCellSummary({ ...summary, updatesApplied: -1 })).toThrow();
+    expect(() => parseEncCellSummary({ ...summary, updateError: 3 })).toThrow();
+    expect(() => parseEncCellSummary({ ...summary, cancelled: false })).toThrow();
+    const missing: Record<string, unknown> = { ...summary };
+    delete missing.updatesPending;
+    expect(() => parseEncCellSummary(missing)).toThrow();
   });
 
   it('transmet le chemin relatif de la cellule au moteur', async () => {

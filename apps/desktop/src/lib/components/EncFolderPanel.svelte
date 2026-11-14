@@ -146,6 +146,12 @@
       {#if reading}
         <div class="summary" data-testid="enc-summary" aria-live="polite">
           {#if summary}
+            {#if summary.cancelled}
+              <p class="error" role="alert" data-testid="enc-cancelled">
+                Cellule annulée par son producteur le {formatIssueDate(summary.cancelled)} : ne plus l'utiliser
+                pour la navigation.
+              </p>
+            {/if}
             <p>
               <strong>{summary.datasetName}</strong> — édition {summary.edition}, mise à jour {summary.updateNumber},
               publiée le {formatIssueDate(summary.issueDate)}
@@ -167,11 +173,21 @@
                 .map(([name, n]) => `${name} ${n}`)
                 .join(' · ')}
             </p>
-            {#if reading.updates > 0}
-              <p class="warn" role="status">
-                {plural(reading.updates, 'mise')} à jour non appliquée{reading.updates > 1
+            {#if summary.updatesApplied > 0}
+              <p class="muted" data-testid="enc-updates">
+                {plural(summary.updatesApplied, 'mise')} à jour appliquée{summary.updatesApplied > 1
                   ? 's'
-                  : ''} : le contenu affiché ici est celui de l'édition de base.
+                  : ''}{summary.updateIssueDate
+                  ? `, la dernière publiée le ${formatIssueDate(summary.updateIssueDate)}`
+                  : ''}.
+              </p>
+            {/if}
+            {#if summary.updateError}
+              <p class="warn" role="status">
+                Cellule pas à jour : {plural(summary.updatesPending, 'mise')} à jour non appliquée{summary.updatesPending >
+                1
+                  ? 's'
+                  : ''} ({summary.updateError}).
               </p>
             {/if}
             {#if summary.skippedFeatures > 0}
@@ -216,8 +232,8 @@
   <p class="hint">
     Dossier d'un jeu d'échange S-57 (en général <code>ENC_ROOT</code>, avec
     <code>CATALOG.031</code> et les cellules <code>.000</code>). Pour l'instant, NautiK repère et
-    lit les cellules (WGS 84 uniquement) ; leur affichage sur la carte viendra ensuite. Les fichiers
-    ne sont jamais modifiés.
+    lit les cellules (WGS 84 uniquement) avec leurs mises à jour ; leur affichage sur la carte
+    viendra ensuite. Les fichiers ne sont jamais modifiés.
   </p>
   {#if error}
     <p class="error" role="alert">{error}</p>

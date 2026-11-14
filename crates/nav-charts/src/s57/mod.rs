@@ -13,14 +13,20 @@
 //!   ([`S57Cell::skipped_features`]) : aucune position n'est inventée ;
 //! - seules les cellules en WGS 84 et en mètres sont acceptées.
 //!
-//! Les fichiers de mise à jour (`.001`…) ne sont pas encore appliqués.
+//! Les fichiers de mise à jour (`.001`, `.002`…) sont appliqués dans
+//! l'ordre par [`decode_cell_file`] (voir le module `update`) : chaque
+//! mise à jour est appliquée en entier ou pas du tout, et une mise à jour
+//! manquante ou refusée est signalée ([`S57Cell::update_error`]).
 
 pub mod catalogue;
 mod geometry;
 mod iso8211;
 #[cfg(test)]
 mod testdata;
+mod update;
 
+use std::collections::btree_map::Entry as BTreeEntry;
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -45,6 +51,10 @@ const DUNI_METRES: u8 = 1;
 const RUIN_INSERT: u8 = 1;
 /// Type d'opération « nouvelle édition » (EXPP) : fichier de base.
 const EXPP_NEW: u8 = 1;
+/// Type d'opération « révision » (EXPP) : fichier de mise à jour.
+const EXPP_UPDATE: u8 = 2;
+/// Nombre maximal de fichiers de mise à jour (`.001` à `.999`).
+pub const MAX_UPDATES: u32 = 999;
 /// Niveau lexical UCS-2 (NALL).
 const LEXICAL_UCS2: u8 = 2;
 
@@ -178,7 +188,7 @@ pub struct S57Cell {
     pub dataset_name: String,
     /// Numéro d'édition (EDTN).
     pub edition: String,
-    /// Numéro de mise à jour (UPDN).
+    /// Numéro de la dernière mise à jour intégrée (UPDN).
     pub update_number: String,
     /// Date de publication (ISDT, AAAAMMJJ).
     pub issue_date: String,
@@ -192,6 +202,17 @@ pub struct S57Cell {
     pub skipped_features: u32,
     /// Détail des premiers problèmes rencontrés.
     pub problems: Vec<String>,
+    /// Mises à jour appliquées.
+    pub updates_applied: u32,
+    /// Fichiers de mise à jour présents mais non appliqués.
+    pub updates_pending: u32,
+    /// Date de publication de la dernière mise à jour appliquée.
+    pub update_issue_date: Option<String>,
+    /// Raison de l'arrêt des mises à jour (fichier manquant, refusé…).
+    pub update_error: Option<String>,
+    /// Date d'annulation de la cellule par son producteur : une cellule
+    /// annulée ne doit plus servir à la navigation.
+    pub cancelled: Option<String>,
 }
 
 /// Résumé d'une cellule pour l'affichage (Paramètres → Cartes).
@@ -202,7 +223,7 @@ pub struct S57CellSummary {
     pub dataset_name: String,
     /// Édition.
     pub edition: String,
-    /// Numéro de mise à jour intégrée au fichier de base.
+    /// Numéro de la dernière mise à jour intégrée.
     pub update_number: String,
     /// Date de publication (AAAAMMJJ).
     pub issue_date: String,
@@ -222,6 +243,16 @@ pub struct S57CellSummary {
     pub skipped_features: u32,
     /// Premiers problèmes rencontrés.
     pub problems: Vec<String>,
+    /// Mises à jour appliquées.
+    pub updates_applied: u32,
+    /// Mises à jour présentes mais non appliquées.
+    pub updates_pending: u32,
+    /// Date de la dernière mise à jour appliquée.
+    pub update_issue_date: Option<String>,
+    /// Raison de l'arrêt des mises à jour.
+    pub update_error: Option<String>,
+    /// Date d'annulation de la cellule, le cas échéant.
+    pub cancelled: Option<String>,
 }
 
 impl S57Cell {
@@ -268,6 +299,11 @@ impl S57Cell {
             bounds,
             skipped_features: self.skipped_features,
             problems: self.problems.clone(),
+            updates_applied: self.updates_applied,
+            updates_pending: self.updates_pending,
+            update_issue_date: self.update_issue_date.clone(),
+            update_error: self.update_error.clone(),
+            cancelled: self.cancelled.clone(),
         }
     }
 }
@@ -294,6 +330,9 @@ const EXPECTED_FORMATS: &[(&str, &[&str])] = &[
         ],
     ),
     ("VRID", &["b11", "b14", "b12", "b11"]),
+    ("VRPC", &["b11", "b12", "b12"]),
+    ("SGCC", &["b11", "b12", "b12"]),
+    ("FSPC", &["b11", "b12", "b12"]),
     ("VRPT", &["B(40)", "b11", "b11", "b11", "b11"]),
     ("SG2D", &["b24", "b24"]),
     ("SG3D", &["b24", "b24", "b24"]),
@@ -320,22 +359,24 @@ fn check_formats(file: &iso8211::Iso8211File<'_>) -> Result<(), S57Error> {
 }
 
 /// Identification du jeu de données (DSID, DSSI).
-#[derive(Debug, Default)]
-struct DatasetId {
-    name: String,
-    edition: String,
-    update: String,
-    issue_date: String,
-    usage: u8,
-    national_level: u8,
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DatasetId {
+    pub name: String,
+    pub edition: String,
+    pub update: String,
+    pub issue_date: String,
+    pub usage: u8,
+    /// Type d'opération : 1 fichier de base, 2 mise à jour.
+    pub expp: u8,
+    pub national_level: u8,
     /// Nombres d'enregistrements annoncés (DSSI) : objets, nœuds isolés,
     /// nœuds connectés, arcs.
-    declared: Option<Declared>,
+    pub declared: Option<Declared>,
 }
 
 /// Nombres d'enregistrements annoncés par le champ DSSI.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct Declared {
+pub(crate) struct Declared {
     features: u64,
     isolated_nodes: u64,
     connected_nodes: u64,
@@ -353,11 +394,6 @@ fn read_dsid(record: &Record<'_>, dsid: &Field<'_>) -> Result<DatasetId, S57Erro
     let update = c.variable_text();
     let _uadt = c.fixed_text(8)?;
     let issue_date = c.fixed_text(8)?;
-    if expp != EXPP_NEW {
-        return Err(S57Error::unsupported(format!(
-            "{name} est un fichier de mise à jour (EXPP {expp}), pas une cellule de base"
-        )));
-    }
     let mut national_level = 1;
     let mut declared = None;
     if let Some(dssi) = record.field("DSSI") {
@@ -382,6 +418,7 @@ fn read_dsid(record: &Record<'_>, dsid: &Field<'_>) -> Result<DatasetId, S57Erro
         update,
         issue_date,
         usage,
+        expp,
         national_level,
         declared,
     })
@@ -389,7 +426,7 @@ fn read_dsid(record: &Record<'_>, dsid: &Field<'_>) -> Result<DatasetId, S57Erro
 
 /// Paramètres du jeu de données (DSPM).
 #[derive(Debug, Clone, Copy)]
-struct DatasetParams {
+pub(crate) struct DatasetParams {
     scale: u32,
     comf: u32,
     somf: u32,
@@ -427,17 +464,48 @@ fn read_dspm(dspm: &Field<'_>) -> Result<DatasetParams, S57Error> {
     Ok(DatasetParams { scale, comf, somf })
 }
 
-/// Lit un enregistrement vecteur ; `None` si son instruction n'est pas
-/// une insertion.
-fn read_vector(
-    record: &Record<'_>,
-    vrid: &Field<'_>,
-) -> Result<(u8, u32, u8, RawVector), S57Error> {
+/// Instruction de mise à jour d'une liste (champs VRPC, SGCC, FSPC) :
+/// insérer (1), supprimer (2) ou modifier (3) `count` éléments à partir
+/// de la position `index` (comptée à partir de 1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ListUpdate {
+    pub instruction: u8,
+    pub index: usize,
+    pub count: usize,
+}
+
+fn read_list_update(field: &Field<'_>) -> Result<ListUpdate, S57Error> {
+    let mut c = Cursor::new(field);
+    Ok(ListUpdate {
+        instruction: c.u8()?,
+        index: usize::from(c.u16()?),
+        count: usize::from(c.u16()?),
+    })
+}
+
+/// Enregistrement vecteur lu dans un fichier.
+#[derive(Debug, Clone)]
+pub(crate) struct VectorRecord {
+    pub rcnm: u8,
+    pub rcid: u32,
+    /// Version de l'enregistrement (RVER).
+    pub version: u16,
+    /// Instruction (RUIN) : 1 insérer, 2 supprimer, 3 modifier.
+    pub instruction: u8,
+    /// Pointeurs et coordonnées portés par l'enregistrement.
+    pub vector: RawVector,
+    /// Mise à jour des pointeurs (VRPC).
+    pub pointer_update: Option<ListUpdate>,
+    /// Mise à jour des coordonnées (SGCC).
+    pub coord_update: Option<ListUpdate>,
+}
+
+fn read_vector(record: &Record<'_>, vrid: &Field<'_>) -> Result<VectorRecord, S57Error> {
     let mut c = Cursor::new(vrid);
     let rcnm = c.u8()?;
     let rcid = c.u32()?;
-    let _rver = c.u16()?;
-    let ruin = c.u8()?;
+    let version = c.u16()?;
+    let instruction = c.u8()?;
     let mut vector = RawVector::default();
     for field in record.fields("VRPT") {
         let mut c = Cursor::new(field);
@@ -474,33 +542,58 @@ fn read_vector(
             "vecteur {rcnm}/{rcid} : coordonnées 2D et 3D mélangées"
         )));
     }
-    Ok((rcnm, rcid, ruin, vector))
+    Ok(VectorRecord {
+        rcnm,
+        rcid,
+        version,
+        instruction,
+        vector,
+        pointer_update: record.field("VRPC").map(read_list_update).transpose()?,
+        coord_update: record.field("SGCC").map(read_list_update).transpose()?,
+    })
 }
 
-/// Objet brut, avant construction de la géométrie.
-struct RawFeature {
-    rcid: u32,
-    prim: u8,
-    group: u8,
-    objl: u16,
-    ruin: u8,
-    attributes: Vec<S57Attribute>,
-    pointers: Vec<SpatialPointer>,
+/// Objet lu dans un fichier.
+#[derive(Debug, Clone)]
+pub(crate) struct FeatureRecord {
+    pub rcid: u32,
+    /// Version de l'enregistrement (RVER).
+    pub version: u16,
+    /// Instruction (RUIN) : 1 insérer, 2 supprimer, 3 modifier.
+    pub instruction: u8,
+    pub prim: u8,
+    pub group: u8,
+    pub objl: u16,
+    /// Attributs (ATTF puis NATF) ; en mise à jour, la valeur `DEL`
+    /// (0x7F) supprime l'attribut.
+    pub attributes: Vec<S57Attribute>,
+    pub pointers: Vec<SpatialPointer>,
+    /// Mise à jour des pointeurs (FSPC).
+    pub pointer_update: Option<ListUpdate>,
+}
+
+impl FeatureRecord {
+    /// Libellé pour les messages : acronyme (ou code) et identifiant.
+    pub fn label(&self) -> String {
+        let class = catalogue::object_class_acronym(self.objl)
+            .map_or_else(|| self.objl.to_string(), str::to_owned);
+        format!("objet {class} {}", self.rcid)
+    }
 }
 
 fn read_feature(
     record: &Record<'_>,
     frid: &Field<'_>,
     national_level: u8,
-) -> Result<RawFeature, S57Error> {
+) -> Result<FeatureRecord, S57Error> {
     let mut c = Cursor::new(frid);
     let _rcnm = c.u8()?;
     let rcid = c.u32()?;
     let prim = c.u8()?;
     let group = c.u8()?;
     let objl = c.u16()?;
-    let _rver = c.u16()?;
-    let ruin = c.u8()?;
+    let version = c.u16()?;
+    let instruction = c.u8()?;
     let mut attributes = Vec::new();
     for field in record.fields("ATTF") {
         let mut c = Cursor::new(field);
@@ -537,14 +630,87 @@ fn read_feature(
             });
         }
     }
-    Ok(RawFeature {
+    Ok(FeatureRecord {
         rcid,
+        version,
+        instruction,
         prim,
         group,
         objl,
-        ruin,
         attributes,
         pointers,
+        pointer_update: record.field("FSPC").map(read_list_update).transpose()?,
+    })
+}
+
+/// Contenu d'un fichier S-57 (cellule de base ou mise à jour).
+#[derive(Debug, Clone)]
+pub(crate) struct Dataset {
+    pub id: DatasetId,
+    pub params: Option<DatasetParams>,
+    pub vectors: Vec<VectorRecord>,
+    pub features: Vec<FeatureRecord>,
+}
+
+/// Lit les enregistrements d'un fichier S-57.
+///
+/// Un fichier coupé entre deux enregistrements reste lisible : les nombres
+/// annoncés par DSSI révèlent les enregistrements manquants.
+pub(crate) fn read_dataset(bytes: &[u8]) -> Result<Dataset, S57Error> {
+    let file = iso8211::read_file(bytes)?;
+    check_formats(&file)?;
+
+    let mut id: Option<DatasetId> = None;
+    let mut params = None;
+    let mut vectors = Vec::new();
+    let mut features = Vec::new();
+    let mut read = Declared::default();
+    for record in &file.records {
+        if let Some(dsid) = record.field("DSID") {
+            id = Some(read_dsid(record, dsid)?);
+        } else if let Some(dspm) = record.field("DSPM") {
+            params = Some(read_dspm(dspm)?);
+        } else if let Some(vrid) = record.field("VRID") {
+            let vector = read_vector(record, vrid)?;
+            match vector.rcnm {
+                geometry::RCNM_ISOLATED_NODE => read.isolated_nodes += 1,
+                geometry::RCNM_CONNECTED_NODE => read.connected_nodes += 1,
+                geometry::RCNM_EDGE => read.edges += 1,
+                _ => {}
+            }
+            vectors.push(vector);
+        } else if let Some(frid) = record.field("FRID") {
+            let level = id.as_ref().map_or(1, |d| d.national_level);
+            features.push(read_feature(record, frid, level)?);
+            read.features += 1;
+        }
+    }
+    let id =
+        id.ok_or_else(|| S57Error::malformed("identification du jeu de données (DSID) absente"))?;
+    if let Some(declared) = id.declared {
+        let counts = [
+            ("objets", read.features, declared.features),
+            ("nœuds isolés", read.isolated_nodes, declared.isolated_nodes),
+            (
+                "nœuds connectés",
+                read.connected_nodes,
+                declared.connected_nodes,
+            ),
+            ("arcs", read.edges, declared.edges),
+        ];
+        for (what, found, expected) in counts {
+            if found < expected {
+                return Err(S57Error::malformed(format!(
+                    "fichier incomplet : {found} {what} sur {expected} annoncés"
+                )));
+            }
+        }
+    }
+    Ok(Dataset {
+        id,
+        params,
+        vectors,
+        features,
     })
 }
 
@@ -568,134 +734,225 @@ impl Problems {
     }
 }
 
-/// Décode une cellule S-57 de base (contenu d'un fichier `.000`).
+/// Objet de la cellule, avant construction de la géométrie.
+#[derive(Debug, Clone)]
+pub(crate) struct FeatureState {
+    pub version: u16,
+    pub prim: u8,
+    pub group: u8,
+    pub objl: u16,
+    pub attributes: Vec<S57Attribute>,
+    pub pointers: Vec<SpatialPointer>,
+}
+
+/// État d'une cellule : fichier de base et mises à jour appliquées.
+#[derive(Debug, Clone)]
+pub(crate) struct CellState {
+    pub id: DatasetId,
+    pub params: DatasetParams,
+    /// Numéro de la dernière mise à jour intégrée.
+    pub update_number: u32,
+    pub vectors: Vectors,
+    /// Versions (RVER) des enregistrements vecteurs.
+    pub vector_versions: HashMap<(u8, u32), u16>,
+    /// Objets, par identifiant.
+    pub features: BTreeMap<u32, FeatureState>,
+}
+
+/// Numéro de mise à jour (UPDN).
+pub(crate) fn update_number(text: &str) -> Result<u32, S57Error> {
+    text.trim()
+        .parse()
+        .map_err(|_| S57Error::malformed(format!("numéro de mise à jour « {text} » invalide")))
+}
+
+/// Charge le fichier de base.
+fn load_base(dataset: Dataset, problems: &mut Problems) -> Result<CellState, S57Error> {
+    let id = dataset.id;
+    if id.expp != EXPP_NEW {
+        return Err(S57Error::unsupported(format!(
+            "{} est un fichier de mise à jour (EXPP {}), pas une cellule de base",
+            id.name, id.expp
+        )));
+    }
+    let params = dataset
+        .params
+        .ok_or_else(|| S57Error::malformed("paramètres du jeu de données (DSPM) absents"))?;
+    let mut state = CellState {
+        update_number: update_number(&id.update)?,
+        id,
+        params,
+        vectors: HashMap::new(),
+        vector_versions: HashMap::new(),
+        features: BTreeMap::new(),
+    };
+    for record in dataset.vectors {
+        let key = (record.rcnm, record.rcid);
+        if record.instruction != RUIN_INSERT {
+            problems.note(format!(
+                "vecteur {}/{} : instruction {} ignorée",
+                record.rcnm, record.rcid, record.instruction
+            ));
+        } else if let Entry::Vacant(slot) = state.vectors.entry(key) {
+            slot.insert(record.vector);
+            state.vector_versions.insert(key, record.version);
+        } else {
+            problems.note(format!("vecteur {}/{} en double", record.rcnm, record.rcid));
+        }
+    }
+    for record in dataset.features {
+        if record.instruction != RUIN_INSERT {
+            problems.skip(format!(
+                "{} : instruction {}",
+                record.label(),
+                record.instruction
+            ));
+        } else if let BTreeEntry::Vacant(slot) = state.features.entry(record.rcid) {
+            slot.insert(FeatureState {
+                version: record.version,
+                prim: record.prim,
+                group: record.group,
+                objl: record.objl,
+                attributes: record.attributes,
+                pointers: record.pointers,
+            });
+        } else {
+            problems.skip(format!("{} en double", record.label()));
+        }
+    }
+    Ok(state)
+}
+
+/// Bilan de l'application des mises à jour.
+#[derive(Debug, Default)]
+struct UpdateOutcome {
+    applied: u32,
+    pending: u32,
+    issue_date: Option<String>,
+    error: Option<String>,
+    cancelled: Option<String>,
+}
+
+/// Construit la géométrie des objets et produit la cellule décodée.
+fn finish(state: CellState, mut problems: Problems, outcome: UpdateOutcome) -> S57Cell {
+    let scale = Scale {
+        comf: f64::from(state.params.comf),
+        somf: f64::from(state.params.somf),
+    };
+    let mut features = Vec::with_capacity(state.features.len());
+    for (rcid, raw) in state.features {
+        match geometry::build(raw.prim, &raw.pointers, &state.vectors, scale) {
+            Ok(geometry) => features.push(S57Feature {
+                record_id: rcid,
+                object_class: raw.objl,
+                group: raw.group,
+                attributes: raw.attributes,
+                geometry,
+            }),
+            Err(reason) => {
+                let class = catalogue::object_class_acronym(raw.objl)
+                    .map_or_else(|| raw.objl.to_string(), str::to_owned);
+                problems.skip(format!("objet {class} {rcid} : {reason}"));
+            }
+        }
+    }
+    if problems.skipped > 0 {
+        tracing::warn!(
+            cell = %state.id.name,
+            skipped = problems.skipped,
+            "objets S-57 écartés"
+        );
+    }
+    if let Some(error) = &outcome.error {
+        tracing::warn!(cell = %state.id.name, %error, "mises à jour S-57 interrompues");
+    }
+    S57Cell {
+        dataset_name: state.id.name,
+        edition: state.id.edition,
+        update_number: state.update_number.to_string(),
+        issue_date: state.id.issue_date,
+        intended_usage: state.id.usage,
+        compilation_scale: state.params.scale,
+        features,
+        skipped_features: problems.skipped,
+        problems: problems.messages,
+        updates_applied: outcome.applied,
+        updates_pending: outcome.pending,
+        update_issue_date: outcome.issue_date,
+        update_error: outcome.error,
+        cancelled: outcome.cancelled,
+    }
+}
+
+/// Fichier de mise à jour : numéro (extension) et contenu, ou erreur de
+/// lecture.
+type UpdateInput = (u32, Result<Vec<u8>, String>);
+
+/// Décode une cellule de base et applique ses mises à jour dans l'ordre.
+/// La première mise à jour illisible, refusée ou manquante arrête
+/// l'application : la cellule reste valide mais signalée comme non à jour.
+fn decode_with_updates(base: &[u8], updates: Vec<UpdateInput>) -> Result<S57Cell, S57Error> {
+    let mut problems = Problems::default();
+    let mut state = load_base(read_dataset(base)?, &mut problems)?;
+    let mut outcome = UpdateOutcome::default();
+    let total = u32::try_from(updates.len()).unwrap_or(u32::MAX);
+    for (done, (number, bytes)) in (0u32..).zip(updates) {
+        let result = bytes.and_then(|bytes| update::apply_file(&state, &bytes));
+        match result {
+            Ok(update::Applied::AlreadyIncluded) => {}
+            Ok(update::Applied::Cancelled { issue_date }) => {
+                tracing::warn!(cell = %state.id.name, date = %issue_date, "cellule S-57 annulée");
+                outcome.cancelled = Some(issue_date);
+                outcome.pending = total - done - 1;
+                break;
+            }
+            Ok(update::Applied::Updated {
+                state: next,
+                issue_date,
+            }) => {
+                state = *next;
+                outcome.applied += 1;
+                outcome.issue_date = Some(issue_date);
+            }
+            Err(reason) => {
+                outcome.error = Some(format!("mise à jour .{number:03} : {reason}"));
+                outcome.pending = total - done;
+                break;
+            }
+        }
+    }
+    Ok(finish(state, problems, outcome))
+}
+
+/// Décode une cellule S-57 de base (contenu d'un fichier `.000`), sans
+/// mise à jour.
 ///
 /// # Errors
 ///
 /// [`S57Error`] si le fichier n'est pas une cellule S-57 lisible, n'est
 /// pas un fichier de base, ou n'est pas en WGS 84 et en mètres.
 pub fn decode_cell(bytes: &[u8]) -> Result<S57Cell, S57Error> {
-    let file = iso8211::read_file(bytes)?;
-    check_formats(&file)?;
-
-    let mut dataset: Option<DatasetId> = None;
-    let mut params: Option<DatasetParams> = None;
-    let mut vectors: Vectors = HashMap::new();
-    let mut raw_features = Vec::new();
-    let mut problems = Problems::default();
-    let mut read = Declared::default();
-
-    for record in &file.records {
-        if let Some(dsid) = record.field("DSID") {
-            dataset = Some(read_dsid(record, dsid)?);
-        } else if let Some(dspm) = record.field("DSPM") {
-            params = Some(read_dspm(dspm)?);
-        } else if let Some(vrid) = record.field("VRID") {
-            let (rcnm, rcid, ruin, vector) = read_vector(record, vrid)?;
-            match rcnm {
-                geometry::RCNM_ISOLATED_NODE => read.isolated_nodes += 1,
-                geometry::RCNM_CONNECTED_NODE => read.connected_nodes += 1,
-                geometry::RCNM_EDGE => read.edges += 1,
-                _ => {}
-            }
-            if ruin != RUIN_INSERT {
-                problems.note(format!(
-                    "vecteur {rcnm}/{rcid} : instruction {ruin} ignorée"
-                ));
-            } else if vectors.insert((rcnm, rcid), vector).is_some() {
-                problems.note(format!("vecteur {rcnm}/{rcid} en double"));
-            }
-        } else if let Some(frid) = record.field("FRID") {
-            let level = dataset.as_ref().map_or(1, |d| d.national_level);
-            raw_features.push(read_feature(record, frid, level)?);
-            read.features += 1;
-        }
-    }
-
-    let dataset = dataset
-        .ok_or_else(|| S57Error::malformed("identification du jeu de données (DSID) absente"))?;
-    // Une cellule coupée entre deux enregistrements reste lisible : les
-    // nombres annoncés par DSSI révèlent les enregistrements manquants.
-    if let Some(declared) = dataset.declared {
-        let short = [
-            ("objets", read.features, declared.features),
-            ("nœuds isolés", read.isolated_nodes, declared.isolated_nodes),
-            (
-                "nœuds connectés",
-                read.connected_nodes,
-                declared.connected_nodes,
-            ),
-            ("arcs", read.edges, declared.edges),
-        ];
-        for (what, found, expected) in short {
-            if found < expected {
-                return Err(S57Error::malformed(format!(
-                    "cellule incomplète : {found} {what} sur {expected} annoncés"
-                )));
-            }
-            if found > expected {
-                problems.note(format!("{found} {what} pour {expected} annoncés"));
-            }
-        }
-    }
-    let params =
-        params.ok_or_else(|| S57Error::malformed("paramètres du jeu de données (DSPM) absents"))?;
-    let scale = Scale {
-        comf: f64::from(params.comf),
-        somf: f64::from(params.somf),
-    };
-
-    let mut features = Vec::with_capacity(raw_features.len());
-    for raw in raw_features {
-        let label = catalogue::object_class_acronym(raw.objl)
-            .map_or_else(|| raw.objl.to_string(), str::to_owned);
-        if raw.ruin != RUIN_INSERT {
-            problems.skip(format!(
-                "objet {label} {} : instruction {}",
-                raw.rcid, raw.ruin
-            ));
-            continue;
-        }
-        match geometry::build(raw.prim, &raw.pointers, &vectors, scale) {
-            Ok(geometry) => features.push(S57Feature {
-                record_id: raw.rcid,
-                object_class: raw.objl,
-                group: raw.group,
-                attributes: raw.attributes,
-                geometry,
-            }),
-            Err(reason) => problems.skip(format!("objet {label} {} : {reason}", raw.rcid)),
-        }
-    }
-    if problems.skipped > 0 {
-        tracing::warn!(
-            cell = %dataset.name,
-            skipped = problems.skipped,
-            "objets S-57 écartés"
-        );
-    }
-
-    Ok(S57Cell {
-        dataset_name: dataset.name,
-        edition: dataset.edition,
-        update_number: dataset.update,
-        issue_date: dataset.issue_date,
-        intended_usage: dataset.usage,
-        compilation_scale: params.scale,
-        features,
-        skipped_features: problems.skipped,
-        problems: problems.messages,
-    })
+    decode_with_updates(bytes, Vec::new())
 }
 
-/// Lit et décode un fichier de cellule (opération bloquante, voir
-/// [`decode_cell_file`]).
+/// Décode une cellule de base et applique ses mises à jour (contenus des
+/// fichiers `.001`, `.002`…, dans l'ordre).
 ///
 /// # Errors
 ///
-/// [`S57Error::Io`] si le fichier est illisible, [`S57Error::TooLarge`]
-/// s'il dépasse [`MAX_CELL_BYTES`], sinon voir [`decode_cell`].
-pub fn decode_cell_file_blocking(path: &Path) -> Result<S57Cell, S57Error> {
+/// Voir [`decode_cell`] : seule la cellule de base peut produire une
+/// erreur ; un problème de mise à jour est signalé dans
+/// [`S57Cell::update_error`].
+pub fn decode_cell_with_updates(base: &[u8], updates: &[&[u8]]) -> Result<S57Cell, S57Error> {
+    let inputs = (1u32..)
+        .zip(updates)
+        .map(|(n, bytes)| (n, Ok(bytes.to_vec())))
+        .collect();
+    decode_with_updates(base, inputs)
+}
+
+/// Lit un fichier en refusant les fichiers trop volumineux.
+fn read_limited(path: &Path) -> Result<Vec<u8>, S57Error> {
     let size = std::fs::metadata(path)?.len();
     if size > MAX_CELL_BYTES {
         return Err(S57Error::TooLarge {
@@ -703,10 +960,62 @@ pub fn decode_cell_file_blocking(path: &Path) -> Result<S57Cell, S57Error> {
             max: MAX_CELL_BYTES,
         });
     }
-    decode_cell(&std::fs::read(path)?)
+    Ok(std::fs::read(path)?)
 }
 
-/// Lit et décode un fichier de cellule sans bloquer le runtime asynchrone.
+/// Fichiers de mise à jour d'une cellule (`NOM.001`… dans le même
+/// dossier, casse ignorée), triés par numéro.
+fn update_files(base: &Path) -> Result<Vec<(u32, PathBuf)>, S57Error> {
+    let Some(stem) = base.file_stem().and_then(|s| s.to_str()) else {
+        return Ok(Vec::new());
+    };
+    let dir = match base.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    };
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        let same_cell = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.eq_ignore_ascii_case(stem));
+        let number = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .filter(|e| e.len() == 3 && e.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|e| e.parse::<u32>().ok())
+            .filter(|n| (1..=MAX_UPDATES).contains(n));
+        if let (true, Some(number)) = (same_cell, number) {
+            if path.is_file() {
+                files.push((number, path));
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Lit et décode un fichier de cellule de base et applique les mises à
+/// jour présentes à côté (opération bloquante, voir [`decode_cell_file`]).
+///
+/// # Errors
+///
+/// [`S57Error::Io`] si la cellule ou son dossier est illisible,
+/// [`S57Error::TooLarge`] si elle dépasse [`MAX_CELL_BYTES`], sinon voir
+/// [`decode_cell`]. Une mise à jour illisible est signalée dans
+/// [`S57Cell::update_error`].
+pub fn decode_cell_file_blocking(path: &Path) -> Result<S57Cell, S57Error> {
+    let base = read_limited(path)?;
+    let updates = update_files(path)?
+        .into_iter()
+        .map(|(number, file)| (number, read_limited(&file).map_err(|e| e.to_string())))
+        .collect();
+    decode_with_updates(&base, updates)
+}
+
+/// Lit et décode un fichier de cellule (et ses mises à jour) sans bloquer
+/// le runtime asynchrone.
 ///
 /// # Errors
 ///

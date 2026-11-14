@@ -212,12 +212,11 @@ fn detects_missing_records() {
     let mut builder = CellBuilder::sample();
     builder.declared_features = Some(8);
     let error = decode_cell(&builder.build()).unwrap_err();
-    assert!(error.to_string().contains("incomplète"), "{error}");
+    assert!(error.to_string().contains("incomplet"), "{error}");
 
-    // Plus d'objets qu'annoncé : signalé, sans bloquer.
+    // Plus d'objets qu'annoncé : sans conséquence sur la lecture.
     builder.declared_features = Some(5);
-    let cell = decode_cell(&builder.build()).unwrap();
-    assert!(cell.problems.iter().any(|p| p.contains("annoncés")));
+    assert_eq!(decode_cell(&builder.build()).unwrap().features.len(), 6);
 }
 
 #[test]
@@ -316,4 +315,287 @@ async fn reads_cell_files_without_blocking() {
     std::fs::write(&path, CellBuilder::sample().build()).unwrap();
     let cell = decode_cell_file(path).await.unwrap();
     assert_eq!(cell.dataset_name, "TEST0001.000");
+}
+
+// --- Mises à jour ---------------------------------------------------------
+
+use super::testdata::{Feature, Vector};
+
+fn point_node(rcid: u32, lon: f64, lat: f64) -> Vector {
+    Vector {
+        rcnm: 110,
+        rcid,
+        ruin: 1,
+        coords: vec![(deg(lon), deg(lat))],
+        depths: Vec::new(),
+        nodes: Vec::new(),
+        version: 1,
+        pointer_update: None,
+        coord_update: None,
+    }
+}
+
+fn change(rcid: u32, objl: u16, ruin: u8, version: u16) -> Feature {
+    Feature {
+        rcid,
+        prim: 1,
+        objl,
+        ruin,
+        attributes: Vec::new(),
+        national: Vec::new(),
+        pointers: Vec::new(),
+        version,
+        pointer_update: None,
+    }
+}
+
+/// Mise à jour 1 : épave renommée (profondeur supprimée), obstacle
+/// incohérent supprimé, feu inséré sur un nouveau nœud.
+fn update_one() -> CellBuilder {
+    let mut u = CellBuilder::update(1);
+    u.vectors = vec![point_node(52, -149.51, -17.41)];
+    let mut wreck = change(104, 159, 3, 2);
+    wreck.attributes = vec![(116, "Nouveau nom".into()), (179, "\u{7f}".into())];
+    let mut light = change(107, 75, 1, 1);
+    light.pointers = vec![(110, 52, 255, 255, 255)];
+    u.features = vec![wreck, change(105, 86, 2, 2), light];
+    u
+}
+
+/// Mise à jour 2 : nœud 2 déplacé (SGCC), trou retiré de la zone de
+/// profondeur (FSPC).
+fn update_two() -> CellBuilder {
+    let mut u = CellBuilder::update(2);
+    let mut moved = point_node(2, -149.45, -17.35);
+    moved.rcnm = 120;
+    moved.ruin = 3;
+    moved.version = 2;
+    moved.coord_update = Some((3, 1, 1));
+    u.vectors = vec![moved];
+    let mut depare = change(100, 42, 3, 2);
+    depare.prim = 3;
+    depare.pointer_update = Some((2, 3, 1));
+    u.features = vec![depare];
+    u
+}
+
+#[test]
+fn applies_updates_in_order() {
+    let base = CellBuilder::sample().build();
+    let (one, two) = (update_one().build(), update_two().build());
+    let cell = decode_cell_with_updates(&base, &[&one, &two]).unwrap();
+    assert_eq!(cell.updates_applied, 2);
+    assert_eq!(cell.updates_pending, 0);
+    assert_eq!(cell.update_error, None);
+    assert_eq!(cell.cancelled, None);
+    assert_eq!(cell.update_number, "2");
+    assert_eq!(cell.update_issue_date.as_deref(), Some("20261102"));
+    // L'obstacle incohérent a été supprimé : plus rien d'écarté.
+    assert_eq!(cell.skipped_features, 0);
+
+    let wreck = by_class(&cell, "WRECKS");
+    assert_eq!(wreck.attribute(116), Some("Nouveau nom"));
+    assert_eq!(wreck.attribute(179), None);
+    assert_eq!(wreck.attribute(301), Some("Épave"));
+    assert_eq!(
+        by_class(&cell, "LIGHTS").geometry,
+        S57Geometry::Point {
+            position: [-149.51, -17.41]
+        }
+    );
+    let S57Geometry::Area { rings } = &by_class(&cell, "DEPARE").geometry else {
+        panic!("surface attendue");
+    };
+    assert_eq!(rings.len(), 1, "trou retiré");
+    assert!(close(rings[0][2], [-149.45, -17.35]), "nœud déplacé");
+}
+
+#[test]
+fn an_inconsistent_update_is_rejected_as_a_whole() {
+    let base = CellBuilder::sample().build();
+    let mut bad = update_one();
+    // Version de l'épave inattendue (3 au lieu de 2).
+    bad.features[0].version = 3;
+    let cell = decode_cell_with_updates(&base, &[&bad.build(), &update_two().build()]).unwrap();
+    assert_eq!(cell.updates_applied, 0);
+    assert_eq!(cell.updates_pending, 2);
+    assert_eq!(cell.update_number, "0");
+    let error = cell.update_error.clone().unwrap();
+    assert!(
+        error.contains(".001") && error.contains("version"),
+        "{error}"
+    );
+    // Rien de la mise à jour refusée : ni feu inséré, ni épave renommée.
+    assert!(cell.features.iter().all(|f| f.object_class != 75));
+    assert_eq!(
+        by_class(&cell, "WRECKS").attribute(116),
+        Some("Epave du port")
+    );
+}
+
+type Edit = Box<dyn Fn(&mut CellBuilder)>;
+
+#[test]
+fn rejects_unknown_or_duplicate_targets() {
+    let base = CellBuilder::sample().build();
+    let cases: Vec<(&str, Edit)> = vec![
+        (
+            "introuvable",
+            Box::new(|u| u.features = vec![change(999, 75, 3, 2)]),
+        ),
+        (
+            "introuvable",
+            Box::new(|u| u.features = vec![change(999, 75, 2, 2)]),
+        ),
+        (
+            "déjà présent",
+            Box::new(|u| u.features = vec![change(104, 159, 1, 1)]),
+        ),
+        (
+            "déjà présent",
+            Box::new(|u| u.vectors = vec![point_node(51, 0.0, 0.0)]),
+        ),
+        (
+            "inconnue",
+            Box::new(|u| u.features = vec![change(104, 159, 7, 2)]),
+        ),
+        (
+            "FSPC",
+            Box::new(|u| {
+                let mut f = change(104, 159, 3, 2);
+                f.pointers = vec![(110, 51, 255, 255, 255)];
+                u.features = vec![f];
+            }),
+        ),
+        (
+            "incohérente",
+            Box::new(|u| {
+                let mut f = change(100, 42, 3, 2);
+                f.pointer_update = Some((2, 4, 1));
+                u.features = vec![f];
+            }),
+        ),
+        (
+            "SGCC",
+            Box::new(|u| {
+                let mut v = point_node(51, 0.0, 0.0);
+                v.ruin = 3;
+                v.version = 2;
+                u.vectors = vec![v];
+            }),
+        ),
+    ];
+    for (expected, edit) in cases {
+        let mut update = CellBuilder::update(1);
+        edit(&mut update);
+        let cell = decode_cell_with_updates(&base, &[&update.build()]).unwrap();
+        let error = cell.update_error.unwrap_or_default();
+        assert!(error.contains(expected), "« {expected} » attendu : {error}");
+        assert_eq!(cell.updates_applied, 0);
+    }
+}
+
+#[test]
+fn missing_or_foreign_updates_stop_the_sequence() {
+    let base = CellBuilder::sample().build();
+    let three = CellBuilder::update(3).build();
+    let cell = decode_cell_with_updates(&base, &[&update_one().build(), &three]).unwrap();
+    assert_eq!(cell.updates_applied, 1);
+    assert_eq!(cell.updates_pending, 1);
+    assert!(cell.update_error.unwrap().contains("n° 2 manquante"));
+
+    let mut other_edition = CellBuilder::update(1);
+    other_edition.edition = "2";
+    let cell = decode_cell_with_updates(&base, &[&other_edition.build()]).unwrap();
+    assert!(cell.update_error.unwrap().contains("édition 2"));
+
+    // Une cellule de base n'est pas une mise à jour.
+    let cell = decode_cell_with_updates(&base, &[&base]).unwrap();
+    assert!(cell
+        .update_error
+        .unwrap()
+        .contains("pas un fichier de mise à jour"));
+}
+
+#[test]
+fn updates_already_in_a_reissue_are_skipped() {
+    let mut reissue = CellBuilder::sample();
+    reissue.update = "1".into();
+    let cell = decode_cell_with_updates(
+        &reissue.build(),
+        &[&update_one().build(), &update_two().build()],
+    )
+    .unwrap();
+    // .001 déjà intégrée ; .002 appliquée.
+    assert_eq!(cell.updates_applied, 1);
+    assert_eq!(cell.update_number, "2");
+    assert_eq!(cell.update_error, None);
+    assert!(cell.features.iter().all(|f| f.object_class != 75));
+}
+
+#[test]
+fn cancellation_is_reported() {
+    let base = CellBuilder::sample().build();
+    let mut cancel = CellBuilder::update(2);
+    cancel.edition = "0";
+    let cell = decode_cell_with_updates(
+        &base,
+        &[
+            &update_one().build(),
+            &cancel.build(),
+            &CellBuilder::update(3).build(),
+        ],
+    )
+    .unwrap();
+    assert_eq!(cell.cancelled.as_deref(), Some("20261102"));
+    assert_eq!(cell.updates_applied, 1);
+    assert_eq!(cell.updates_pending, 1);
+    assert_eq!(cell.update_error, None);
+    assert_eq!(cell.summary().cancelled.as_deref(), Some("20261102"));
+}
+
+#[test]
+fn truncated_or_corrupted_updates_never_apply_partially() {
+    let base = CellBuilder::sample().build();
+    let update = update_one().build();
+    for len in 0..update.len() {
+        let cell = decode_cell_with_updates(&base, &[&update[..len]]).unwrap();
+        assert_eq!(
+            cell.updates_applied, 0,
+            "mise à jour tronquée à {len} octets appliquée"
+        );
+        assert!(cell.update_error.is_some());
+        assert_eq!(
+            by_class(&cell, "WRECKS").attribute(116),
+            Some("Epave du port")
+        );
+    }
+    for i in 0..update.len() {
+        let mut corrupted = update.clone();
+        corrupted[i] ^= 0xFF;
+        let _ = decode_cell_with_updates(&base, &[&corrupted]).unwrap();
+    }
+}
+
+#[test]
+fn finds_update_files_next_to_the_cell() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("TEST0001.000");
+    std::fs::write(&path, CellBuilder::sample().build()).unwrap();
+    std::fs::write(dir.path().join("test0001.002"), update_two().build()).unwrap();
+    std::fs::write(dir.path().join("TEST0001.001"), update_one().build()).unwrap();
+    // Ni d'une autre cellule, ni hors numérotation.
+    std::fs::write(dir.path().join("OTHER001.001"), b"x").unwrap();
+    std::fs::write(dir.path().join("TEST0001.TXT"), b"x").unwrap();
+    std::fs::write(dir.path().join("TEST0001.01"), b"x").unwrap();
+    let cell = decode_cell_file_blocking(&path).unwrap();
+    assert_eq!(cell.updates_applied, 2);
+    assert_eq!(cell.update_error, None);
+
+    // Mise à jour manquante dans la séquence.
+    std::fs::remove_file(dir.path().join("TEST0001.001")).unwrap();
+    let cell = decode_cell_file_blocking(&path).unwrap();
+    assert_eq!(cell.updates_applied, 0);
+    assert_eq!(cell.updates_pending, 1);
+    assert!(cell.update_error.unwrap().contains("n° 1 manquante"));
 }

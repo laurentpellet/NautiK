@@ -480,8 +480,7 @@ Critères (TEST_PLAN.md §7) :
       `inspect_enc_cell`, chemin relatif vérifié par
       `resolve_cell_path` : ni `..`, ni chemin absolu, ni sortie du
       dossier par lien) ; résumé (édition, date, usage, échelle, classes,
-      sondes, emprise), objets écartés et mises à jour non appliquées
-      signalés.
+      sondes, emprise), objets écartés signalés.
     - Vérifié sur deux cellules NOAA réelles (US5MA1AM, port, 1 538
       objets, 1 177 sondes ; US4MA23M, approche, 1 748 objets) : aucun
       objet écarté, emprise et attributs cohérents (bouées nommées,
@@ -489,8 +488,30 @@ Critères (TEST_PLAN.md §7) :
       `CATALOG.031` refusés comme cellules de base. Outil :
       `cargo run -p nav-charts --example enc_summary -- CELLULE.000`
       (`NAUTIK_ENC_CLASS=n` pour lister les attributs d'une classe).
-  - [ ] Application des mises à jour `.001`… (RUIN, FSPC, VRPC, SGCC,
-    contrôle RVER/UPDN).
+  - [x] Application des mises à jour `.001`… (`nav_charts::s57::update`) :
+    - fichiers `NOM.001` à `NOM.999` trouvés à côté de la cellule (casse
+      ignorée), appliqués dans l'ordre par `decode_cell_file` ;
+    - EXPP 2 et même édition exigés ; numéros UPDN consécutifs (mise à
+      jour manquante signalée), mises à jour déjà intégrées à une
+      réédition ignorées ;
+    - instructions RUIN (insérer, supprimer, modifier) avec contrôle des
+      versions RVER ; listes modifiées par VRPC, SGCC (2D et 3D), FSPC ;
+      attributs remplacés, ajoutés ou supprimés (`DEL`) ;
+    - chaque mise à jour est appliquée sur une copie, en entier ou pas
+      du tout ; la première refusée arrête la séquence : cellule
+      signalée « pas à jour » avec le nombre de mises à jour non
+      appliquées et la raison ;
+    - annulation par le producteur (mise à jour d'édition 0) signalée
+      comme alerte : « ne plus l'utiliser pour la navigation » ;
+    - tests : insertions, suppressions, déplacement de nœud, retrait de
+      trou, versions et cibles incohérentes, séquence trouée, réédition,
+      annulation, chaque troncature d'une mise à jour (jamais appliquée
+      en partie), octets corrompus, recherche des fichiers ;
+    - vérifié sur NOAA : US5MA1AM, 7 mises à jour appliquées sans objet
+      écarté (1 538 → 1 552 objets), puis annulation du 30/12/2022 ;
+      US4MA23M annulée le 09/10/2024.
+    - Application : résumé avec mises à jour appliquées et date de la
+      dernière, cellule pas à jour ou annulée signalée.
   - [ ] Affichage sur la carte, symbologie S-52 simplifiée (profondeurs,
     dangers).
 - [ ] CPA/TCPA.

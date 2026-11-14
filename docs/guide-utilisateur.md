@@ -78,8 +78,13 @@ Dans la liste **Cellules**, **Lire** décode une cellule et en affiche le
 résumé : édition, date de publication, usage (port, approche…),
 échelle, nombre d'objets et de sondes, emprise et principales classes
 d'objets. Seules les cellules en WGS 84 sont acceptées. Les mises à
-jour ne sont pas encore appliquées : le résumé le rappelle quand la
-cellule en a. Un objet incohérent est écarté et signalé, jamais
+jour (`.001`, `.002`… à côté de la cellule) sont appliquées dans
+l'ordre ; le résumé indique combien l'ont été et la date de la
+dernière. Une mise à jour manquante ou incohérente n'est jamais
+appliquée à moitié : la cellule est signalée « pas à jour », avec la
+raison. Une cellule annulée par son producteur est signalée en rouge :
+ne l'utilisez plus, procurez-vous la cellule qui la remplace. Un objet
+incohérent est écarté et signalé, jamais
 deviné. L'affichage des ENC sur la carte viendra dans une version
 suivante. Un
 dossier ENC disparu est signalé ; **Retirer** l'oublie sans toucher aux

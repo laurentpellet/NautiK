@@ -80,6 +80,16 @@ export interface EncCellSummary {
   /** Objets écartés (géométrie incohérente). */
   skippedFeatures: number;
   problems: string[];
+  /** Mises à jour (.001…) appliquées. */
+  updatesApplied: number;
+  /** Mises à jour présentes mais non appliquées. */
+  updatesPending: number;
+  /** Date (AAAAMMJJ) de la dernière mise à jour appliquée. */
+  updateIssueDate: string | null;
+  /** Raison de l'arrêt des mises à jour (manquante, refusée…). */
+  updateError: string | null;
+  /** Date (AAAAMMJJ) d'annulation de la cellule par son producteur. */
+  cancelled: string | null;
 }
 
 function parseBounds(value: unknown): [number, number, number, number] {
@@ -112,6 +122,11 @@ export function parseEncCellSummary(value: unknown): EncCellSummary {
     bounds: optional(r.bounds, parseBounds),
     skippedFeatures: expectInteger(r.skippedFeatures, 'résumé.skippedFeatures', 0, 2 ** 32),
     problems: expectArray(r.problems, 'résumé.problems', (v) => expectString(v, 'problème')),
+    updatesApplied: expectInteger(r.updatesApplied, 'résumé.updatesApplied', 0, 999),
+    updatesPending: expectInteger(r.updatesPending, 'résumé.updatesPending', 0, 999),
+    updateIssueDate: optional(r.updateIssueDate, (v) => expectString(v, 'résumé.updateIssueDate')),
+    updateError: optional(r.updateError, (v) => expectString(v, 'résumé.updateError')),
+    cancelled: optional(r.cancelled, (v) => expectString(v, 'résumé.cancelled')),
   };
 }
 
