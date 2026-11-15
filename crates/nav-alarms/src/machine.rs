@@ -121,6 +121,19 @@ impl Machine {
         }
     }
 
+    /// Déclenche l'alarme immédiatement (alarme manuelle, ex. homme à la
+    /// mer). Retourne `false` si elle était déjà déclenchée.
+    pub fn trigger(&mut self, at: DateTime<Utc>) -> bool {
+        if self.is_alerting() {
+            return false;
+        }
+        self.state = AlarmState::Active;
+        self.pending_since = None;
+        self.active_since = Some(at);
+        self.clear_since = None;
+        true
+    }
+
     /// Fait évoluer la machine selon la condition constatée à `now`.
     pub fn update(
         &mut self,
@@ -261,6 +274,17 @@ mod tests {
         assert_eq!(m.state(), AlarmState::Active);
         // Le délai de retour a été interrompu par la donnée inconnue.
         assert_eq!(m.update(Condition::Clear, t(100), D, C), None);
+    }
+
+    #[test]
+    fn manual_trigger_is_immediate_and_unique() {
+        let mut m = Machine::new(true);
+        assert!(m.trigger(t(3)));
+        assert_eq!(m.state(), AlarmState::Active);
+        assert_eq!(m.active_since(), Some(t(3)));
+        assert!(!m.trigger(t(4)), "déjà déclenchée");
+        assert!(m.acknowledge());
+        assert!(!m.trigger(t(5)), "acquittée mais toujours déclenchée");
     }
 
     #[test]

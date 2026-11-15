@@ -2403,6 +2403,7 @@ dependencies = [
  "nav-charts",
  "nav-core",
  "nav-engine",
+ "nav-poi",
  "nav-routing",
  "nav-storage",
  "nav-weather",
@@ -2498,7 +2499,9 @@ dependencies = [
  "nav-ais",
  "nav-alarms",
  "nav-core",
+ "nav-geodesy",
  "nav-nmea0183",
+ "nav-poi",
  "nav-routing",
  "nav-signalk",
  "nav-storage",
@@ -2542,6 +2545,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nav-poi"
+version = "0.1.0"
+dependencies = [
+ "nav-core",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "nav-routing"
 version = "0.1.0"
 dependencies = [
@@ -2580,6 +2598,7 @@ dependencies = [
  "chrono",
  "nav-alarms",
  "nav-core",
+ "nav-poi",
  "nav-routing",
  "serde",
  "serde_json",

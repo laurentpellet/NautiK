@@ -1,7 +1,7 @@
 /** Réglages du bateau simulé (vitesse en m/s, validée par le moteur). */
 import { invoke } from '@tauri-apps/api/core';
 import type { InvokeFn } from './engine';
-import { EngineProtocolError, expectNumber, expectRecord } from './validate';
+import { EngineProtocolError, expectNumber, expectRecord, type LatLon } from './validate';
 
 /** Vitesse simulée maximale acceptée par le moteur : 30 nœuds. */
 export const MAX_SIMULATED_SPEED_MPS = (30 * 1852) / 3600;
@@ -28,5 +28,10 @@ export class SimulatorApi {
 
   async setSpeed(speedMps: number): Promise<SimulatorSettings> {
     return parseSimulatorSettings(await this.invokeFn('set_simulator_settings', { speedMps }));
+  }
+
+  /** Place le bateau simulé (le moteur refuse hors du mode simulateur). */
+  async placeBoat(position: LatLon): Promise<void> {
+    await this.invokeFn('place_simulated_boat', { position });
   }
 }

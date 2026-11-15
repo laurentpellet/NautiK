@@ -16,6 +16,7 @@ members = [
     "crates/nav-storage",
     "crates/nav-api",
     "crates/nav-weather",
+    "crates/nav-poi",
 ]
 
 [workspace.package]
@@ -35,6 +36,7 @@ nav-engine = { path = "crates/nav-engine" }
 nav-charts = { path = "crates/nav-charts" }
 nav-geodesy = { path = "crates/nav-geodesy" }
 nav-nmea0183 = { path = "crates/nav-nmea0183" }
+nav-poi = { path = "crates/nav-poi" }
 nav-routing = { path = "crates/nav-routing" }
 nav-signalk = { path = "crates/nav-signalk" }
 nav-storage = { path = "crates/nav-storage" }

@@ -91,7 +91,13 @@
       {#each events as e (e.id)}
         <li class={e.kind}>
           <span class="time">{formatUtc(e.at)}</span>
-          <span class="kind">{e.alarm === 'anchor' ? 'Mouillage' : 'Position'}</span>
+          <span class="kind"
+            >{e.alarm === 'anchor'
+              ? 'Mouillage'
+              : e.alarm === 'manOverboard'
+                ? 'MOB'
+                : 'Position'}</span
+          >
           <span class="what">{EVENT_LABELS[e.kind]}</span>
           <span class="msg">{e.message}{e.simulated ? ' (simulation)' : ''}</span>
         </li>

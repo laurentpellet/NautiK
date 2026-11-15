@@ -1,5 +1,5 @@
 /**
- * Alarmes (mouillage, perte de position). L'évaluation est faite par le
+ * Alarmes (mouillage, perte de position, homme à la mer). L'évaluation est faite par le
  * moteur Rust ; ce service ne fait que lire son état et relayer les
  * commandes de l'utilisateur.
  */
@@ -21,11 +21,11 @@ import {
   type LatLon,
 } from './validate';
 
-export type AlarmKind = 'anchor' | 'positionLost';
+export type AlarmKind = 'anchor' | 'positionLost' | 'manOverboard';
 export type AlarmState = 'off' | 'normal' | 'pending' | 'active' | 'acknowledged';
 export type EventKind = 'activated' | 'acknowledged' | 'resolved' | 'enabled' | 'disabled';
 
-const KINDS: readonly AlarmKind[] = ['anchor', 'positionLost'];
+const KINDS: readonly AlarmKind[] = ['anchor', 'positionLost', 'manOverboard'];
 const STATES: readonly AlarmState[] = ['off', 'normal', 'pending', 'active', 'acknowledged'];
 const EVENTS: readonly EventKind[] = [
   'activated',
@@ -61,10 +61,23 @@ export interface AnchorView {
   bearingRad: number | null;
 }
 
+export interface MobView {
+  /** Point MOB (dernière position connue à l'appui). */
+  position: LatLon;
+  markedAt: number;
+  /** La position était obsolète à l'appui : point approximatif. */
+  approximate: boolean;
+  /** Distance du bateau au MOB (m), si la position est fraîche. */
+  distanceM: number | null;
+  /** Relèvement du MOB depuis le bateau (rad, vrai). */
+  bearingRad: number | null;
+}
+
 export interface AlarmsSnapshot {
   computedAt: number;
   alarms: AlarmView[];
   anchor: AnchorView | null;
+  mob: MobView | null;
   anchorRadiusM: number;
   sounding: boolean;
   simulated: boolean;
@@ -119,12 +132,28 @@ function parseAnchor(value: unknown): AnchorView {
   return anchor;
 }
 
+function parseMob(value: unknown): MobView {
+  const r = expectRecord(value, 'homme à la mer');
+  const mob = {
+    position: expectPosition(r.position, 'MOB'),
+    markedAt: expectTimestamp(r.markedAt, 'markedAt'),
+    approximate: expectBoolean(r.approximate, 'approximate'),
+    distanceM: optional(r.distanceM, (v) => expectNumber(v, 'distanceM')),
+    bearingRad: optional(r.bearingRad, (v) => expectNumber(v, 'bearingRad')),
+  };
+  if (mob.distanceM !== null && mob.distanceM < 0) {
+    throw new EngineProtocolError('distance MOB négative');
+  }
+  return mob;
+}
+
 export function parseAlarmsSnapshot(value: unknown): AlarmsSnapshot {
   const r = expectRecord(value, 'alarmes');
   return {
     computedAt: expectTimestamp(r.computedAt, 'computedAt'),
     alarms: expectArray(r.alarms, 'alarms', parseAlarm),
     anchor: optional(r.anchor, parseAnchor),
+    mob: optional(r.mob, parseMob),
     anchorRadiusM: expectNumber(r.anchorRadiusM, 'anchorRadiusM'),
     sounding: expectBoolean(r.sounding, 'sounding'),
     simulated: expectBoolean(r.simulated, 'simulated'),
@@ -172,6 +201,16 @@ export class AlarmsApi {
 
   async raiseAnchor(): Promise<AlarmsSnapshot> {
     return parseAlarmsSnapshot(await this.invokeFn('raise_anchor'));
+  }
+
+  /** Homme à la mer : point MOB à la dernière position connue. */
+  async markMob(): Promise<AlarmsSnapshot> {
+    return parseAlarmsSnapshot(await this.invokeFn('mark_mob'));
+  }
+
+  /** Fin de l'alerte homme à la mer. */
+  async clearMob(): Promise<AlarmsSnapshot> {
+    return parseAlarmsSnapshot(await this.invokeFn('clear_mob'));
   }
 
   async acknowledge(kind: AlarmKind): Promise<AlarmsSnapshot> {

@@ -1,8 +1,10 @@
 //! Opérations sur les routes : création, édition, inversion, segments.
 
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 use nav_core::GeoPosition;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::model::{
@@ -155,6 +157,125 @@ impl Route {
     }
 }
 
+/// Waypoint d'une route en cours d'édition : existant (`id`) ou nouveau.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaypointEdit {
+    /// Waypoint existant de la route, `None` pour un nouveau point.
+    pub id: Option<Uuid>,
+    /// Nom ; vide ou absent : `WPnnn` selon le rang.
+    pub name: Option<String>,
+    /// Position WGS84.
+    pub position: GeoPosition,
+}
+
+fn edited_name(name: Option<&str>, index: usize) -> String {
+    match name.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) => n.to_owned(),
+        None => format!("WP{:03}", index + 1),
+    }
+}
+
+/// Construit les waypoints d'une édition. Les waypoints existants
+/// (`existing`) gardent leur identifiant, leur description et leur date
+/// de création.
+fn edited_waypoints(
+    existing: &[Waypoint],
+    edits: &[WaypointEdit],
+    now: DateTime<Utc>,
+) -> Result<Vec<Waypoint>, ValidationError> {
+    check_length(edits.len())?;
+    let mut seen = HashSet::new();
+    edits
+        .iter()
+        .enumerate()
+        .map(|(index, edit)| {
+            let name = edited_name(edit.name.as_deref(), index);
+            match edit.id {
+                None => Waypoint::new(&name, edit.position, None, now),
+                Some(id) => {
+                    if !seen.insert(id) {
+                        return Err(ValidationError::DuplicateWaypoint(id));
+                    }
+                    let mut waypoint = existing
+                        .iter()
+                        .find(|w| w.id == id)
+                        .cloned()
+                        .ok_or(ValidationError::UnknownWaypoint(id))?;
+                    let name = validate_name(&name)?;
+                    if waypoint.name != name || waypoint.position != edit.position {
+                        waypoint.name = name;
+                        waypoint.position = edit.position;
+                        waypoint.updated_at = now;
+                    }
+                    Ok(waypoint)
+                }
+            }
+        })
+        .collect()
+}
+
+impl Route {
+    /// Crée une route à partir d'une édition (nouveaux points uniquement).
+    ///
+    /// # Errors
+    ///
+    /// [`ValidationError`] si le nom, un nom de waypoint ou la longueur
+    /// sont invalides, ou si un point désigne un waypoint existant.
+    pub fn from_edits(
+        name: &str,
+        edits: &[WaypointEdit],
+        now: DateTime<Utc>,
+    ) -> Result<Self, ValidationError> {
+        let waypoints = edited_waypoints(&[], edits, now)?;
+        Self::new(name, None, waypoints, now)
+    }
+
+    /// Remplace le nom et les waypoints de la route par une édition :
+    /// déplacement, renommage, ajout (départ, arrivée, intermédiaire),
+    /// retrait et réordonnancement. Rien n'est modifié en cas d'erreur.
+    ///
+    /// # Errors
+    ///
+    /// [`ValidationError`] si un nom ou la longueur sont invalides, ou si
+    /// un point désigne un waypoint absent de la route ou répété.
+    pub fn apply_edit(
+        &mut self,
+        name: &str,
+        edits: &[WaypointEdit],
+        now: DateTime<Utc>,
+    ) -> Result<(), ValidationError> {
+        let name = validate_name(name)?;
+        let waypoints = edited_waypoints(&self.waypoints, edits, now)?;
+        self.name = name;
+        self.waypoints = waypoints;
+        self.updated_at = now;
+        Ok(())
+    }
+
+    /// Renomme le waypoint à l'index donné.
+    ///
+    /// # Errors
+    ///
+    /// [`ValidationError`] si l'index est hors limites ou le nom invalide.
+    pub fn rename_waypoint(
+        &mut self,
+        index: usize,
+        name: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), ValidationError> {
+        let name = validate_name(name)?;
+        let waypoint = self
+            .waypoints
+            .get_mut(index)
+            .ok_or(ValidationError::IndexOutOfRange(index))?;
+        waypoint.name = name;
+        waypoint.updated_at = now;
+        self.updated_at = now;
+        Ok(())
+    }
+}
+
 fn check_length(len: usize) -> Result<(), ValidationError> {
     if (2..=MAX_ROUTE_WAYPOINTS).contains(&len) {
         Ok(())
@@ -259,6 +380,142 @@ mod tests {
         r.move_waypoint(0, p(0.0, -1.0), Utc::now()).expect("move");
         assert_eq!(r.waypoints[0].position, p(0.0, -1.0));
         assert!(r.move_waypoint(7, p(0.0, 0.0), Utc::now()).is_err());
+    }
+
+    fn keep(w: &Waypoint) -> WaypointEdit {
+        WaypointEdit {
+            id: Some(w.id),
+            name: Some(w.name.clone()),
+            position: w.position,
+        }
+    }
+
+    fn new_point(name: Option<&str>, position: GeoPosition) -> WaypointEdit {
+        WaypointEdit {
+            id: None,
+            name: name.map(str::to_owned),
+            position,
+        }
+    }
+
+    #[test]
+    fn edit_adds_departure_and_arrival_and_renames() {
+        let mut r = route();
+        let ids: Vec<_> = r.waypoints.iter().map(|w| w.id).collect();
+        let created = r.waypoints[1].created_at;
+        let mut middle = keep(&r.waypoints[1]);
+        middle.name = Some("  Passe Tiputa ".to_owned());
+        let edits = vec![
+            new_point(Some("Départ"), p(-1.0, 0.0)),
+            keep(&r.waypoints[0]),
+            middle,
+            keep(&r.waypoints[2]),
+            new_point(None, p(2.0, 1.0)),
+        ];
+        r.apply_edit(" Nouvelle ", &edits, Utc::now())
+            .expect("édition");
+        assert_eq!(r.name, "Nouvelle");
+        let names: Vec<_> = r.waypoints.iter().map(|w| w.name.as_str()).collect();
+        assert_eq!(names, ["Départ", "WP001", "Passe Tiputa", "WP003", "WP005"]);
+        assert_eq!(r.waypoints[1].id, ids[0], "identifiant conservé");
+        assert_eq!(r.waypoints[2].created_at, created);
+        assert!(!ids.contains(&r.waypoints[0].id));
+    }
+
+    #[test]
+    fn edit_moves_removes_and_reorders() {
+        let mut r = route();
+        let mut moved = keep(&r.waypoints[2]);
+        moved.position = p(5.0, 5.0);
+        let edits = vec![moved, keep(&r.waypoints[0])];
+        r.apply_edit("Test", &edits, Utc::now()).expect("édition");
+        assert_eq!(r.waypoints.len(), 2);
+        assert_eq!(r.waypoints[0].position, p(5.0, 5.0));
+        assert_eq!(r.waypoints[1].name, "WP001");
+    }
+
+    #[test]
+    fn invalid_edits_leave_the_route_unchanged() {
+        let mut r = route();
+        let before = r.clone();
+        let first = keep(&r.waypoints[0]);
+        let cases = [
+            (
+                "Test",
+                vec![first.clone(), first.clone()],
+                ValidationError::DuplicateWaypoint(r.waypoints[0].id),
+            ),
+            (
+                "Test",
+                vec![first.clone()],
+                ValidationError::InvalidRouteLength,
+            ),
+            (
+                "  ",
+                vec![first.clone(), keep(&r.waypoints[1])],
+                ValidationError::InvalidName,
+            ),
+            (
+                "Test",
+                vec![
+                    first.clone(),
+                    new_point(Some(&"x".repeat(101)), p(0.0, 0.0)),
+                ],
+                ValidationError::InvalidName,
+            ),
+        ];
+        for (name, edits, expected) in cases {
+            assert_eq!(r.apply_edit(name, &edits, Utc::now()), Err(expected));
+            assert_eq!(r, before);
+        }
+        let stranger = Uuid::new_v4();
+        let edits = vec![
+            first,
+            WaypointEdit {
+                id: Some(stranger),
+                name: None,
+                position: p(0.0, 0.0),
+            },
+        ];
+        assert_eq!(
+            r.apply_edit("Test", &edits, Utc::now()),
+            Err(ValidationError::UnknownWaypoint(stranger))
+        );
+        assert_eq!(r, before);
+    }
+
+    #[test]
+    fn from_edits_names_points_and_refuses_existing_ids() {
+        let edits = [
+            new_point(Some("Papeete"), p(-17.53, -149.57)),
+            new_point(Some(" "), p(-17.48, -149.85)),
+        ];
+        let r = Route::from_edits("Moorea", &edits, Utc::now()).expect("route");
+        assert_eq!(r.waypoints[0].name, "Papeete");
+        assert_eq!(r.waypoints[1].name, "WP002");
+        let existing = WaypointEdit {
+            id: Some(Uuid::new_v4()),
+            ..edits[0].clone()
+        };
+        assert!(matches!(
+            Route::from_edits("x", &[existing, edits[1].clone()], Utc::now()),
+            Err(ValidationError::UnknownWaypoint(_))
+        ));
+    }
+
+    #[test]
+    fn rename_waypoint_validates() {
+        let mut r = route();
+        r.rename_waypoint(1, " Passe ", Utc::now()).expect("rename");
+        assert_eq!(r.waypoints[1].name, "Passe");
+        assert_eq!(
+            r.rename_waypoint(1, "", Utc::now()),
+            Err(ValidationError::InvalidName)
+        );
+        assert_eq!(
+            r.rename_waypoint(9, "x", Utc::now()),
+            Err(ValidationError::IndexOutOfRange(9))
+        );
     }
 
     #[test]

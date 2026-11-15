@@ -130,6 +130,31 @@ async fn health_is_public_and_reports_a_stalled_loop() {
 }
 
 #[tokio::test]
+async fn man_overboard_through_rest() {
+    let (app, service, _) = app().await;
+    let (status, body) = call(&app, Method::POST, "/api/v1/alarms/mob", good(), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "aucune position connue");
+    assert!(body["error"]
+        .as_str()
+        .expect("message")
+        .contains("position"));
+    let (status, _) = call(&app, Method::POST, "/api/v1/alarms/mob", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    service.step(chrono::Utc::now()).await;
+    let (status, body) = call(&app, Method::POST, "/api/v1/alarms/mob", good(), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["mob"]["position"].is_object());
+    assert_eq!(body["sounding"], true);
+    let (status, _) = call(&app, Method::POST, "/api/v1/alarms/mob", good(), None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "MOB déjà en cours");
+
+    let (status, body) = call(&app, Method::DELETE, "/api/v1/alarms/mob", good(), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["mob"], Value::Null);
+}
+
+#[tokio::test]
 async fn anchor_watch_through_rest() {
     let (app, service, _) = app().await;
     // Sans position : refus explicite.
@@ -238,6 +263,38 @@ async fn routes_navigation_and_recording_through_rest() {
     .await;
     assert!(status.is_client_error(), "position hors bornes refusée");
 
+    // Édition : départ ajouté, waypoints renommés.
+    let first = route["waypoints"][0]["id"].clone();
+    let (status, edited) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/routes/{id}"),
+        good(),
+        Some(json!({
+            "name": "Passe Tiputa",
+            "waypoints": [
+                {"id": null, "name": "Départ", "position": {"latitudeDeg": -15.0, "longitudeDeg": -147.7}},
+                {"id": first, "name": "Entrée", "position": {"latitudeDeg": -14.968, "longitudeDeg": -147.638}},
+                {"id": null, "name": null, "position": {"latitudeDeg": -14.9, "longitudeDeg": -147.6}}
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(edited["waypoints"][0]["name"], "Départ");
+    assert_eq!(edited["waypoints"][1]["id"], first);
+    assert_eq!(edited["waypoints"][2]["name"], "WP003");
+    assert!(edited["bounds"]["west"].is_number());
+    let (status, _) = call(
+        &app,
+        Method::PUT,
+        &format!("/api/v1/routes/{id}"),
+        good(),
+        Some(json!({"name": "X", "waypoints": []})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "route trop courte");
+
     let (status, _) = call(
         &app,
         Method::PUT,
@@ -277,6 +334,18 @@ async fn routes_navigation_and_recording_through_rest() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, tracks) = call(&app, Method::GET, "/api/v1/tracks", good(), None).await;
     assert_eq!(tracks.as_array().map(Vec::len), Some(1));
+    let track_id = tracks[0]["id"].as_str().expect("id").to_owned();
+    let (status, _) = call(
+        &app,
+        Method::PATCH,
+        &format!("/api/v1/tracks/{track_id}"),
+        good(),
+        Some(json!({"name": "Sortie du matin"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, tracks) = call(&app, Method::GET, "/api/v1/tracks", good(), None).await;
+    assert_eq!(tracks[0]["name"], "Sortie du matin");
 
     let (status, _) = call(&app, Method::GET, "/api/v1/tracks/../../etc", good(), None).await;
     assert!(status.is_client_error());
@@ -413,12 +482,17 @@ async fn websocket_streams_state_after_first_message_auth() {
     // Puis le flux en continu.
     service.step(chrono::Utc::now()).await;
     let mut streamed = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..4 {
         streamed.push(next_json(&mut client).await["type"].clone());
     }
     assert_eq!(
         streamed,
-        [json!("alarms"), json!("instruments"), json!("ais")]
+        [
+            json!("alarms"),
+            json!("instruments"),
+            json!("ais"),
+            json!("ownShip")
+        ]
     );
 
     // Arrêt du service : la session se ferme proprement (1001).

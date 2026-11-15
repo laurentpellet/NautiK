@@ -23,7 +23,7 @@ export const PANEL_LABELS: Record<PanelId, string> = {
   anchor: 'Mouillage',
   live: 'Navigation',
   bar: 'Barre',
-  route: 'Route',
+  route: 'Routes et traces',
   routeBar: 'Barre de route',
 };
 

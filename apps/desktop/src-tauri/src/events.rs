@@ -16,6 +16,7 @@ fn emit(app: &AppHandle, event: &EngineEvent) -> tauri::Result<()> {
         EngineEvent::Rejections(v) => app.emit(name, v),
         EngineEvent::Ais(v) => app.emit(name, v),
         EngineEvent::Alarms(v) => app.emit(name, v),
+        EngineEvent::OwnShip(v) => app.emit(name, v),
     }
 }
 

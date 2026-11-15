@@ -233,6 +233,25 @@ async fn imported_track_is_stored_complete() {
 }
 
 #[tokio::test]
+async fn rename_track_changes_only_the_name() {
+    let db = Db::open_in_memory().await.expect("db");
+    let track = Track {
+        ended_at: Some(t(10)),
+        points: vec![point(0, 1.0), point(10, 1.1)],
+        ..empty_track("Avant")
+    };
+    db.create_track(&track, false).await.expect("create");
+    assert!(db.rename_track(track.id, "Après").await.expect("rename"));
+    let renamed = db.get_track(track.id).await.expect("get").expect("trace");
+    assert_eq!(renamed.name, "Après");
+    assert_eq!(renamed.points, track.points);
+    assert!(!db
+        .rename_track(Uuid::new_v4(), "x")
+        .await
+        .expect("inconnue"));
+}
+
+#[tokio::test]
 async fn interrupted_recordings_are_closed_without_inventing_times() {
     let db = Db::open_in_memory().await.expect("db");
     let with_points = empty_track("Avec points");
@@ -339,4 +358,84 @@ async fn open_fails_on_unwritable_location() {
     let dir = tempfile::tempdir().expect("dir");
     // Un répertoire existant ne peut pas être ouvert comme base.
     assert!(Db::open(dir.path()).await.is_err());
+}
+
+fn poi(osm_ref: &str, kind: nav_poi::PoiKind, name: Option<&str>) -> nav_poi::Poi {
+    nav_poi::Poi {
+        osm_ref: osm_ref.to_owned(),
+        kind,
+        name: name.map(str::to_owned),
+        position: GeoPosition::new(-17.5, -149.6).expect("pos"),
+        category: Some("port".to_owned()),
+        details: None,
+    }
+}
+
+#[tokio::test]
+async fn poi_regions_are_replaced_listed_and_deleted() {
+    use nav_poi::PoiKind;
+    let db = Db::open_in_memory().await.expect("db");
+    let first = [
+        poi("r1", PoiKind::Island, Some("Tahiti")),
+        poi("n2", PoiKind::Beacon, None),
+    ];
+    db.replace_region_pois("polynesie-francaise", t(0), "overpass", &first)
+        .await
+        .expect("enregistrement");
+    // Ordre stable : par référence OpenStreetMap.
+    assert_eq!(
+        db.list_pois().await.expect("liste"),
+        vec![first[1].clone(), first[0].clone()]
+    );
+
+    // Mise à jour : la région est remplacée en bloc.
+    let second = [poi("n3", PoiKind::Pass, Some("Passe de Taapuna"))];
+    db.replace_region_pois("polynesie-francaise", t(60), "overpass", &second)
+        .await
+        .expect("remplacement");
+    assert_eq!(db.list_pois().await.expect("liste"), second.to_vec());
+    let regions = db.list_poi_regions().await.expect("régions");
+    assert_eq!(regions.len(), 1);
+    assert_eq!(regions[0].poi_count, 1);
+    assert_eq!(regions[0].fetched_at, t(60));
+
+    // Régions qui se recouvrent : un point n'est listé qu'une fois.
+    db.replace_region_pois("autre", t(0), "overpass", &second)
+        .await
+        .expect("autre région");
+    assert_eq!(db.list_pois().await.expect("liste").len(), 1);
+
+    assert!(db
+        .delete_poi_region("polynesie-francaise")
+        .await
+        .expect("suppression"));
+    assert!(!db
+        .delete_poi_region("polynesie-francaise")
+        .await
+        .expect("déjà supprimée"));
+    assert_eq!(db.list_poi_regions().await.expect("régions").len(), 1);
+}
+
+#[tokio::test]
+async fn failed_poi_replacement_keeps_previous_points() {
+    use nav_poi::PoiKind;
+    let db = Db::open_in_memory().await.expect("db");
+    let first = [poi("r1", PoiKind::Island, Some("Moorea"))];
+    db.replace_region_pois("r", t(0), "overpass", &first)
+        .await
+        .expect("enregistrement");
+    // Doublon de clé : la transaction échoue et rien n'est modifié.
+    let duplicate = [
+        poi("n1", PoiKind::Beacon, None),
+        poi("n1", PoiKind::Beacon, None),
+    ];
+    assert!(db
+        .replace_region_pois("r", t(9), "overpass", &duplicate)
+        .await
+        .is_err());
+    assert_eq!(db.list_pois().await.expect("liste"), first.to_vec());
+    assert_eq!(
+        db.list_poi_regions().await.expect("régions")[0].fetched_at,
+        t(0)
+    );
 }

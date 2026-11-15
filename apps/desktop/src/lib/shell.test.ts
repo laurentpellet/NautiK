@@ -59,6 +59,7 @@ describe("pastilles d'état", () => {
             bearingRad: null,
           }
         : null,
+      mob: null,
       anchorRadiusM: 50,
       sounding: false,
       simulated: false,

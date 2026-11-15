@@ -37,6 +37,8 @@ const routingDefaults: Record<string, () => Promise<unknown>> = {
   get_enc_folder: () => Promise.resolve({ dir: null, inventory: null, error: null }),
   get_enc_map_index: () => Promise.resolve({ dir: null, index: null, error: null }),
   get_cm93_view: () => Promise.resolve({ base: null, cells: [], omitted: 0, truncated: false }),
+  get_pois: () => Promise.resolve({ pois: [], attribution: '© OSM' }),
+  list_poi_regions: () => Promise.resolve([]),
 };
 
 function alarmsSnapshot(patch: Record<string, unknown> = {}) {
@@ -92,8 +94,10 @@ function fakeListen() {
   return { listen, emit };
 }
 
-async function openSettings() {
+/** Ouvre l'onglet Paramètres sur une section (la section mémorisée est ignorée). */
+async function openSettings(section: 'Général' | 'Source' | 'Alarmes' | 'Cartes' = 'Général') {
   await fireEvent.click(await screen.findByRole('tab', { name: 'Paramètres' }));
+  await fireEvent.click(await screen.findByRole('tab', { name: new RegExp(`^${section}`, 'u') }));
 }
 
 function snapshotWith(fix: Record<string, unknown>, stale = false, readings: unknown[] = []) {
@@ -271,7 +275,7 @@ describe('App', () => {
       }),
       listen: events.listen,
     });
-    await openSettings();
+    await openSettings('Source');
     expect((await screen.findByTestId('source-mode')).textContent).toContain('boat.local');
     expect(screen.getByTestId('source-status').textContent).toContain('tentative 1');
 
@@ -313,7 +317,7 @@ describe('App', () => {
       return base(command);
     };
     render(App, { invoke, listen: fakeListen().listen });
-    await openSettings();
+    await openSettings('Source');
     await fireEvent.click(await screen.findByRole('button', { name: 'Modifier la source' }));
     await fireEvent.click(screen.getByLabelText('Signal K'));
     await fireEvent.input(screen.getByLabelText(/Adresse du serveur/), {
@@ -366,7 +370,7 @@ describe('App', () => {
       return base(command);
     };
     render(App, { invoke, listen: events.listen });
-    await openSettings();
+    await openSettings('Source');
     await fireEvent.click(await screen.findByRole('button', { name: 'Modifier la source' }));
     await fireEvent.click(screen.getByLabelText('NMEA 0183'));
     await fireEvent.change(screen.getByLabelText('Liaison'), { target: { value: 'serial' } });
@@ -405,7 +409,7 @@ describe('App', () => {
       return base(command);
     };
     render(App, { invoke, listen: fakeListen().listen });
-    await openSettings();
+    await openSettings('Source');
     await fireEvent.click(await screen.findByRole('button', { name: 'Modifier la source' }));
     await fireEvent.click(screen.getByLabelText('NMEA 0183'));
     await fireEvent.click(screen.getByRole('button', { name: 'Appliquer' }));
@@ -494,7 +498,7 @@ describe('App', () => {
       }),
       listen: fakeListen().listen,
     });
-    await openSettings();
+    await openSettings('Cartes');
     const panel = await screen.findByTestId('enc-folder');
     await vi.waitFor(() =>
       expect(within(panel).getByTestId('enc-dir').textContent).toContain('Aucun dossier ENC'),
@@ -536,7 +540,7 @@ describe('App', () => {
       }),
       listen: fakeListen().listen,
     });
-    await openSettings();
+    await openSettings('Cartes');
     const panel = await screen.findByTestId('enc-folder');
     const alert = await within(panel).findByRole('alert');
     expect(alert.textContent).toContain('Dossier ENC inaccessible');
@@ -592,7 +596,7 @@ describe('App', () => {
       }),
       listen: fakeListen().listen,
     });
-    await openSettings();
+    await openSettings('Cartes');
     const panel = await screen.findByTestId('enc-folder');
     await fireEvent.click(await within(panel).findByRole('button', { name: 'Lire FR501130' }));
     const summary = await within(panel).findByTestId('enc-summary');
@@ -658,7 +662,7 @@ describe('App', () => {
       }),
       listen: fakeListen().listen,
     });
-    await openSettings();
+    await openSettings('Cartes');
     const panel = await screen.findByTestId('enc-folder');
     await fireEvent.click(await within(panel).findByRole('button', { name: 'Lire US5MA1AM' }));
     const cancelled = await within(panel).findByTestId('enc-cancelled');
@@ -835,7 +839,7 @@ describe('App', () => {
       return base(command);
     };
     render(App, { invoke, listen: fakeListen().listen });
-    await openSettings();
+    await openSettings('Cartes');
     const panel = await screen.findByTestId('charts-folder');
     expect(screen.getByTestId('charts-dir').textContent).toBe('C:\\NautiK\\charts');
     expect(panel.textContent).toContain("dossier par défaut de l'application");
@@ -871,7 +875,7 @@ describe('App', () => {
       }),
       listen: fakeListen().listen,
     });
-    await openSettings();
+    await openSettings('Cartes');
     const panel = await screen.findByTestId('charts-folder');
     expect(panel.textContent).toContain('NAUTIK_CHARTS_DIR');
     expect(panel.textContent).toContain('Cartes indisponibles : répertoire introuvable');
@@ -914,7 +918,11 @@ describe('App', () => {
       'Cartes',
       'Routes',
       'Traces',
+      'Marques',
       'Cibles',
+      'Îles',
+      'Vecteur',
+      'Laylines',
     ]);
     expect(document.querySelector('[data-testid="layers-menu"] hr')).toBeTruthy();
 
@@ -968,7 +976,7 @@ describe('App', () => {
       });
       await screen.findByTestId('chart-view-stub');
       await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
-      expect(screen.getAllByRole('checkbox')).toHaveLength(4);
+      expect(screen.getAllByRole('checkbox')).toHaveLength(8);
       // Pas de choix de carte MBTiles : seulement les ENC, puis les objets.
       expect(screen.getAllByRole('checkbox')[0]?.closest('label')?.textContent).toContain(
         'Cartes ENC',
@@ -1119,11 +1127,15 @@ describe('App', () => {
     expect(routeButton.getAttribute('aria-pressed')).toBe('true');
     await fireEvent.click(routeButton);
     expect(
-      screen.getByLabelText('Panneau Route', { selector: 'section' }).closest('[hidden]'),
+      screen
+        .getByLabelText('Panneau Routes et traces', { selector: 'section' })
+        .closest('[hidden]'),
     ).toBeTruthy();
     await fireEvent.click(routeButton);
     expect(
-      screen.getByLabelText('Panneau Route', { selector: 'section' }).closest('[hidden]'),
+      screen
+        .getByLabelText('Panneau Routes et traces', { selector: 'section' })
+        .closest('[hidden]'),
     ).toBeNull();
 
     // La barre se masque depuis la barre d'outils, puis se réaffiche.
@@ -1332,7 +1344,7 @@ describe('App', () => {
     };
     localStorage.clear();
     render(App, { invoke, listen: fakeListen().listen });
-    await openSettings();
+    await openSettings('Général');
     const speed = await screen.findByLabelText(/Vitesse du bateau simulé \(kn\)/);
     await vi.waitFor(() => expect((speed as HTMLInputElement).value).toBe('8.0'));
 
@@ -1353,7 +1365,8 @@ describe('App', () => {
     expect(await screen.findByText('Vitesse invalide.')).toBeTruthy();
     expect(calls).toHaveLength(1);
 
-    // Les sources sont réglées dans cet onglet.
+    // Les sources sont réglées dans cet onglet, section Source.
+    await fireEvent.click(screen.getByRole('tab', { name: /^Source/ }));
     expect(screen.getByRole('button', { name: 'Modifier la source' })).toBeTruthy();
     await fireEvent.change(screen.getByLabelText('Vitesse'), { target: { value: 'kn' } });
   });
@@ -1715,6 +1728,80 @@ describe('App', () => {
     await screen.findByRole('button', { name: 'Mouiller ici' });
   });
 
+  it('déclenche un homme à la mer et affiche relèvement et distance en grand', async () => {
+    const events = fakeListen();
+    const calls: [string, unknown][] = [];
+    const base = fakeIpc({
+      get_engine_info: () => Promise.resolve(engine),
+      get_chart_catalog: () => Promise.resolve(emptyCatalog),
+    });
+    const mobAlarm = {
+      kind: 'manOverboard',
+      label: 'Homme à la mer',
+      state: 'active',
+      since: new Date().toISOString(),
+      message: 'HOMME À LA MER — 120 m',
+    };
+    const withMob = alarmsSnapshot({
+      alarms: [...alarmsSnapshot().alarms, mobAlarm],
+      mob: {
+        position: { latitudeDeg: -17.5, longitudeDeg: -149.5 },
+        markedAt: new Date().toISOString(),
+        approximate: false,
+        distanceM: 120,
+        bearingRad: Math.PI / 2,
+      },
+      sounding: true,
+    });
+    render(App, {
+      invoke: (command: string, args?: Record<string, unknown>) => {
+        calls.push([command, args]);
+        if (command === 'mark_mob') return Promise.resolve(withMob);
+        if (command === 'clear_mob') return Promise.resolve(alarmsSnapshot());
+        return base(command);
+      },
+      listen: events.listen,
+    });
+    await screen.findByTestId('map-bar');
+    events.emit(
+      snapshotWith({
+        position: { latitudeDeg: -17.5, longitudeDeg: -149.5 },
+        source: 'simulator',
+        sourceId: 'simulator',
+      }),
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Homme à la mer' }));
+    expect(calls).toContainEqual(['mark_mob', undefined]);
+    const panel = await screen.findByTestId('mob-panel');
+    expect(screen.getByTestId('mob-bearing').textContent).toBe('090°');
+    expect(panel.textContent).toContain('HOMME À LA MER');
+    // Pas en double dans le bandeau d'alarme.
+    expect(screen.queryByTestId('alarm-banner')).toBeNull();
+    // Ctrl+M pendant un MOB : le point n'est pas redemandé.
+    await fireEvent.keyDown(window, { key: 'm', ctrlKey: true });
+    expect(calls.filter(([c]) => c === 'mark_mob')).toHaveLength(1);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Fin du MOB' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Confirmer la fin du MOB' }));
+    expect(calls).toContainEqual(['clear_mob', undefined]);
+    await vi.waitFor(() => expect(screen.queryByTestId('mob-panel')).toBeNull());
+  });
+
+  it('signale un homme à la mer refusé faute de position (Ctrl+M)', async () => {
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        mark_mob: () =>
+          Promise.reject(new Error('aucune position connue : point homme à la mer impossible')),
+      }),
+      listen: fakeListen().listen,
+    });
+    await screen.findByTestId('map-bar');
+    await fireEvent.keyDown(window, { key: 'M', ctrlKey: true });
+    expect(await screen.findByText(/Homme à la mer : aucune position connue/)).toBeTruthy();
+  });
+
   it("refuse de poser l'ancre si le moteur n'a pas de position", async () => {
     const events = fakeListen();
     render(App, {
@@ -1785,7 +1872,7 @@ describe('App', () => {
       },
       listen: fakeListen().listen,
     });
-    await openSettings();
+    await openSettings('Alarmes');
     const events = await screen.findByTestId('alarm-events');
     expect(events.textContent).toContain('Déclenchée');
     expect(events.textContent).toContain('(simulation)');

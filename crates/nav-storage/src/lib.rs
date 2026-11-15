@@ -15,6 +15,9 @@ mod codec;
 mod db;
 mod error;
 mod import;
+mod logbook;
+mod marks;
+mod pois;
 mod routes;
 mod settings;
 mod tracks;
@@ -23,6 +26,8 @@ mod waypoints;
 pub use alarms::MAX_EVENTS_PAGE;
 pub use db::Db;
 pub use error::StorageError;
+pub use logbook::MAX_LOG_PAGE;
+pub use pois::PoiRegionStatus;
 pub use tracks::TrackSummary;
 
 /// Nom du composant, utilisé comme identifiant de source dans les logs.

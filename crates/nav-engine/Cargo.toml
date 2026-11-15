@@ -12,7 +12,10 @@ chrono.workspace = true
 nav-ais.workspace = true
 nav-alarms.workspace = true
 nav-core.workspace = true
+nav-geodesy.workspace = true
 nav-nmea0183.workspace = true
+# Recherche par nom dans les îles et amers téléchargés.
+nav-poi.workspace = true
 nav-routing.workspace = true
 nav-signalk.workspace = true
 nav-storage.workspace = true

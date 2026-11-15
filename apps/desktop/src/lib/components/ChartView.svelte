@@ -20,7 +20,7 @@
   import type { AisSnapshot } from '../services/ais';
   import type { ChartCatalog } from '../services/charts';
   import type { PositionFix } from '../services/position';
-  import type { LatLon, Route } from '../services/routing';
+  import type { GeoBounds, LatLon, Route } from '../services/routing';
   import { AIS_SOURCE, AIS_SYMBOL_LAYER, aisData, aisIcons, aisLayers } from '../map/ais';
   import { WIND_SOURCE, viewBounds, windData, windIcon, windLayers } from '../map/wind';
   import type { Bounds, WindVector } from '../services/weather';
@@ -38,15 +38,33 @@
   } from '../map/enc';
   import type { FeatureCollection } from 'geojson';
   import {
+    DRAFT_POINTS_LAYER,
+    DEFAULT_ACTIVE_ROUTE_COLOR,
     DRAFT_SOURCE,
     ROUTES_SOURCE,
+    activeRouteColorChanges,
     TRACKS_SOURCE,
     draftData,
     emptyCollection,
     overlayLayers,
+    overlayThemeChanges,
     routesData,
     tracksData,
+    type DraftPoint,
   } from '../map/overlays';
+  import { labelImage, parseLabelImageId } from '../map/labels';
+  import {
+    POI_SOURCE,
+    emptyPoiCollection,
+    poiLayers,
+    poiThemeChanges,
+    type PoiFeatures,
+  } from '../map/poi';
+  import { POI_ATTRIBUTION } from '../services/poi';
+  import { MEASURE_SOURCE, measureData, measureLayers } from '../map/measure';
+  import { AIDS_SOURCE, aidsLayers, type aidsData } from '../map/aids';
+  import { MARKS_SOURCE, marksLayers, marksThemeChanges, type MarkFeatures } from '../map/marks';
+  import { REPLAY_SOURCE, replayLayers, type ReplayFeatures } from '../map/replay';
   import {
     BACKGROUND_COLOR,
     BACKGROUND_LAYER_ID,
@@ -69,11 +87,15 @@
     routes?: Route[];
     /** Index du waypoint visé sur la route active. */
     targetIndex?: number | null;
-    /** Points de la route en cours de tracé. */
-    draft?: LatLon[];
+    /** Points de la route en cours d'édition. */
+    draft?: DraftPoint[];
+    /** Route en cours d'édition : dessinée par le brouillon, pas en double. */
+    editedRouteId?: string | null;
+    /** Point de la route en édition déplacé (glisser sur la carte). */
+    onpointmove?: (index: number, position: LatLon) => void;
     /** Traces à dessiner. */
     tracks?: { id: string; points: LatLon[]; recording: boolean }[];
-    /** Mode tracé : un clic sur la carte ajoute un point. */
+    /** Mode édition : un clic sur la carte ajoute un point, un point se déplace en le glissant. */
     drawing?: boolean;
     onmapclick?: (position: LatLon) => void;
     /** Cibles AIS à dessiner. */
@@ -96,6 +118,25 @@
     oncamera?: (camera: MapCamera, user: boolean) => void;
     /** Entités des cartes ENC à dessiner (symbologie simplifiée). */
     enc?: FeatureCollection<EncFeature['geometry'], EncFeature['properties']>;
+    /** Îles et amers (OpenStreetMap) à dessiner. */
+    pois?: PoiFeatures;
+    /** Couleur de la route active (`#rrggbb`). */
+    activeRouteColor?: string;
+    /** Points de l'outil de mesure. */
+    measure?: LatLon[];
+    /**
+     * Clic droit (ou appui long) sans glisser : position visée et point
+     * écran relatif à la carte, pour un menu contextuel.
+     */
+    oncontextmenu?: (position: LatLon, point: { x: number; y: number }) => void;
+    /** Aides à la navigation (vecteurs, laylines, MOB, VRM/EBL). */
+    aids?: ReturnType<typeof aidsData>;
+    /** Homme à la mer en cours : marqueur MOB. */
+    mob?: { position: LatLon; approximate: boolean } | null;
+    /** Marques personnelles. */
+    marks?: MarkFeatures;
+    /** Trace en relecture (vitesse en couleur, curseur). */
+    replay?: ReplayFeatures;
   }
 
   let {
@@ -107,6 +148,8 @@
     routes = [],
     targetIndex = null,
     draft = [],
+    editedRouteId = null,
+    onpointmove,
     tracks = [],
     drawing = false,
     onmapclick,
@@ -120,6 +163,14 @@
     camera = null,
     oncamera,
     enc = emptyEncCollection(),
+    pois = emptyPoiCollection(),
+    activeRouteColor = DEFAULT_ACTIVE_ROUTE_COLOR,
+    measure = [],
+    oncontextmenu,
+    aids = emptyCollection() as ReturnType<typeof aidsData>,
+    mob = null,
+    marks = { type: 'FeatureCollection', features: [] },
+    replay = { type: 'FeatureCollection', features: [] },
   }: Props = $props();
 
   function emitView(m: MapLibreMap): void {
@@ -146,6 +197,10 @@
   let pointerHeld = false;
   /** Délai pendant lequel un mouvement suit encore un geste (animation de zoom). */
   const INPUT_WINDOW_MS = 600;
+  /** Point de la route en édition en cours de déplacement. */
+  let dragIndex: number | null = null;
+  /** Le point a bougé : le clic qui termine le glisser n'ajoute rien. */
+  let dragged = false;
 
   /** Mouvement dû à l'utilisateur : ce volet mène l'autre (cartes verrouillées). */
   function byUser(): boolean {
@@ -210,13 +265,20 @@
     m.on('move', () => {
       if (!applying) oncamera?.(cameraOf(m), byUser());
     });
-    // Sondes ENC : images créées à la demande (pas de polices hors ligne).
-    m.on('styleimagemissing', (event: { id: string }) => {
-      const sounding = parseSoundingImageId(event.id);
-      if (!sounding || m.hasImage(event.id)) return;
+    // Sondes ENC et étiquettes (noms des waypoints) : images créées à la
+    // demande, pas de polices hors ligne. Depuis MapLibre 6, seul un
+    // résolveur peut fournir l'image à la requête en cours.
+    m.setMissingStyleImageResolver((id) => {
+      if (m.hasImage(id)) return;
       const ratio = window.devicePixelRatio || 1;
-      const image = soundingImage(sounding.label, sounding.shallow, sounding.theme, ratio);
-      if (image) m.addImage(event.id, image, { pixelRatio: ratio });
+      const sounding = parseSoundingImageId(id);
+      const label = sounding ? null : parseLabelImageId(id);
+      const image = sounding
+        ? soundingImage(sounding.label, sounding.shallow, sounding.theme, ratio)
+        : label
+          ? labelImage(label.text, label.style, label.theme, ratio)
+          : null;
+      if (image) m.addImage(id, image, { pixelRatio: ratio });
     });
     m.on('load', () => {
       // Cartes ENC au-dessus des cartes raster, sous toutes les surimpressions.
@@ -224,10 +286,22 @@
       for (const layer of encLayers(untrack(() => theme))) {
         m.addLayer(layer);
       }
+      // Îles et amers (OSM) au-dessus des cartes, sous les surimpressions.
+      m.addSource(POI_SOURCE, {
+        type: 'geojson',
+        data: emptyPoiCollection(),
+        attribution: POI_ATTRIBUTION,
+      });
+      for (const layer of poiLayers(untrack(() => theme))) {
+        m.addLayer(layer);
+      }
       for (const source of [ROUTES_SOURCE, DRAFT_SOURCE, TRACKS_SOURCE]) {
         m.addSource(source, { type: 'geojson', data: emptyCollection() });
       }
-      const overlays = overlayLayers();
+      const overlays = overlayLayers(
+        untrack(() => theme),
+        untrack(() => activeRouteColor),
+      );
       for (const layer of overlays) {
         m.addLayer(layer);
       }
@@ -243,11 +317,30 @@
       for (const layer of anchorLayers()) {
         m.addLayer(layer, overlays[0]?.id);
       }
+      // Trace relue et marques au-dessus des routes et traces.
+      m.addSource(REPLAY_SOURCE, { type: 'geojson', data: emptyCollection() });
+      for (const layer of replayLayers()) {
+        m.addLayer(layer);
+      }
+      m.addSource(MARKS_SOURCE, { type: 'geojson', data: emptyCollection() });
+      for (const layer of marksLayers(untrack(() => theme))) {
+        m.addLayer(layer);
+      }
+      // Aides (vecteurs, laylines, MOB, VRM/EBL) sous les cibles AIS.
+      m.addSource(AIDS_SOURCE, { type: 'geojson', data: emptyCollection() });
+      for (const layer of aidsLayers()) {
+        m.addLayer(layer);
+      }
       for (const { id, image } of aisIcons()) {
         m.addImage(id, image, { sdf: true });
       }
       m.addSource(AIS_SOURCE, { type: 'geojson', data: emptyCollection() });
       for (const layer of aisLayers()) {
+        m.addLayer(layer);
+      }
+      // Mesure au-dessus de tout : c'est l'outil en cours d'utilisation.
+      m.addSource(MEASURE_SOURCE, { type: 'geojson', data: measureData([]) });
+      for (const layer of measureLayers()) {
         m.addLayer(layer);
       }
       loaded = true;
@@ -268,11 +361,76 @@
     m.on('mouseleave', AIS_SYMBOL_LAYER, () => {
       if (!drawing) m.getCanvas().style.cursor = '';
     });
+    // Édition : un point de la route se déplace en le glissant (souris ou doigt).
+    const startDrag = (event: {
+      features?: { properties: Record<string, unknown> }[];
+      preventDefault: () => void;
+    }): void => {
+      const index = event.features?.[0]?.properties.index;
+      if (!drawing || typeof index !== 'number') return;
+      event.preventDefault();
+      dragIndex = index;
+      dragged = false;
+      m.getCanvas().style.cursor = 'grabbing';
+    };
+    const moveDrag = (event: { lngLat: { wrap: () => { lat: number; lng: number } } }): void => {
+      if (dragIndex === null) return;
+      dragged = true;
+      const { lat, lng } = event.lngLat.wrap();
+      onpointmove?.(dragIndex, { latitudeDeg: lat, longitudeDeg: lng });
+    };
+    const endDrag = (): void => {
+      if (dragIndex === null) return;
+      dragIndex = null;
+      m.getCanvas().style.cursor = drawing ? 'crosshair' : '';
+      // Le clic éventuel qui suit le relâchement arrive avant ce délai ;
+      // après un vrai glisser, MapLibre n'en émet pas : le clic suivant compte.
+      setTimeout(() => {
+        dragged = false;
+      }, 0);
+    };
+    m.on('mousedown', DRAFT_POINTS_LAYER, startDrag);
+    m.on('touchstart', DRAFT_POINTS_LAYER, (event) => {
+      if (event.points.length === 1) startDrag(event);
+    });
+    m.on('mousemove', moveDrag);
+    m.on('touchmove', moveDrag);
+    m.on('mouseup', endDrag);
+    m.on('touchend', endDrag);
+    m.on('mouseenter', DRAFT_POINTS_LAYER, () => {
+      if (drawing && dragIndex === null) m.getCanvas().style.cursor = 'move';
+    });
+    m.on('mouseleave', DRAFT_POINTS_LAYER, () => {
+      if (drawing && dragIndex === null) m.getCanvas().style.cursor = 'crosshair';
+    });
     m.on('click', (event) => {
-      if (drawing) {
-        const { lat, lng } = event.lngLat.wrap();
-        onmapclick?.({ latitudeDeg: lat, longitudeDeg: lng });
+      if (!drawing) return;
+      // Fin d'un glisser, ou clic sur un point existant : pas de nouveau point.
+      if (dragged) {
+        dragged = false;
+        return;
       }
+      if (m.queryRenderedFeatures(event.point, { layers: [DRAFT_POINTS_LAYER] }).length > 0) return;
+      const { lat, lng } = event.lngLat.wrap();
+      onmapclick?.({ latitudeDeg: lat, longitudeDeg: lng });
+    });
+    // Menu contextuel : clic droit sans glisser (le glisser droit tourne la
+    // carte) ou appui long.
+    let rightDown: { x: number; y: number } | null = null;
+    m.on('mousedown', (event) => {
+      if (event.originalEvent.button === 2) rightDown = event.point;
+    });
+    m.on('contextmenu', (event) => {
+      event.preventDefault();
+      event.originalEvent.preventDefault();
+      const start = rightDown;
+      rightDown = null;
+      if (start && Math.hypot(event.point.x - start.x, event.point.y - start.y) > 5) return;
+      const { lat, lng } = event.lngLat.wrap();
+      oncontextmenu?.(
+        { latitudeDeg: lat, longitudeDeg: lng },
+        { x: event.point.x, y: event.point.y },
+      );
     });
     zoom = m.getZoom();
     m.on('zoom', () => {
@@ -289,6 +447,8 @@
       window.removeEventListener('touchend', release);
       marker?.remove();
       marker = null;
+      mobMarker?.remove();
+      mobMarker = null;
       m.remove();
       map = null;
       loaded = false;
@@ -325,11 +485,30 @@
       if (kind === 'paint') m.setPaintProperty(layer, property as never, value as never);
       else m.setLayoutProperty(layer, property as never, value as never);
     }
+    for (const [layer, image] of [
+      ...overlayThemeChanges(t),
+      ...poiThemeChanges(t),
+      ...marksThemeChanges(t),
+    ]) {
+      m.setLayoutProperty(layer, 'icon-image', image);
+    }
   });
 
   $effect(() => {
     const data = enc;
     if (map && loaded) map.getSource<GeoJSONSource>(ENC_SOURCE)?.setData(data);
+  });
+
+  // Couleur de la route active, changée dans les Paramètres.
+  $effect(() => {
+    const changes = activeRouteColorChanges(activeRouteColor);
+    if (!map || !loaded) return;
+    for (const [layer, property, value] of changes) map.setPaintProperty(layer, property, value);
+  });
+
+  $effect(() => {
+    const data = pois;
+    if (map && loaded) map.getSource<GeoJSONSource>(POI_SOURCE)?.setData(data);
   });
 
   // Cartes masquées : visibilité des couches raster, sans reconstruire
@@ -354,7 +533,7 @@
   }
 
   $effect(() => {
-    const data = routesData(routes, targetIndex);
+    const data = routesData(routes, targetIndex, editedRouteId);
     if (map && loaded) setData(ROUTES_SOURCE, data);
   });
 
@@ -376,6 +555,52 @@
   $effect(() => {
     const data = anchorData(anchor, anchorAlerting);
     if (map && loaded) map.getSource<GeoJSONSource>(ANCHOR_SOURCE)?.setData(data);
+  });
+
+  $effect(() => {
+    const data = marks;
+    if (map && loaded) map.getSource<GeoJSONSource>(MARKS_SOURCE)?.setData(data);
+  });
+
+  $effect(() => {
+    const data = replay;
+    if (map && loaded) map.getSource<GeoJSONSource>(REPLAY_SOURCE)?.setData(data);
+  });
+
+  $effect(() => {
+    const data = aids;
+    if (map && loaded) map.getSource<GeoJSONSource>(AIDS_SOURCE)?.setData(data);
+  });
+
+  // Homme à la mer : marqueur bien visible, au-dessus de tout.
+  let mobMarker: Marker | null = null;
+  $effect(() => {
+    const m = map;
+    const current = mob;
+    if (!m || !current) {
+      mobMarker?.remove();
+      mobMarker = null;
+      return;
+    }
+    const lngLat: [number, number] = [current.position.longitudeDeg, current.position.latitudeDeg];
+    if (!mobMarker) {
+      const element = document.createElement('div');
+      element.className = 'mob-marker';
+      element.innerHTML = '<span class="mob-ring">MOB</span>';
+      mobMarker = new Marker({ element }).setLngLat(lngLat).addTo(m);
+    } else {
+      mobMarker.setLngLat(lngLat);
+    }
+    const element = mobMarker.getElement();
+    element.classList.toggle('approximate', current.approximate);
+    element.title = current.approximate
+      ? 'Homme à la mer — point approximatif (position obsolète à l’appui)'
+      : 'Homme à la mer';
+  });
+
+  $effect(() => {
+    const data = measureData(measure);
+    if (map && loaded) map.getSource<GeoJSONSource>(MEASURE_SOURCE)?.setData(data);
   });
 
   $effect(() => {
@@ -435,6 +660,29 @@
     }
     markerElement.title = simulated ? 'Position simulée' : 'Position du bateau';
   });
+
+  /**
+   * Cadre la carte sur une emprise (route, trace), en laissant de la place
+   * aux panneaux. Une emprise qui traverse l'antiméridien est déroulée.
+   */
+  export function fitBounds(bounds: GeoBounds): void {
+    const m = map;
+    if (!m) return;
+    const east = bounds.west > bounds.east ? bounds.east + 360 : bounds.east;
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    const roomy = width > 700 && height > 400;
+    const padding = roomy
+      ? { top: 60, bottom: 120, left: 60, right: Math.min(380, Math.round(width * 0.4)) }
+      : 30;
+    m.fitBounds(
+      [
+        [bounds.west, bounds.south],
+        [east, bounds.north],
+      ],
+      { padding, maxZoom: 15, duration: 600 },
+    );
+  }
 
   /** Centre la carte sur la dernière position connue. */
   export function recenter(): void {
@@ -513,5 +761,35 @@
 
   :global(.boat-label:empty) {
     display: none;
+  }
+
+  :global(.mob-marker) {
+    pointer-events: auto;
+  }
+
+  :global(.mob-ring) {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    background: #e53935;
+    box-shadow: 0 0 0 3px #e53935;
+    color: #fff;
+    font:
+      800 11px/1 system-ui,
+      sans-serif;
+    animation: mob-pulse 1s ease-in-out infinite alternate;
+  }
+
+  :global(.mob-marker.approximate .mob-ring) {
+    border-style: dashed;
+  }
+
+  @keyframes -global-mob-pulse {
+    to {
+      box-shadow: 0 0 0 9px rgba(229, 57, 53, 0.35);
+    }
   }
 </style>

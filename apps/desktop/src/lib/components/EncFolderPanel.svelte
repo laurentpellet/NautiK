@@ -240,9 +240,9 @@
   </div>
   <p class="hint">
     Dossier d'un jeu d'échange S-57 (en général <code>ENC_ROOT</code>, avec
-    <code>CATALOG.031</code> et les cellules <code>.000</code>). Pour l'instant, NautiK repère et
-    lit les cellules (WGS 84 uniquement) avec leurs mises à jour ; leur affichage sur la carte
-    viendra ensuite. Les fichiers ne sont jamais modifiés.
+    <code>CATALOG.031</code> et les cellules <code>.000</code>), ou base CM93 placée dedans. Les
+    cellules (WGS 84 uniquement) sont lues avec leurs mises à jour et dessinées sur la carte
+    (calques ENC et CM93). Les fichiers ne sont jamais modifiés.
   </p>
   {#if error}
     <p class="error" role="alert">{error}</p>

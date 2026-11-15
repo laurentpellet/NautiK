@@ -1,10 +1,11 @@
 //! Commandes routes, waypoints, navigation active et traces : délèguent
 //! à `nav_engine::routing`, qui valide les entrées.
 
+use chrono::{DateTime, Utc};
 use nav_core::GeoPosition;
 use nav_engine::routing::{self, NavigationStateView, RouteView, TrackView};
 use nav_engine::CommandResult;
-use nav_routing::Waypoint;
+use nav_routing::{RoutePlan, Waypoint, WaypointEdit};
 use nav_storage::TrackSummary;
 use tauri::State;
 
@@ -96,4 +97,54 @@ pub async fn get_track(state: State<'_, AppState>, id: String) -> CommandResult<
 #[tauri::command]
 pub async fn delete_track(state: State<'_, AppState>, id: String) -> CommandResult<()> {
     routing::delete_track(&state, &id).await
+}
+
+/// Enregistre une route éditée sur la carte (création si `id` est absent).
+#[tauri::command]
+pub async fn save_route(
+    state: State<'_, AppState>,
+    id: Option<String>,
+    name: String,
+    waypoints: Vec<WaypointEdit>,
+) -> CommandResult<RouteView> {
+    routing::save_route(&state, id.as_deref(), &name, &waypoints).await
+}
+
+/// Planifie un parcours à la vitesse prévue (durée, heures de passage, emprise).
+#[tauri::command]
+pub fn plan_route(
+    positions: Vec<GeoPosition>,
+    speed_mps: f64,
+    departure: Option<DateTime<Utc>>,
+) -> CommandResult<RoutePlan> {
+    routing::plan_route(&positions, speed_mps, departure)
+}
+
+/// Renomme une trace.
+#[tauri::command]
+pub async fn rename_track(
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> CommandResult<()> {
+    routing::rename_track(&state, &id, &name).await
+}
+
+/// Profil d'une trace (statistiques, vitesse de chaque point) pour sa
+/// relecture.
+#[tauri::command]
+pub async fn get_track_profile(
+    state: State<'_, AppState>,
+    id: String,
+) -> CommandResult<nav_routing::track_profile::TrackProfile> {
+    routing::track_profile(&state, &id).await
+}
+
+/// Recherche un lieu (coordonnées, marques, waypoints, îles et amers).
+#[tauri::command]
+pub async fn search_places(
+    state: State<'_, AppState>,
+    query: String,
+) -> CommandResult<Vec<nav_engine::search::Place>> {
+    nav_engine::search::search(&state, &query).await
 }

@@ -8,6 +8,14 @@ export interface MapLayers {
   enc: boolean;
   /** Cartes CM93 de la base trouvée dans le dossier ENC. */
   cm93: boolean;
+  /** Îles et amers téléchargés (OpenStreetMap). */
+  poi: boolean;
+  /** Marques personnelles. */
+  marks: boolean;
+  /** Vecteur de route (COG/SOG) et ligne de cap du bateau. */
+  vectors: boolean;
+  /** Laylines du waypoint actif. */
+  laylines: boolean;
 }
 
 export const DEFAULT_LAYERS: MapLayers = {
@@ -16,6 +24,10 @@ export const DEFAULT_LAYERS: MapLayers = {
   ais: true,
   enc: true,
   cm93: true,
+  poi: true,
+  marks: true,
+  vectors: true,
+  laylines: true,
 };
 
 export const LAYER_LABELS: Record<keyof MapLayers, string> = {
@@ -24,6 +36,10 @@ export const LAYER_LABELS: Record<keyof MapLayers, string> = {
   ais: 'Cibles AIS',
   enc: 'Cartes ENC (S-57)',
   cm93: 'Cartes CM93',
+  poi: 'Îles et amers (OSM)',
+  marks: 'Marques',
+  vectors: 'Vecteur et ligne de cap',
+  laylines: 'Laylines',
 };
 
 /** Cartes vectorielles d'un volet : ENC officielles et base CM93. */
@@ -32,8 +48,16 @@ export type VectorCharts = Pick<MapLayers, 'enc' | 'cm93'>;
 /** Calques des cartes vectorielles (groupe « Cartes » du menu). */
 export const VECTOR_KEYS = ['enc', 'cm93'] as const;
 
-/** Calques d'objets (routes, traces, AIS). */
-export const OBJECT_KEYS = ['routes', 'tracks', 'ais'] as const;
+/** Calques d'objets (routes, traces, marques, AIS, îles et amers, aides). */
+export const OBJECT_KEYS = [
+  'routes',
+  'tracks',
+  'marks',
+  'ais',
+  'poi',
+  'vectors',
+  'laylines',
+] as const;
 
 /** Cartes vectorielles proposées : ENC toujours, CM93 si une base est trouvée. */
 export function vectorKeys(cm93Available: boolean): (keyof VectorCharts)[] {
@@ -68,6 +92,10 @@ export function loadLayers(
       ais: flag('ais'),
       enc: flag('enc'),
       cm93: flag('cm93'),
+      poi: flag('poi'),
+      marks: flag('marks'),
+      vectors: flag('vectors'),
+      laylines: flag('laylines'),
     };
   } catch {
     return { ...DEFAULT_LAYERS };
@@ -93,6 +121,18 @@ export function hiddenLayers(layers: MapLayers, cm93Available = false): string[]
   return (Object.keys(LAYER_LABELS) as (keyof MapLayers)[])
     .filter((k) => !layers[k] && (k !== 'cm93' || cm93Available))
     .map((k) => LAYER_LABELS[k]);
+}
+
+/**
+ * Routes dessinées sur la carte. Le calque Routes masque les routes
+ * enregistrées, jamais la route suivie en navigation : la perdre de vue
+ * sans s'en rendre compte serait dangereux.
+ */
+export function visibleRoutes<R extends { active: boolean }>(
+  routes: R[],
+  layers: Pick<MapLayers, 'routes'>,
+): R[] {
+  return layers.routes ? routes : routes.filter((r) => r.active);
 }
 
 const HIDDEN_CHARTS_KEY = 'nautik.hiddenCharts';

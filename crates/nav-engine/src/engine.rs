@@ -24,10 +24,12 @@
 //! (phrases complètes) emprunte le même chemin de décodage. Les cibles
 //! sont oubliées à chaque changement de source.
 
+use crate::own_ship::OwnShipSnapshot;
 use chrono::{DateTime, Utc};
 use nav_ais::{AisDecoder, AisError, AisSimulator, AisTargetView, AisTracker, Fragment};
 use nav_alarms::{
-    AlarmEvent, AlarmKind, AlarmManager, AlarmSettings, AlarmsSnapshot, AnchorConfig, RuleError,
+    AlarmEvent, AlarmKind, AlarmManager, AlarmSettings, AlarmsSnapshot, AnchorConfig, MobMark,
+    RuleError,
 };
 use nav_core::{
     GeoPosition, InstrumentSimulator, InstrumentsSnapshot, Measurement, PositionFix, Priorities,
@@ -62,6 +64,16 @@ pub enum EngineError {
     /// Configuration d'alarme invalide.
     #[error(transparent)]
     Alarm(#[from] RuleError),
+    /// Le bateau ne peut être placé qu'en mode simulateur : une position
+    /// réelle n'est jamais inventée.
+    #[error("le bateau ne peut être placé sur la carte qu'en mode simulateur")]
+    NotSimulator,
+    /// Aucune position connue : le point MOB ne peut pas être posé.
+    #[error("aucune position connue : point homme à la mer impossible, noter l'heure et le cap")]
+    NoPosition,
+    /// Un homme à la mer est déjà en cours : son point n'est pas déplacé.
+    #[error("un homme à la mer est déjà en cours")]
+    MobAlreadyMarked,
 }
 
 /// Source des données de navigation.
@@ -114,6 +126,8 @@ pub struct Tick {
     pub alarms: AlarmsSnapshot,
     /// Événements d'alarme survenus pendant ce pas (à historiser).
     pub alarm_events: Vec<AlarmEvent>,
+    /// Aides à la navigation du bateau.
+    pub own_ship: OwnShipSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +223,35 @@ impl Engine {
         self.alarms.raise_anchor(now)
     }
 
+    /// Homme à la mer : pose le point MOB à la dernière position reçue,
+    /// même obsolète (le point est alors marqué approximatif) ; aucune
+    /// position n'est inventée.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::NoPosition`] sans aucune position connue,
+    /// [`EngineError::MobAlreadyMarked`] si un MOB est déjà en cours.
+    pub fn mark_mob(&mut self, now: DateTime<Utc>) -> Result<AlarmEvent, EngineError> {
+        let position = self
+            .vessel
+            .snapshot(now)
+            .position
+            .ok_or(EngineError::NoPosition)?;
+        let mark = MobMark {
+            position: position.fix.position,
+            marked_at: now,
+            approximate: position.stale,
+        };
+        self.alarms
+            .mark_mob(mark, now)
+            .ok_or(EngineError::MobAlreadyMarked)
+    }
+
+    /// Fin de l'alerte homme à la mer. `None` si aucun MOB n'était en cours.
+    pub fn clear_mob(&mut self, now: DateTime<Utc>) -> Option<AlarmEvent> {
+        self.alarms.clear_mob(now)
+    }
+
     /// Acquitte une alarme. `None` si elle n'était pas active.
     pub fn acknowledge_alarm(&mut self, kind: AlarmKind, now: DateTime<Utc>) -> Option<AlarmEvent> {
         self.alarms.acknowledge(kind, now)
@@ -251,6 +294,21 @@ impl Engine {
     /// Change la vitesse du bateau simulé.
     pub fn set_simulated_speed(&mut self, speed_mps: f64) {
         self.simulator.set_speed(speed_mps);
+    }
+
+    /// Place le bateau simulé à `position` (« bateau ici »). Refusé hors du
+    /// mode simulateur : la position d'une source réelle ou d'un rejeu
+    /// n'est jamais remplacée. Le relevé suivant reste marqué simulé.
+    ///
+    /// # Errors
+    ///
+    /// [`EngineError::NotSimulator`] hors du mode simulateur.
+    pub fn place_simulated_boat(&mut self, position: GeoPosition) -> Result<(), EngineError> {
+        if self.mode != SourceMode::Simulator {
+            return Err(EngineError::NotSimulator);
+        }
+        self.simulator.move_to(position);
+        Ok(())
     }
 
     /// Définit les priorités des sources (arbitrage).
@@ -397,6 +455,12 @@ impl Engine {
         let snapshot = self.vessel.snapshot(now);
         // Les alarmes sont évaluées dans tous les modes, sans interface.
         let alarm_events = self.alarms.evaluate(&snapshot, now);
+        let target = self
+            .navigation
+            .as_ref()
+            .and_then(|n| n.route().waypoints.get(n.target_index()))
+            .map(|w| w.position);
+        let own_ship = crate::own_ship::compute(&snapshot, target, self.is_simulated());
         Tick {
             update,
             snapshot,
@@ -407,6 +471,7 @@ impl Engine {
             },
             alarms: self.alarms.snapshot(now),
             alarm_events,
+            own_ship,
         }
     }
 }
@@ -671,6 +736,33 @@ mod tests {
     }
 
     #[test]
+    fn simulated_boat_can_be_placed_only_in_simulator_mode() {
+        let mut engine = Engine::new(p(0.0, 0.0), 4.0);
+        engine.tick(t(0));
+        engine
+            .place_simulated_boat(p(-17.5, -149.6))
+            .expect("simulateur");
+        let fix = engine.tick(t(1)).update.expect("relevé").fix;
+        assert_eq!(fix.position, p(-17.5, -149.6));
+        assert!(fix.source.is_simulated(), "toujours marqué simulé");
+
+        for (mode, replay) in [
+            (SourceMode::SignalK, false),
+            (SourceMode::Nmea0183, false),
+            (SourceMode::Nmea0183, true),
+        ] {
+            engine.set_mode(mode, replay);
+            assert_eq!(
+                engine.place_simulated_boat(p(1.0, 1.0)),
+                Err(EngineError::NotSimulator),
+                "{mode:?} rejeu={replay}"
+            );
+        }
+        // Aucune position produite hors simulateur, même après la tentative.
+        assert!(engine.tick(t(2)).update.is_none());
+    }
+
+    #[test]
     fn returning_to_simulator_resumes_active_route() {
         let mut engine = Engine::new(p(0.0, 0.0), 5.0);
         engine.set_mode(SourceMode::SignalK, false);
@@ -738,6 +830,27 @@ mod tests {
             engine.drop_anchor(50.0, 10, t(60)),
             Err(EngineError::NoFreshPosition)
         );
+    }
+
+    #[test]
+    fn mob_uses_the_last_known_position_and_never_invents_one() {
+        let mut engine = Engine::new(p(0.0, 0.0), 4.0);
+        engine.set_mode(SourceMode::SignalK, false);
+        assert_eq!(engine.mark_mob(t(0)), Err(EngineError::NoPosition));
+        engine.on_fix(signalk_fix(0, -14.9));
+        let event = engine.mark_mob(t(1)).expect("MOB");
+        assert_eq!(event.alarm, AlarmKind::ManOverboard);
+        let mob = engine.alarm_settings().mob.expect("point");
+        assert_eq!(mob.position, p(-14.9, 0.0));
+        assert!(!mob.approximate);
+        assert_eq!(engine.mark_mob(t(2)), Err(EngineError::MobAlreadyMarked));
+        assert!(engine.tick(t(2)).alarms.sounding);
+        assert!(engine.clear_mob(t(3)).is_some());
+        assert!(engine.clear_mob(t(3)).is_none());
+
+        // Position devenue obsolète : point posé, marqué approximatif.
+        engine.mark_mob(t(60)).expect("MOB");
+        assert!(engine.alarm_settings().mob.expect("point").approximate);
     }
 
     #[test]

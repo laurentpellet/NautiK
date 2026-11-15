@@ -59,7 +59,7 @@ describe('disposition des panneaux', () => {
     expect(PANEL_IDS).toContain('routeBar');
     expect(d.route).toEqual({ visible: true, x: null, y: null });
     expect(d.routeBar).toEqual({ visible: true, x: null, y: null });
-    expect(PANEL_LABELS.route).toBe('Route');
+    expect(PANEL_LABELS.route).toBe('Routes et traces');
     expect(PANEL_LABELS.routeBar).toBe('Barre de route');
     // Disposition mémorisée avant leur ajout : ils sont affichés à leur place.
     const old = loadLayout(store(JSON.stringify({ side: { visible: false, x: null, y: null } })));

@@ -10,6 +10,10 @@
   import ChartsFolderPanel from './lib/components/ChartsFolderPanel.svelte';
   import EncFolderPanel from './lib/components/EncFolderPanel.svelte';
   import { EncApi } from './lib/services/enc';
+  import PoiPanel from './lib/components/PoiPanel.svelte';
+  import { routeStyle } from './lib/routeColor.svelte';
+  import { PoiApi, type Poi } from './lib/services/poi';
+  import { emptyPoiCollection, poiData } from './lib/map/poi';
   import { EncMapController } from './lib/encMap.svelte';
   import FloatingPanel from './lib/components/FloatingPanel.svelte';
   import MapBar from './lib/components/MapBar.svelte';
@@ -43,6 +47,7 @@
     saveHiddenCharts,
     saveLayers,
     vectorLabel,
+    visibleRoutes,
     type MapLayers,
     type VectorCharts,
   } from './lib/layers';
@@ -70,10 +75,9 @@
   } from './lib/services/alarms';
   import NavigationPanel from './lib/components/NavigationPanel.svelte';
   import PositionPanel from './lib/components/PositionPanel.svelte';
-  import RoutesPanel from './lib/components/RoutesPanel.svelte';
+  import RoutesTracksPanel from './lib/components/RoutesTracksPanel.svelte';
   import RouteBar from './lib/components/RouteBar.svelte';
   import SourcePanel from './lib/components/SourcePanel.svelte';
-  import TracksPanel from './lib/components/TracksPanel.svelte';
   import { describeConnection, isEngineSilent } from './lib/format';
   import type { Theme } from './lib/map/style';
   import { subscribeAis, type AisSnapshot } from './lib/services/ais';
@@ -90,7 +94,30 @@
   } from './lib/services/instruments';
   import type { ListenFn } from './lib/services/position';
   import { NavigationController } from './lib/navigation.svelte';
-  import { RoutingApi, subscribeNavigation } from './lib/services/routing';
+  import {
+    RoutingApi,
+    subscribeNavigation,
+    type GeoBounds,
+    type LatLon,
+  } from './lib/services/routing';
+  import { MapToolsController } from './lib/mapTools.svelte';
+  import MeasurePanel from './lib/components/MeasurePanel.svelte';
+  import MapContextMenu from './lib/components/MapContextMenu.svelte';
+  import MobPanel from './lib/components/MobPanel.svelte';
+  import RangeBearingPanel from './lib/components/RangeBearingPanel.svelte';
+  import { subscribeOwnShip, type OwnShip } from './lib/services/ownShip';
+  import { aidsData } from './lib/map/aids';
+  import { marksData } from './lib/map/marks';
+  import { replayData } from './lib/map/replay';
+  import { MarksController, boundsAround } from './lib/marks.svelte';
+  import { MarksApi } from './lib/services/marks';
+  import { ReplayController } from './lib/replay.svelte';
+  import { getTrackProfile } from './lib/services/trackProfile';
+  import { LogbookController } from './lib/logbook.svelte';
+  import { LogbookApi } from './lib/services/logbook';
+  import TrackReplayPanel from './lib/components/TrackReplayPanel.svelte';
+  import SearchBox from './lib/components/SearchBox.svelte';
+  import LogbookView from './lib/components/LogbookView.svelte';
   import { holdSubscription } from './lib/subscription';
   import { loadTheme, saveTheme } from './lib/theme';
 
@@ -125,7 +152,7 @@
   let aisError = $state<string | null>(null);
   let selectedTarget = $state<string | null>(null);
   /** Onglet affiché ; la carte reste montée sous les autres onglets. */
-  let tab = $state<'chart' | 'instruments' | 'weather' | 'settings'>('chart');
+  let tab = $state<'chart' | 'instruments' | 'weather' | 'logbook' | 'settings'>('chart');
   /** Emprise affichée sur la carte. */
   let mapView = $state.raw<Bounds | null>(null);
   /** Fichier météo affiché sur la carte et échéance choisie. */
@@ -142,13 +169,15 @@
     { id: 'chart', label: 'Carte' },
     { id: 'instruments', label: 'Instruments' },
     { id: 'weather', label: 'Météo' },
+    { id: 'logbook', label: 'Journal' },
     { id: 'settings', label: 'Paramètres' },
   ] as const;
   let now = $state(Date.now());
   let theme = $state<Theme>(loadTheme());
   let northUp = $state(true);
-  let chartView = $state<{ recenter: () => void } | null>(null);
-  let chartViewRight = $state<{ recenter: () => void } | null>(null);
+  type ChartHandle = { recenter: () => void; fitBounds: (bounds: GeoBounds) => void };
+  let chartView = $state<ChartHandle | null>(null);
+  let chartViewRight = $state<ChartHandle | null>(null);
 
   /** Deux cartes côte à côte (mémorisé). */
   let split = $state<SplitState>(loadSplit());
@@ -192,6 +221,17 @@
     chartView?.recenter();
     if (split.enabled && !split.locked) chartViewRight?.recenter();
   }
+
+  // Cadrage demandé (route, trace) : volet gauche, et droit s'il est libre.
+  $effect(() => {
+    const focus = nav.focus;
+    if (!focus) return;
+    untrack(() => {
+      leader = 'left';
+      chartView?.fitBounds(focus.bounds);
+      if (split.enabled && !split.locked) chartViewRight?.fitBounds(focus.bounds);
+    });
+  });
   /** Disposition des panneaux de l'onglet Carte (mémorisée). */
   let layout = $state<PanelLayout>(loadLayout());
   let stageElement = $state<HTMLElement | null>(null);
@@ -262,6 +302,26 @@
     await encMap.refresh();
     if (wantedVector.enc || wantedVector.cm93) await encMap.show(mapView, wantedVector);
   }
+
+  // Îles et amers (OpenStreetMap) enregistrés : chargés au démarrage puis
+  // après chaque téléchargement ou suppression.
+  const poiApi = new PoiApi((command, args) => invokeFn(command, args));
+  let pois = $state.raw<Poi[]>([]);
+  const poiFeatures = $derived(poiData(pois));
+  const shownPois = $derived(layers.poi ? poiFeatures : emptyPoiCollection());
+
+  async function reloadPois(): Promise<void> {
+    try {
+      pois = (await poiApi.getPois()).pois;
+    } catch (e) {
+      // Sans amers enregistrés, la carte reste utilisable.
+      console.warn('îles et amers indisponibles', e);
+    }
+  }
+
+  $effect(() => {
+    void reloadPois();
+  });
   const weatherApi = new WeatherApi((command, args) => invokeFn(command, args));
   const alarmsApi = new AlarmsApi((command, args) => invokeFn(command, args));
 
@@ -270,7 +330,25 @@
   let alarmsError = $state<string | null>(null);
   let soundUnavailable = $state(false);
   const sound = new AlarmSound();
-  const alerting = $derived(alertingAlarms(alarms));
+  // L'homme à la mer a son propre grand panneau : pas en double dans le bandeau.
+  const alerting = $derived(alertingAlarms(alarms).filter((a) => a.kind !== 'manOverboard'));
+  const mob = $derived(alarms?.mob ?? null);
+  const mobState = $derived(alarms?.alarms.find((a) => a.kind === 'manOverboard')?.state ?? 'off');
+  let mobError = $state<string | null>(null);
+
+  /** Homme à la mer : point posé par le moteur à la dernière position connue. */
+  async function markMob(): Promise<void> {
+    try {
+      alarms = await alarmsApi.markMob();
+      mobError = null;
+    } catch (e) {
+      mobError = `Homme à la mer : ${message(e)}`;
+    }
+  }
+
+  async function endMob(): Promise<void> {
+    alarms = await alarmsApi.clearMob();
+  }
   const anchorAlerting = $derived(alerting.some((a) => a.kind === 'anchor'));
 
   // Son piloté par l'état du moteur : seul l'acquittement ou la
@@ -349,6 +427,16 @@
   }
 
   function onKeydown(event: KeyboardEvent): void {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'm') {
+      event.preventDefault();
+      if (!mob) void markMob();
+      return;
+    }
+    if (event.key === 'Escape' && tools.picking) {
+      event.preventDefault();
+      tools.close();
+      return;
+    }
     const next = fullscreenShortcut(event.key, fullscreen);
     if (next === null) return;
     event.preventDefault();
@@ -362,6 +450,81 @@
     return d.level === 'alert' ? d.label : null;
   });
   const nav = new NavigationController(new RoutingApi((command, args) => invokeFn(command, args)));
+  const marks = new MarksController(new MarksApi((command, args) => invokeFn(command, args)));
+  const replay = new ReplayController((id) =>
+    getTrackProfile(id, (command, args) => invokeFn(command, args)),
+  );
+  const logbook = new LogbookController(new LogbookApi((command, args) => invokeFn(command, args)));
+  const shownMarks = $derived(marksData(layers.marks ? marks.marks : []));
+  const replayFeatures = $derived(
+    replay.profile ? replayData(replay.profile.points, replay.index) : replayData([], null),
+  );
+  // Relecture arrêtée en quittant l'application.
+  $effect(() => () => replay.stop());
+
+  /** Cadre la carte sur un point (marque, résultat de recherche). */
+  function zoomToPoint(position: LatLon): void {
+    tab = 'chart';
+    nav.zoomTo(boundsAround(position));
+  }
+
+  /** Nouvelle marque : panneau Routes et traces affiché sur l'onglet Marques. */
+  function newMark(position: LatLon): void {
+    marks.startNew(position);
+    if (!layout.route.visible) updatePanel('route', { visible: true });
+  }
+
+  // Outils de la carte : mesure et « bateau ici » (barre d'outils, clic droit).
+  const tools = new MapToolsController(
+    new RoutingApi((command, args) => invokeFn(command, args)),
+    simulator,
+    () => nav.speedMps,
+    () => (fix && !stale ? { latitudeDeg: fix.latitudeDeg, longitudeDeg: fix.longitudeDeg } : null),
+  );
+  /** Le bateau simulé peut être placé (le moteur refuse hors simulateur, rejeu compris). */
+  const canPlaceBoat = $derived((alarms?.simulated ?? false) && !nav.drawing);
+
+  interface ContextMenuState {
+    pane: 'left' | 'right';
+    position: LatLon;
+    x: number;
+    y: number;
+  }
+  let contextMenu = $state<ContextMenuState | null>(null);
+
+  /** Clic sur la carte : tracé de route d'abord, sinon l'outil actif. */
+  function onMapClick(position: LatLon): void {
+    contextMenu = null;
+    if (nav.drawing) nav.addPoint(position);
+    else void tools.click(position);
+  }
+
+  // Un tracé de route prend la main sur les outils.
+  $effect(() => {
+    if (nav.drawing) untrack(() => tools.close());
+  });
+
+  // Message « bateau déplacé » effacé après quelques secondes.
+  $effect(() => {
+    if (!tools.notice) return;
+    const timer = setTimeout(() => (tools.notice = null), NOTICE_MS);
+    return () => clearTimeout(timer);
+  });
+  /** Aides du bateau (vecteurs, VMG, laylines), calculées par le moteur. */
+  let ownShip = $state.raw<OwnShip | null>(null);
+  const aids = $derived(
+    aidsData({
+      own: ownShip,
+      vectors: layers.vectors,
+      laylines: layers.laylines,
+      mob: mob?.position ?? null,
+      rangeBearing: tools.tool === 'rangeBearing' ? tools.rangeBearing : null,
+    }),
+  );
+  const mobMarker = $derived(mob ? { position: mob.position, approximate: mob.approximate } : null);
+
+  /** Routes de la carte : la route active reste affichée même calque masqué. */
+  const shownRoutes = $derived(visibleRoutes(nav.routes, layers));
   let navEventError = $state<string | null>(null);
 
   /** Période de rafraîchissement de la trace en cours d'enregistrement. */
@@ -377,6 +540,10 @@
   const position = $derived(snapshot?.position ?? null);
   const fix = $derived(position?.fix ?? null);
   const stale = $derived(fix !== null && (silent || (position?.stale ?? false)));
+  /** Position fraîche du bateau (marque au bateau). */
+  const freshBoat = $derived<LatLon | null>(
+    fix && !stale ? { latitudeDeg: fix.latitudeDeg, longitudeDeg: fix.longitudeDeg } : null,
+  );
   /** Navigation calculée sur une position obsolète ou absente : signalée. */
   const navStale = $derived(silent || position === null || position.stale);
   /** Barre de route à sa place par défaut, en bas : colonnes raccourcies. */
@@ -470,6 +637,18 @@
     ),
   );
 
+  $effect(() =>
+    holdSubscription(
+      () =>
+        subscribeOwnShip(
+          (o) => (ownShip = o),
+          (e) => console.warn('aides du bateau rejetées', e),
+          listenFn,
+        ),
+      (e) => console.warn('aides du bateau indisponibles', e),
+    ),
+  );
+
   $effect(() => {
     alarmsApi
       .get()
@@ -494,6 +673,10 @@
 
   $effect(() => {
     void nav.refresh();
+  });
+
+  $effect(() => {
+    void marks.refresh();
   });
 
   $effect(() =>
@@ -568,22 +751,36 @@
                 {stale}
                 {theme}
                 {northUp}
-                routes={layers.routes ? nav.routes : []}
+                routes={shownRoutes}
                 targetIndex={nav.status?.targetIndex ?? null}
                 draft={nav.draft}
+                editedRouteId={nav.editor?.routeId ?? null}
+                onpointmove={(i, p) => nav.movePoint(i, p)}
                 tracks={layers.tracks ? nav.displayedTracks : []}
-                drawing={nav.drawing}
-                onmapclick={(p) => nav.addPoint(p)}
+                drawing={nav.drawing || tools.picking}
+                onmapclick={onMapClick}
+                measure={tools.points}
+                oncontextmenu={(position, point) =>
+                  (contextMenu = { pane: 'left', position, ...point })}
                 ais={layers.ais ? ais : null}
                 onaisclick={(mmsi) => (selectedTarget = mmsi)}
                 wind={weatherShown ? (windField?.points ?? null) : null}
                 onviewchange={(b) => (mapView = b)}
                 enc={leftEnc}
+                pois={shownPois}
+                activeRouteColor={routeStyle.activeColor}
                 anchor={alarms?.anchor ?? null}
                 {anchorAlerting}
+                {aids}
+                mob={mobMarker}
+                marks={shownMarks}
+                replay={replayFeatures}
                 camera={followedCamera('left', split, leader, cameras)}
                 oncamera={(c, user) => onCamera('left', c, user)}
               />
+              {#if contextMenu?.pane === 'left'}
+                {@render mapMenu(contextMenu)}
+              {/if}
             </div>
             {#if split.enabled}
               <div class="pane" data-testid="split-pane">
@@ -595,21 +792,35 @@
                   {stale}
                   {theme}
                   {northUp}
-                  routes={layers.routes ? nav.routes : []}
+                  routes={shownRoutes}
                   targetIndex={nav.status?.targetIndex ?? null}
                   draft={nav.draft}
+                  editedRouteId={nav.editor?.routeId ?? null}
+                  onpointmove={(i, p) => nav.movePoint(i, p)}
                   tracks={layers.tracks ? nav.displayedTracks : []}
-                  drawing={nav.drawing}
-                  onmapclick={(p) => nav.addPoint(p)}
+                  drawing={nav.drawing || tools.picking}
+                  onmapclick={onMapClick}
+                  measure={tools.points}
+                  oncontextmenu={(position, point) =>
+                    (contextMenu = { pane: 'right', position, ...point })}
                   ais={layers.ais ? ais : null}
                   onaisclick={(mmsi) => (selectedTarget = mmsi)}
                   wind={weatherShown ? (windField?.points ?? null) : null}
                   enc={rightEnc}
+                  pois={shownPois}
+                  activeRouteColor={routeStyle.activeColor}
                   anchor={alarms?.anchor ?? null}
                   {anchorAlerting}
+                  {aids}
+                  mob={mobMarker}
+                  marks={shownMarks}
+                  replay={replayFeatures}
                   camera={followedCamera('right', split, leader, cameras)}
                   oncamera={(c, user) => onCamera('right', c, user)}
                 />
+                {#if contextMenu?.pane === 'right'}
+                  {@render mapMenu(contextMenu)}
+                {/if}
                 {#if catalog.charts.length > 1 || encFolderSet}
                   <div class="pane-charts">
                     <Dropdown
@@ -645,6 +856,20 @@
       {/key}
     {/if}
 
+    {#snippet mapMenu(menu: ContextMenuState)}
+      <MapContextMenu
+        position={menu.position}
+        x={menu.x}
+        y={menu.y}
+        {canPlaceBoat}
+        onplaceboat={(at) => void tools.placeBoat(at)}
+        canMeasure={!nav.drawing}
+        onmeasure={(at) => void tools.measureFrom(at)}
+        onmark={newMark}
+        onclose={() => (contextMenu = null)}
+      />
+    {/snippet}
+
     {#snippet statusStrip()}
       <StatusStrip {position} {silent} {connection} />
     {/snippet}
@@ -652,6 +877,7 @@
     {#snippet chartsSection()}
       <ChartsFolderPanel api={chartsApi} {catalog} onchange={(c) => (catalog = c)} />
       <EncFolderPanel api={encApi} onchange={() => void reloadEnc()} />
+      <PoiPanel api={poiApi} onchange={() => void reloadPois()} />
     {/snippet}
 
     {#snippet alarmsSection()}
@@ -668,7 +894,49 @@
       error={alarmsError}
     />
 
+    <!-- Homme à la mer : grand affichage, dans tous les onglets. -->
+    {#if mob}
+      <div class="mob-slot">
+        <MobPanel
+          {mob}
+          alarmState={mobState}
+          {now}
+          stale={fix === null || stale}
+          onacknowledge={() => void acknowledge('manOverboard')}
+          onend={endMob}
+        />
+      </div>
+    {/if}
+    {#if mobError}
+      <p class="error floating mob-error" role="alert">{mobError}</p>
+    {/if}
+
     {#if tab === 'chart'}
+      <!-- Outils de la carte : mesure, « bateau ici » et leurs messages. -->
+      {#if tools.picking || tools.error || tools.notice || replay.active}
+        <div class="tool-side">
+          {#if replay.active}
+            <TrackReplayPanel {replay} />
+          {/if}
+          {#if tools.measuring}
+            <MeasurePanel {tools} />
+          {:else if tools.tool === 'rangeBearing'}
+            <RangeBearingPanel {tools} boatKnown={fix !== null && !stale} />
+          {:else}
+            {#if tools.tool === 'placeBoat'}
+              <p class="tool-note" role="status">
+                Cliquez sur la carte pour placer le bateau simulé (Échap : annuler).
+              </p>
+            {/if}
+            {#if tools.error}
+              <p class="tool-note error" role="alert">{tools.error}</p>
+            {/if}
+          {/if}
+          {#if tools.notice}
+            <p class="tool-note" role="status">{tools.notice}</p>
+          {/if}
+        </div>
+      {/if}
       <div class="map-side" class:short={routeBarDocked}>
         <!-- Rappel des calques masqués : toujours visible, pas un panneau. -->
         {#if hiddenOnMap.length > 0}
@@ -700,13 +968,13 @@
         {/if}
         {#if layout.live.visible}
           <FloatingPanel {...panel('live')} bare>
-            <LiveNavCard {snapshot} {silent} />
+            <LiveNavCard {snapshot} {silent} {ownShip} />
           </FloatingPanel>
         {/if}
         <!-- Panneau Route gardé monté (brouillon de route en cours). -->
         <div class="route-slot" hidden={!layout.route.visible}>
           <FloatingPanel {...panel('route')}>
-            <section class="panel" aria-label="Panneau Route">
+            <section class="panel" aria-label="Panneau Routes et traces">
               {#if nav.status}
                 <NavigationPanel status={nav.status} {now} ondeactivate={() => nav.deactivate()} />
               {/if}
@@ -716,7 +984,13 @@
               {#if nav.notice}
                 <p class="notice" role="status">{nav.notice}</p>
               {/if}
-              <RoutesPanel {nav} />
+              <RoutesTracksPanel
+                {nav}
+                {marks}
+                boat={freshBoat}
+                onzoom={zoomToPoint}
+                onreplay={(id, name) => void replay.load(id, name)}
+              />
             </section>
           </FloatingPanel>
         </div>
@@ -767,9 +1041,25 @@
                 locked={split.locked}
                 onsplit={toggleSplit}
                 onlock={toggleLock}
+                tool={tools.tool}
+                {canPlaceBoat}
+                onplaceboat={() => tools.togglePlaceBoat()}
+                onmeasure={() => {
+                  if (!nav.drawing) tools.toggleMeasure();
+                }}
+                onrangebearing={() => {
+                  if (!nav.drawing) tools.toggleRangeBearing();
+                }}
+                mobActive={mob !== null}
+                onmob={() => {
+                  if (!mob) void markMob();
+                }}
                 ontoggle={(id) => updatePanel(id, { visible: !layout[id].visible })}
                 onresetlayout={() => setLayout(defaultLayout())}
               >
+                {#snippet searchMenu()}
+                  <SearchBox onselect={(place) => zoomToPoint(place.position)} />
+                {/snippet}
                 {#snippet layersMenu()}
                   <MapLayersMenu
                     {layers}
@@ -820,6 +1110,8 @@
         status={statusStrip}
         listen={listenFn}
       />
+    {:else if tab === 'logbook'}
+      <LogbookView {logbook} status={statusStrip} />
     {:else if tab === 'settings'}
       <SettingsView {simulator} status={statusStrip} alarms={alarmsSection} charts={chartsSection}>
         {#snippet sources()}
@@ -870,8 +1162,7 @@
             <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
           {/if}
 
-          <TracksPanel {nav} />
-          <!-- Erreur des routes et traces : dans le panneau Route, ici s'il est masqué. -->
+          <!-- Erreur des routes et traces : dans leur panneau, ici s'il est masqué. -->
           {#if nav.error && !layout.route.visible}
             <p class="error" role="alert">{nav.error}</p>
           {/if}
@@ -987,6 +1278,52 @@
       border-top: 2px solid var(--border);
       border-left: 0;
     }
+  }
+
+  .mob-slot {
+    position: absolute;
+    top: 3.2rem;
+    left: 50%;
+    z-index: 6;
+    transform: translateX(-50%);
+  }
+
+  .mob-error {
+    top: 0.6rem;
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .tool-side {
+    position: absolute;
+    top: 0.6rem;
+    left: 0.6rem;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-width: calc(100% - 1.2rem);
+  }
+
+  /* Volet droit avec son choix de cartes en haut à gauche : outils dessous. */
+  .maps.split ~ .tool-side {
+    top: 3rem;
+  }
+
+  .tool-note {
+    margin: 0;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    background: var(--panel-bg);
+    color: var(--fg);
+    font-size: 0.85rem;
+  }
+
+  .tool-note.error {
+    color: var(--error-fg);
+    font-weight: 600;
   }
 
   .map-side {

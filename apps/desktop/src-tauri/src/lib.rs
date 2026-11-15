@@ -12,6 +12,9 @@ mod commands;
 mod enc;
 mod events;
 mod gpx_io;
+mod logbook;
+mod marks;
+mod poi;
 mod routing;
 mod secrets;
 mod simulator;
@@ -138,6 +141,7 @@ pub fn run() -> anyhow::Result<()> {
                 tokio::spawn(events::forward(handle, Arc::clone(&service)));
                 nav_engine::simulator::restore(&service).await;
                 nav_engine::alarms::restore(&service).await;
+                nav_engine::logbook::restore(&service).await;
                 nav_engine::sources::restore(&service).await;
                 service.run().await;
             });
@@ -171,6 +175,26 @@ pub fn run() -> anyhow::Result<()> {
             routing::list_tracks,
             routing::get_track,
             routing::delete_track,
+            routing::save_route,
+            routing::plan_route,
+            routing::rename_track,
+            routing::get_track_profile,
+            routing::search_places,
+            marks::list_marks,
+            marks::save_mark,
+            marks::delete_mark,
+            marks::import_kml,
+            marks::export_marks_kml,
+            logbook::list_log_entries,
+            logbook::add_log_entry,
+            logbook::delete_log_entry,
+            logbook::get_logbook_settings,
+            logbook::set_logbook_settings,
+            logbook::export_logbook_csv,
+            poi::list_poi_regions,
+            poi::download_pois,
+            poi::delete_pois,
+            poi::get_pois,
             gpx_io::import_gpx,
             gpx_io::export_route_gpx,
             gpx_io::export_track_gpx,
@@ -180,6 +204,7 @@ pub fn run() -> anyhow::Result<()> {
             sources::choose_nmea_recording,
             simulator::get_simulator_settings,
             simulator::set_simulator_settings,
+            simulator::place_simulated_boat,
             weather::list_weather_files,
             weather::import_weather_file,
             weather::download_weather,
@@ -188,6 +213,8 @@ pub fn run() -> anyhow::Result<()> {
             alarms::get_alarms,
             alarms::drop_anchor,
             alarms::raise_anchor,
+            alarms::mark_mob,
+            alarms::clear_mob,
             alarms::acknowledge_alarm,
             alarms::set_alarm_enabled,
             alarms::list_alarm_events,

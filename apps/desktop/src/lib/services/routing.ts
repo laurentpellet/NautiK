@@ -18,6 +18,7 @@ import {
   expectString,
   expectTimestamp,
   optional,
+  EngineProtocolError,
   type LatLon,
 } from './validate';
 
@@ -40,6 +41,8 @@ export interface Route {
   waypoints: Waypoint[];
   totalDistanceM: number;
   active: boolean;
+  /** Emprise (pour zoomer dessus). */
+  bounds: GeoBounds | null;
 }
 
 export interface TrackSummary {
@@ -57,6 +60,47 @@ export interface Track {
   /** Positions dans l'ordre chronologique. */
   points: LatLon[];
   lengthM: number;
+  /** Durée entre la première et la dernière position (s). */
+  durationS: number | null;
+  bounds: GeoBounds | null;
+}
+
+/** Emprise en degrés ; `west > east` si elle traverse l'antiméridien. */
+export interface GeoBounds {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+/** Point d'une route en cours d'édition : waypoint existant (`id`) ou nouveau. */
+export interface WaypointEdit {
+  id: string | null;
+  /** Nom ; vide : `WPnnn` attribué par le moteur. */
+  name: string;
+  position: LatLon;
+}
+
+export interface PlannedLeg {
+  fromIndex: number;
+  distanceM: number;
+  bearingRad: number | null;
+  durationS: number;
+  cumulativeDistanceM: number;
+  cumulativeDurationS: number;
+  /** Heure d'arrivée au bout du segment (ms UTC), si un départ est donné. */
+  arrival: number | null;
+}
+
+/** Parcours planifié par le moteur à la vitesse prévue. */
+export interface RoutePlan {
+  speedMps: number;
+  departure: number | null;
+  legs: PlannedLeg[];
+  totalDistanceM: number;
+  totalDurationS: number;
+  arrival: number | null;
+  bounds: GeoBounds;
 }
 
 export interface NavigationStatus {
@@ -112,6 +156,7 @@ export function parseRoute(value: unknown): Route {
     waypoints: expectArray(r.waypoints, 'route.waypoints', parseWaypoint),
     totalDistanceM: expectNumber(r.totalDistanceM, 'route.totalDistanceM'),
     active: expectBoolean(r.active, 'route.active'),
+    bounds: optional(r.bounds, (v) => parseGeoBounds(v, 'route.bounds')),
   };
 }
 
@@ -136,6 +181,60 @@ export function parseTrack(value: unknown): Track {
       expectPosition(expectRecord(p, 'point').position, 'point.position'),
     ),
     lengthM: expectNumber(r.lengthM, 'trace.lengthM'),
+    durationS: optional(r.durationS, (v) => expectNumber(v, 'trace.durationS')),
+    bounds: optional(r.bounds, (v) => parseGeoBounds(v, 'trace.bounds')),
+  };
+}
+
+export function parseGeoBounds(value: unknown, what = 'emprise'): GeoBounds {
+  const r = expectRecord(value, what);
+  const lat = (v: unknown, k: string) => {
+    const n = expectNumber(v, `${what}.${k}`);
+    if (n < -90 || n > 90) throw new EngineProtocolError(`${what}.${k} hors bornes`);
+    return n;
+  };
+  const lon = (v: unknown, k: string) => {
+    const n = expectNumber(v, `${what}.${k}`);
+    if (n < -180 || n > 180) throw new EngineProtocolError(`${what}.${k} hors bornes`);
+    return n;
+  };
+  const bounds = {
+    west: lon(r.west, 'west'),
+    south: lat(r.south, 'south'),
+    east: lon(r.east, 'east'),
+    north: lat(r.north, 'north'),
+  };
+  if (bounds.south > bounds.north) throw new EngineProtocolError(`${what} : sud au nord`);
+  return bounds;
+}
+
+export function parseRoutePlan(value: unknown): RoutePlan {
+  const r = expectRecord(value, 'plan');
+  const num = (v: unknown, what: string) => {
+    const n = expectNumber(v, `plan.${what}`);
+    if (n < 0) throw new EngineProtocolError(`plan.${what} négatif`);
+    return n;
+  };
+  const time = (what: string) => (v: unknown) => expectTimestamp(v, `plan.${what}`);
+  return {
+    speedMps: num(r.speedMps, 'speedMps'),
+    departure: optional(r.departure, time('departure')),
+    legs: expectArray(r.legs, 'plan.legs', (v) => {
+      const l = expectRecord(v, 'segment');
+      return {
+        fromIndex: expectInteger(l.fromIndex, 'segment.fromIndex', 0, COUNT_MAX),
+        distanceM: num(l.distanceM, 'distanceM'),
+        bearingRad: optional(l.bearingRad, (b) => expectNumber(b, 'segment.bearingRad')),
+        durationS: num(l.durationS, 'durationS'),
+        cumulativeDistanceM: num(l.cumulativeDistanceM, 'cumulativeDistanceM'),
+        cumulativeDurationS: num(l.cumulativeDurationS, 'cumulativeDurationS'),
+        arrival: optional(l.arrival, time('arrival')),
+      };
+    }),
+    totalDistanceM: num(r.totalDistanceM, 'totalDistanceM'),
+    totalDurationS: num(r.totalDurationS, 'totalDurationS'),
+    arrival: optional(r.arrival, time('arrival')),
+    bounds: parseGeoBounds(r.bounds, 'plan.bounds'),
   };
 }
 
@@ -196,6 +295,30 @@ export class RoutingApi {
 
   async reverseRoute(id: string): Promise<Route> {
     return parseRoute(await this.call('reverse_route', { id }));
+  }
+
+  /** Enregistre une route éditée ; `id` absent : création. */
+  async saveRoute(id: string | null, name: string, waypoints: WaypointEdit[]): Promise<Route> {
+    return parseRoute(await this.call('save_route', { id, name, waypoints }));
+  }
+
+  /** Longueur, durée et heures de passage à la vitesse prévue (moteur). */
+  async planRoute(
+    positions: LatLon[],
+    speedMps: number,
+    departure: number | null,
+  ): Promise<RoutePlan> {
+    return parseRoutePlan(
+      await this.call('plan_route', {
+        positions,
+        speedMps,
+        departure: departure === null ? null : new Date(departure).toISOString(),
+      }),
+    );
+  }
+
+  async renameTrack(id: string, name: string): Promise<void> {
+    await this.call('rename_track', { id, name });
   }
 
   async deleteRoute(id: string): Promise<void> {

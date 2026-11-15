@@ -29,6 +29,18 @@ pub async fn raise_anchor(state: State<'_, AppState>) -> CommandResult<AlarmsSna
     alarms::raise_anchor(&state).await
 }
 
+/// Homme à la mer : point MOB à la dernière position connue, alarme.
+#[tauri::command]
+pub async fn mark_mob(state: State<'_, AppState>) -> CommandResult<AlarmsSnapshot> {
+    alarms::mark_mob(&state).await
+}
+
+/// Fin de l'alerte homme à la mer.
+#[tauri::command]
+pub async fn clear_mob(state: State<'_, AppState>) -> CommandResult<AlarmsSnapshot> {
+    alarms::clear_mob(&state).await
+}
+
 /// Acquitte une alarme (coupe le son, l'alarme reste affichée).
 #[tauri::command]
 pub async fn acknowledge_alarm(

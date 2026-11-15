@@ -3,7 +3,8 @@
 
 use chrono::Utc;
 use nav_alarms::{
-    AlarmEvent, AlarmKind, AlarmSettings, AnchorConfig, EventDetails, EventKind, PositionLostConfig,
+    AlarmEvent, AlarmKind, AlarmSettings, AnchorConfig, EventDetails, EventKind, MobMark,
+    PositionLostConfig,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -22,6 +23,13 @@ pub const MAX_EVENTS_PAGE: u32 = 1_000;
 struct AnchorRow {
     anchor: Option<AnchorConfig>,
     radius_m: f64,
+}
+
+/// Homme à la mer en cours (colonne `configuration_json`).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MobRow {
+    mob: Option<MobMark>,
 }
 
 fn corrupt(what: &str, e: impl std::fmt::Display) -> StorageError {
@@ -72,7 +80,11 @@ impl Db {
             settings.position_lost_enabled,
             position_json,
         )
-        .await
+        .await?;
+        let mob_json = serde_json::to_string(&MobRow { mob: settings.mob })
+            .map_err(|e| corrupt("homme à la mer", e))?;
+        self.upsert_alarm(AlarmKind::ManOverboard, settings.mob.is_some(), mob_json)
+            .await
     }
 
     /// Lit la configuration des alarmes (valeurs par défaut pour une
@@ -107,6 +119,10 @@ impl Db {
                 c.validate().map_err(|e| corrupt("perte de position", e))?;
                 settings.position_lost_enabled = enabled;
                 settings.position_lost = c;
+            } else if id == AlarmKind::ManOverboard.id() {
+                let r: MobRow =
+                    serde_json::from_str(json).map_err(|e| corrupt("homme à la mer", e))?;
+                settings.mob = if enabled { r.mob } else { None };
             }
         }
         Ok(settings)
@@ -221,15 +237,25 @@ mod tests {
         let mut m = AlarmManager::new(AlarmSettings::default());
         m.drop_anchor(anchor(), t(0));
         m.set_position_lost_enabled(false, t(0));
+        m.mark_mob(
+            MobMark {
+                position: GeoPosition::new(-17.6, -149.6).expect("pos"),
+                marked_at: t(0),
+                approximate: false,
+            },
+            t(0),
+        );
         db.save_alarm_settings(&m.settings()).await.expect("save");
         assert_eq!(db.load_alarm_settings().await.expect("lu"), m.settings());
 
         m.raise_anchor(t(1));
+        m.clear_mob(t(1));
         db.save_alarm_settings(&m.settings()).await.expect("save");
         let loaded = db.load_alarm_settings().await.expect("lu");
         assert_eq!(loaded.anchor, None);
         assert_eq!(loaded.anchor_radius_m, 60.0);
         assert!(!loaded.position_lost_enabled);
+        assert_eq!(loaded.mob, None);
     }
 
     #[tokio::test]

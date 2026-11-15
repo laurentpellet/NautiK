@@ -5,13 +5,30 @@
   import { instrumentTiles, type Tile } from '../instrumentTiles';
   import type { InstrumentsSnapshot } from '../services/instruments';
   import CompassRose from './CompassRose.svelte';
+  import { formatBearing, formatSpeed } from '../format';
+  import type { OwnShip } from '../services/ownShip';
 
   interface Props {
     snapshot: InstrumentsSnapshot | null;
     silent: boolean;
+    /** VMG et autre amure (moteur) ; absents sans vent ou position fraîche. */
+    ownShip?: OwnShip | null;
   }
 
-  let { snapshot, silent }: Props = $props();
+  let { snapshot, silent, ownShip = null }: Props = $props();
+
+  /** VMG signée : « −1.2 kn » en s'éloignant. */
+  const vmg = (mps: number | null | undefined) =>
+    mps === null || mps === undefined ? '—' : `${mps < 0 ? '−' : ''}${formatSpeed(Math.abs(mps))}`;
+  const sailing = $derived([
+    { id: 'vmgWind', label: 'VMG vent', value: vmg(ownShip?.vmgWindMps) },
+    { id: 'vmgWaypoint', label: 'VMG WP', value: vmg(ownShip?.vmgWaypointMps) },
+    {
+      id: 'otherTack',
+      label: 'Autre amure',
+      value: formatBearing(ownShip?.otherTackCogRad ?? null),
+    },
+  ]);
 
   let collapsed = $state(false);
 
@@ -72,6 +89,14 @@
     <div class="secondary">
       {#each SECONDARY as id (id)}
         {@render value(tiles.get(id), false)}
+      {/each}
+    </div>
+    <div class="secondary" data-testid="sailing-values">
+      {#each sailing as s (s.id)}
+        <div class="value" class:stale={silent} class:missing={s.value === '—'} data-tile={s.id}>
+          <span class="number">{s.value}</span>
+          <span class="label">{s.label}</span>
+        </div>
       {/each}
     </div>
   {/if}

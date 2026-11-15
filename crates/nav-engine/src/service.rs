@@ -18,6 +18,8 @@ use nav_alarms::AlarmsSnapshot;
 use nav_core::{ConnectionState, InstrumentsSnapshot, Sample};
 use nav_nmea0183::{NmeaEvent, Transport};
 use nav_routing::NavigationStatus;
+
+use crate::own_ship::OwnShipSnapshot;
 use nav_signalk::{SignalKConfig, SignalKEvent};
 use nav_storage::{Db, StorageError};
 use serde::Serialize;
@@ -71,6 +73,8 @@ pub enum EngineEvent {
     Ais(AisSnapshot),
     /// État des alarmes.
     Alarms(AlarmsSnapshot),
+    /// Aides à la navigation du bateau (vecteurs, VMG, laylines).
+    OwnShip(OwnShipSnapshot),
 }
 
 impl EngineEvent {
@@ -84,6 +88,7 @@ impl EngineEvent {
             Self::Rejections(_) => "source-rejections",
             Self::Ais(_) => "ais-targets",
             Self::Alarms(_) => "alarms",
+            Self::OwnShip(_) => "own-ship",
         }
     }
 }
@@ -93,6 +98,7 @@ impl EngineEvent {
 struct Latest {
     instruments: Option<InstrumentsSnapshot>,
     ais: Option<AisSnapshot>,
+    own_ship: Option<OwnShipSnapshot>,
     navigation: Option<NavigationStatus>,
     published_rejections: Rejections,
 }
@@ -112,6 +118,7 @@ pub struct Service {
     source_generation: AtomicU64,
     events: broadcast::Sender<EngineEvent>,
     latest: Mutex<Latest>,
+    auto_log: Mutex<crate::logbook::AutoLog>,
     /// Instant du dernier pas de boucle (ms depuis l'époque Unix, 0 si
     /// aucun) : sert au chien de garde.
     last_tick_ms: AtomicI64,
@@ -134,6 +141,7 @@ impl Service {
             source_generation: AtomicU64::new(0),
             events,
             latest: Mutex::new(Latest::default()),
+            auto_log: Mutex::new(crate::logbook::AutoLog::default()),
             last_tick_ms: AtomicI64::new(0),
             shutdown,
         })
@@ -143,6 +151,18 @@ impl Service {
     /// `.await`.
     pub fn engine(&self) -> MutexGuard<'_, Engine> {
         lock(&self.engine)
+    }
+
+    /// Derniers instruments publiés.
+    #[must_use]
+    pub fn latest_instruments(&self) -> Option<InstrumentsSnapshot> {
+        lock(&self.latest).instruments.clone()
+    }
+
+    /// État des relevés automatiques du journal. À ne jamais conserver à
+    /// travers un `.await`.
+    pub fn auto_log(&self) -> MutexGuard<'_, crate::logbook::AutoLog> {
+        lock(&self.auto_log)
     }
 
     /// Dernier état connu de la liaison.
@@ -186,12 +206,15 @@ impl Service {
     pub fn current_events(&self) -> Vec<EngineEvent> {
         let alarms = self.engine().alarms(Utc::now());
         let latest = lock(&self.latest);
-        let mut events = Vec::with_capacity(6);
+        let mut events = Vec::with_capacity(7);
         if let Some(instruments) = &latest.instruments {
             events.push(EngineEvent::Instruments(instruments.clone()));
         }
         if let Some(ais) = &latest.ais {
             events.push(EngineEvent::Ais(ais.clone()));
+        }
+        if let Some(own) = &latest.own_ship {
+            events.push(EngineEvent::OwnShip(own.clone()));
         }
         events.push(EngineEvent::Alarms(alarms));
         events.push(EngineEvent::Navigation(latest.navigation.clone()));
@@ -259,9 +282,12 @@ impl Service {
             let mut latest = lock(&self.latest);
             latest.instruments = Some(tick.snapshot.clone());
             latest.ais = Some(tick.ais.clone());
+            latest.own_ship = Some(tick.own_ship.clone());
         }
         self.publish(EngineEvent::Instruments(tick.snapshot));
         self.publish(EngineEvent::Ais(tick.ais));
+        self.publish(EngineEvent::OwnShip(tick.own_ship));
+        crate::logbook::auto_entry(self, now).await;
         // Rejets : diffusés au plus une fois par pas, s'ils ont changé.
         let rejections = self.rejections();
         let changed = {
@@ -463,7 +489,10 @@ mod tests {
         while let Ok(event) = rx.try_recv() {
             got.push(event);
         }
-        assert_eq!(names(&got), ["alarms", "instruments", "ais-targets"]);
+        assert_eq!(
+            names(&got),
+            ["alarms", "instruments", "ais-targets", "own-ship"]
+        );
         assert_eq!(
             service.last_tick().map(|t| t.timestamp_millis()),
             Some(now.timestamp_millis())
@@ -475,6 +504,7 @@ mod tests {
             [
                 "instruments",
                 "ais-targets",
+                "own-ship",
                 "alarms",
                 "navigation-status",
                 "source-status",

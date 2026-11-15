@@ -135,6 +135,30 @@ impl AnchorConfig {
     }
 }
 
+/// Homme à la mer : position du bateau au moment de l'appui sur MOB.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobMark {
+    /// Dernière position reçue au moment de l'appui (WGS84).
+    pub position: GeoPosition,
+    /// Instant de l'appui (UTC).
+    pub marked_at: chrono::DateTime<chrono::Utc>,
+    /// La position était déjà obsolète au moment de l'appui : le point
+    /// MOB est approximatif (jamais présenté comme exact).
+    pub approximate: bool,
+}
+
+impl MobMark {
+    /// Distance (m) et relèvement (rad, du bateau vers le MOB), si la
+    /// position du bateau est fraîche.
+    #[must_use]
+    pub fn from_boat(&self, position: Option<&PositionStatus>) -> Option<(f64, Option<f64>)> {
+        let p = position.filter(|p| !p.stale)?;
+        let inv = nav_geodesy::inverse(p.fix.position, self.position);
+        Some((inv.distance_m, inv.initial_bearing_rad))
+    }
+}
+
 /// Alarme de perte de position (GPS).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

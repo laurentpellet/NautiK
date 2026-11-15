@@ -8,7 +8,9 @@
 //! Alarmes :
 //! - **mouillage** (ALR-001) : cercle d'évitage autour de l'ancre,
 //!   temporisation, hystérésis, résolution après un retour stable ;
-//! - **perte de position** (ALR-002) : position absente ou obsolète.
+//! - **perte de position** (ALR-002) : position absente ou obsolète ;
+//! - **homme à la mer** (MOB) : déclenchement manuel au dernier point
+//!   connu, distance et relèvement suivis, fin explicite seulement.
 //!
 //! Principes de sûreté :
 //! - une donnée absente ou obsolète ne résout jamais une alarme ;
@@ -22,10 +24,10 @@ mod rules;
 pub use machine::{AlarmState, Condition, Machine, Transition};
 pub use manager::{
     AlarmEvent, AlarmKind, AlarmManager, AlarmSettings, AlarmView, AlarmsSnapshot, AnchorView,
-    EventDetails, EventKind,
+    EventDetails, EventKind, MobView,
 };
 pub use rules::{
-    AnchorConfig, PositionLostConfig, RuleError, CLEAR_DELAY_S, DEFAULT_ANCHOR_DELAY_S,
+    AnchorConfig, MobMark, PositionLostConfig, RuleError, CLEAR_DELAY_S, DEFAULT_ANCHOR_DELAY_S,
     DEFAULT_ANCHOR_RADIUS_M, DEFAULT_POSITION_LOST_DELAY_S, MAX_ANCHOR_RADIUS_M, MAX_DELAY_S,
     MIN_ANCHOR_RADIUS_M, MIN_HYSTERESIS_M,
 };

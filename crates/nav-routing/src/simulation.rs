@@ -66,6 +66,12 @@ impl RouteSimulator {
         self.position
     }
 
+    /// Déplace le bateau simulé à `position` (outil « bateau ici »). La
+    /// route éventuellement suivie continue vers le même waypoint.
+    pub fn move_to(&mut self, position: GeoPosition) {
+        self.position = position;
+    }
+
     /// Indique si le bateau fait route.
     #[must_use]
     pub fn is_underway(&self) -> bool {
@@ -207,6 +213,27 @@ mod tests {
         let route = Route::from_positions("r", &[p(0.0, 1.0), p(1.0, 1.0)], t(0)).expect("r");
         sim.follow(Some(&route));
         assert!(!sim.is_underway());
+    }
+
+    #[test]
+    fn moved_boat_resumes_towards_the_same_waypoint() {
+        let mut sim = RouteSimulator::new(p(0.0, 0.0), 5.0);
+        let route = Route::from_positions("r", &[p(0.0, 0.01), p(0.01, 0.01)], t(0)).expect("r");
+        sim.follow(Some(&route));
+        sim.step(t(0));
+        sim.move_to(p(-0.01, 0.01));
+        assert_eq!(sim.position(), p(-0.01, 0.01));
+        let fix = sim.step(t(10));
+        assert!((fix.position.longitude_deg() - 0.01).abs() < 1e-9);
+        assert!(fix.position.latitude_deg() > -0.01, "fait route au nord");
+        let cog = fix.cog_rad.expect("cap").to_degrees();
+        assert!(cog.abs() < 1e-6, "{cog}");
+
+        // Sans route, le bateau reste où il a été placé.
+        let mut idle = RouteSimulator::new(p(0.0, 0.0), 5.0);
+        idle.move_to(p(1.0, 2.0));
+        idle.step(t(0));
+        assert_eq!(idle.step(t(10)).position, p(1.0, 2.0));
     }
 
     #[test]

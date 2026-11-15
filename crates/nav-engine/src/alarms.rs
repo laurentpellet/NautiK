@@ -151,7 +151,36 @@ pub async fn set_enabled(
         AlarmKind::Anchor => {
             Err("le mouillage se surveille en posant ou en levant l'ancre".to_owned())
         }
+        AlarmKind::ManOverboard => Err(
+            "l'homme à la mer se déclenche par le bouton MOB et se termine explicitement"
+                .to_owned(),
+        ),
     }
+}
+
+/// Homme à la mer : pose le point MOB (dernière position connue) et
+/// déclenche l'alarme. Le point est enregistré avant toute diffusion.
+///
+/// # Errors
+///
+/// Message lisible sans aucune position, si un MOB est déjà en cours ou
+/// si la base est indisponible (l'alarme reste alors déclenchée).
+pub async fn mark_mob(service: &Service) -> CommandResult<AlarmsSnapshot> {
+    let event = service
+        .engine()
+        .mark_mob(Utc::now())
+        .map_err(|e| e.to_string())?;
+    commit(service, Some(event)).await
+}
+
+/// Fin de l'alerte homme à la mer (décision de l'utilisateur).
+///
+/// # Errors
+///
+/// Message lisible si la configuration ne peut pas être enregistrée.
+pub async fn clear_mob(service: &Service) -> CommandResult<AlarmsSnapshot> {
+    let event = service.engine().clear_mob(Utc::now());
+    commit(service, event).await
 }
 
 /// Derniers événements d'alarme (du plus récent au plus ancien), au plus
@@ -203,6 +232,42 @@ mod tests {
         let history = events(&service, 10).await.expect("historique");
         let kinds: Vec<_> = history.iter().map(|e| e.kind).collect();
         assert_eq!(kinds, [EventKind::Disabled, EventKind::Enabled]);
+    }
+
+    #[tokio::test]
+    async fn mob_is_persisted_logged_and_ended_explicitly() {
+        let service = test_service().await;
+        service.engine().tick(Utc::now());
+        assert!(set_enabled(&service, "manOverboard", false).await.is_err());
+        let snap = mark_mob(&service).await.expect("MOB");
+        assert!(snap.mob.is_some());
+        assert!(snap.sounding);
+        assert!(mark_mob(&service).await.is_err(), "déjà en cours");
+        let saved = service.db.load_alarm_settings().await.expect("lu");
+        assert!(saved.mob.is_some(), "conservé au redémarrage");
+
+        let snap = clear_mob(&service).await.expect("fin");
+        assert!(snap.mob.is_none());
+        assert!(service
+            .db
+            .load_alarm_settings()
+            .await
+            .expect("lu")
+            .mob
+            .is_none());
+        let kinds: Vec<_> = events(&service, 10)
+            .await
+            .expect("historique")
+            .iter()
+            .map(|e| (e.alarm, e.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (AlarmKind::ManOverboard, EventKind::Disabled),
+                (AlarmKind::ManOverboard, EventKind::Activated)
+            ]
+        );
     }
 
     #[tokio::test]

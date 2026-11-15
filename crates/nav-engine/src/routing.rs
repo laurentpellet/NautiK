@@ -3,9 +3,9 @@
 //! Chaque opération valide ses entrées (identifiants, positions, noms) et
 //! délègue à `nav-routing` / `nav-storage`.
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use nav_core::GeoPosition;
-use nav_routing::{Route, Track, Waypoint};
+use nav_routing::{bounds_of, GeoBounds, Route, RoutePlan, Track, Waypoint, WaypointEdit};
 use nav_storage::TrackSummary;
 use serde::Serialize;
 use uuid::Uuid;
@@ -40,6 +40,8 @@ pub struct RouteView {
     pub total_distance_m: f64,
     /// Route actuellement suivie.
     pub active: bool,
+    /// Emprise de la route (pour zoomer dessus).
+    pub bounds: Option<GeoBounds>,
 }
 
 impl RouteView {
@@ -47,12 +49,13 @@ impl RouteView {
         Self {
             total_distance_m: route.total_distance_m(),
             active: active_id == Some(route.id),
+            bounds: bounds_of(route.waypoints.iter().map(|w| w.position)),
             route,
         }
     }
 }
 
-/// Trace complète et longueur parcourue.
+/// Trace complète, longueur parcourue, durée et emprise.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackView {
@@ -61,6 +64,31 @@ pub struct TrackView {
     pub track: Track,
     /// Longueur parcourue, en mètres.
     pub length_m: f64,
+    /// Durée, en secondes, de la première à la dernière position
+    /// enregistrée (`None` sans au moins deux points).
+    pub duration_s: Option<f64>,
+    /// Emprise de la trace (`None` sans point).
+    pub bounds: Option<GeoBounds>,
+}
+
+impl TrackView {
+    fn new(track: Track) -> Self {
+        let duration_s = match (track.points.first(), track.points.last()) {
+            (Some(first), Some(last)) if track.points.len() >= 2 => {
+                // Millisecondes d'une trace : bien en deçà de 2^53.
+                #[allow(clippy::cast_precision_loss)]
+                let ms = (last.timestamp - first.timestamp).num_milliseconds() as f64;
+                Some(ms / 1_000.0)
+            }
+            _ => None,
+        };
+        Self {
+            length_m: track.length_m(),
+            duration_s,
+            bounds: bounds_of(track.points.iter().map(|p| p.position)),
+            track,
+        }
+    }
 }
 
 /// État courant de la navigation et de l'enregistrement.
@@ -103,6 +131,56 @@ pub async fn create_route(
     service.db.save_route(&route).await.map_err(text)?;
     tracing::info!(route = %route.name, points = positions.len(), "route créée");
     Ok(RouteView::new(route, None))
+}
+
+/// Enregistre une route éditée sur la carte : création si `id` est absent,
+/// sinon remplacement de son nom et de ses waypoints (déplacés, renommés,
+/// ajoutés en départ, en arrivée ou en intermédiaire, retirés). Refusé
+/// pour la route active.
+///
+/// # Errors
+///
+/// Message lisible si l'identifiant, le nom, un waypoint ou la longueur
+/// sont invalides, ou si la route est introuvable ou active.
+pub async fn save_route(
+    service: &Service,
+    id: Option<&str>,
+    name: &str,
+    waypoints: &[WaypointEdit],
+) -> CommandResult<RouteView> {
+    let now = Utc::now();
+    let route = match id {
+        None => Route::from_edits(name, waypoints, now).map_err(text)?,
+        Some(id) => {
+            let id = parse_id(id)?;
+            ensure_not_active(service, id)?;
+            let mut route = service
+                .db
+                .get_route(id)
+                .await
+                .map_err(text)?
+                .ok_or("route introuvable")?;
+            route.apply_edit(name, waypoints, now).map_err(text)?;
+            route
+        }
+    };
+    service.db.save_route(&route).await.map_err(text)?;
+    tracing::info!(route = %route.name, points = route.waypoints.len(), "route enregistrée");
+    Ok(RouteView::new(route, None))
+}
+
+/// Planifie un parcours (route enregistrée ou en cours d'édition) à la
+/// vitesse prévue : longueur, durée, heures de passage et emprise.
+///
+/// # Errors
+///
+/// Message lisible si la vitesse ou le nombre de points sont invalides.
+pub fn plan_route(
+    positions: &[GeoPosition],
+    speed_mps: f64,
+    departure: Option<DateTime<Utc>>,
+) -> CommandResult<RoutePlan> {
+    nav_routing::plan(positions, speed_mps, departure).map_err(text)
 }
 
 fn ensure_not_active(service: &Service, id: Uuid) -> CommandResult<()> {
@@ -307,10 +385,41 @@ pub async fn get_track(service: &Service, id: &str) -> CommandResult<TrackView> 
         .await
         .map_err(text)?
         .ok_or("trace introuvable")?;
-    Ok(TrackView {
-        length_m: track.length_m(),
-        track,
-    })
+    Ok(TrackView::new(track))
+}
+
+/// Profil d'une trace pour sa relecture : statistiques et vitesse de
+/// chaque point.
+///
+/// # Errors
+///
+/// Message lisible si la trace est introuvable.
+pub async fn track_profile(
+    service: &Service,
+    id: &str,
+) -> CommandResult<nav_routing::track_profile::TrackProfile> {
+    let id = parse_id(id)?;
+    let track = service
+        .db
+        .get_track(id)
+        .await
+        .map_err(text)?
+        .ok_or("trace introuvable")?;
+    Ok(nav_routing::track_profile::profile(&track))
+}
+
+/// Renomme une trace.
+///
+/// # Errors
+///
+/// Message lisible si le nom est invalide ou la trace introuvable.
+pub async fn rename_track(service: &Service, id: &str, name: &str) -> CommandResult<()> {
+    let id = parse_id(id)?;
+    let name = nav_routing::model::validate_name(name).map_err(text)?;
+    if !service.db.rename_track(id, &name).await.map_err(text)? {
+        return Err("trace introuvable".to_owned());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -393,9 +502,162 @@ mod tests {
         assert!(stop_recording(&s).await.is_err());
         let view = get_track(&s, &id).await.expect("get");
         assert_eq!(view.track.points.len(), 1);
+        let profile = track_profile(&s, &id).await.expect("profil");
+        assert_eq!(profile.points.len(), 1);
+        assert!(track_profile(&s, "x").await.is_err());
         assert!(view.track.ended_at.is_some());
         assert_eq!(list_tracks(&s).await.expect("list").len(), 1);
         delete_track(&s, &id).await.expect("delete");
+    }
+
+    fn edit(id: Option<Uuid>, name: &str, position: GeoPosition) -> WaypointEdit {
+        WaypointEdit {
+            id,
+            name: Some(name.to_owned()),
+            position,
+        }
+    }
+
+    #[tokio::test]
+    async fn save_route_creates_then_edits_with_departure_and_arrival() {
+        let s = state().await;
+        let created = save_route(
+            &s,
+            None,
+            "Moorea",
+            &[
+                edit(None, "Papeete", p(-17.53, -149.57)),
+                edit(None, "Vaiare", p(-17.52, -149.77)),
+            ],
+        )
+        .await
+        .expect("création");
+        let id = created.route.id.to_string();
+        let first = created.route.waypoints[0].id;
+        let bounds = created.bounds.expect("emprise");
+        assert_eq!((bounds.west, bounds.east), (-149.77, -149.57));
+
+        let edited = save_route(
+            &s,
+            Some(&id),
+            "Moorea par la passe",
+            &[
+                edit(Some(first), "Port de Papeete", p(-17.53, -149.57)),
+                edit(None, "Passe de Taapuna", p(-17.57, -149.63)),
+                edit(
+                    created.route.waypoints.get(1).map(|w| w.id),
+                    "Vaiare",
+                    p(-17.52, -149.77),
+                ),
+                edit(None, "Arrivée Opunohu", p(-17.49, -149.85)),
+            ],
+        )
+        .await
+        .expect("édition");
+        let names: Vec<_> = edited
+            .route
+            .waypoints
+            .iter()
+            .map(|w| w.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Port de Papeete",
+                "Passe de Taapuna",
+                "Vaiare",
+                "Arrivée Opunohu"
+            ]
+        );
+        assert_eq!(edited.route.waypoints[0].id, first);
+        let listed = list_routes(&s).await.expect("list");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].route, edited.route);
+    }
+
+    #[tokio::test]
+    async fn save_route_rejects_invalid_edits_and_active_route() {
+        let s = state().await;
+        let two = [edit(None, "A", p(0.0, 0.0)), edit(None, "B", p(0.0, 1.0))];
+        assert!(save_route(&s, None, "R", &two[..1]).await.is_err());
+        assert!(save_route(&s, Some("pas-un-id"), "R", &two).await.is_err());
+        let unknown = Uuid::new_v4().to_string();
+        let err = save_route(&s, Some(&unknown), "R", &two)
+            .await
+            .expect_err("inconnue");
+        assert!(err.contains("introuvable"), "{err}");
+
+        let r = save_route(&s, None, "R", &two).await.expect("création");
+        let id = r.route.id.to_string();
+        let stranger = [edit(Some(Uuid::new_v4()), "A", p(0.0, 0.0)), two[1].clone()];
+        let err = save_route(&s, Some(&id), "R", &stranger)
+            .await
+            .expect_err("waypoint étranger");
+        assert!(err.contains("waypoint inconnu"), "{err}");
+
+        activate_route(&s, &id).await.expect("activate");
+        let err = save_route(&s, Some(&id), "R2", &two)
+            .await
+            .expect_err("active");
+        assert!(err.contains("route active"), "{err}");
+        deactivate(&s);
+    }
+
+    #[test]
+    fn plan_route_validates_and_computes() {
+        let plan = plan_route(&[p(0.0, 0.0), p(0.0, 1.0)], 5.0, None).expect("plan");
+        assert!((plan.total_duration_s - plan.total_distance_m / 5.0).abs() < 1e-9);
+        assert!(plan_route(&[p(0.0, 0.0), p(0.0, 1.0)], 0.0, None).is_err());
+        assert!(plan_route(&[p(0.0, 0.0)], 5.0, None).is_err());
+    }
+
+    #[tokio::test]
+    async fn track_view_has_duration_and_bounds_and_can_be_renamed() {
+        let s = state().await;
+        let t0 = Utc::now();
+        let point = |seconds: i64, lat: f64| nav_routing::TrackPoint {
+            timestamp: t0 + chrono::Duration::seconds(seconds),
+            position: p(lat, -149.6),
+            sog_mps: None,
+            cog_rad: None,
+            depth_m: None,
+        };
+        let track = Track {
+            id: Uuid::new_v4(),
+            name: "Import".to_owned(),
+            started_at: t0,
+            ended_at: Some(t0 + chrono::Duration::seconds(3_600)),
+            points: vec![point(0, -17.5), point(1_800, -17.4), point(3_600, -17.3)],
+        };
+        s.db.create_track(&track, false).await.expect("create");
+        let id = track.id.to_string();
+        let view = get_track(&s, &id).await.expect("get");
+        assert_eq!(view.duration_s, Some(3_600.0));
+        let b = view.bounds.expect("emprise");
+        assert_eq!((b.south, b.north), (-17.5, -17.3));
+
+        rename_track(&s, &id, "  Tour de Tahiti ")
+            .await
+            .expect("rename");
+        assert_eq!(
+            list_tracks(&s).await.expect("list")[0].name,
+            "Tour de Tahiti"
+        );
+        assert!(rename_track(&s, &id, "   ").await.is_err());
+        assert!(rename_track(&s, &Uuid::new_v4().to_string(), "x")
+            .await
+            .is_err());
+        assert!(rename_track(&s, "../x", "x").await.is_err());
+
+        let single = Track {
+            id: Uuid::new_v4(),
+            points: vec![point(0, -17.5)],
+            ..track
+        };
+        s.db.create_track(&single, false).await.expect("create");
+        let view = get_track(&s, &single.id.to_string()).await.expect("get");
+        assert_eq!(view.duration_s, None);
+        assert!(view.bounds.is_some());
     }
 
     #[test]

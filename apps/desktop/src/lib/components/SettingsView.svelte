@@ -1,6 +1,46 @@
+<script lang="ts" module>
+  /** Sections de l'onglet Paramètres, dans l'ordre de la navigation. */
+  export const SETTINGS_SECTIONS = [
+    { id: 'general', label: 'Général', hint: 'Unités, carte, simulateur' },
+    { id: 'sources', label: 'Source', hint: 'Données du bord' },
+    { id: 'alarms', label: 'Alarmes', hint: 'Surveillance, historique' },
+    { id: 'charts', label: 'Cartes', hint: 'MBTiles, ENC, îles et amers' },
+  ] as const;
+
+  export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['id'];
+
+  const SECTION_KEY = 'nautik.settingsSection';
+
+  /** Section mémorisée ; inconnue ou absente : Général. */
+  export function loadSection(
+    storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
+  ): SettingsSection {
+    try {
+      const value = storage?.getItem(SECTION_KEY);
+      return SETTINGS_SECTIONS.find((s) => s.id === value)?.id ?? 'general';
+    } catch {
+      return 'general';
+    }
+  }
+
+  function saveSection(section: SettingsSection): void {
+    try {
+      globalThis.localStorage?.setItem(SECTION_KEY, section);
+    } catch {
+      // Préférence non mémorisée : sans conséquence.
+    }
+  }
+</script>
+
 <script lang="ts">
+  // Onglet Paramètres : une navigation par sections (une seule affichée à
+  // la fois) et des réglages compacts. Les sections restent montées : un
+  // formulaire en cours (source, alarmes) n'est pas perdu en changeant de
+  // section. Les alertes de sûreté restent visibles au-dessus.
   import type { Snippet } from 'svelte';
   import type { SimulatorApi } from '../services/simulator';
+  import { DEFAULT_ACTIVE_ROUTE_COLOR } from '../map/overlays';
+  import { routeStyle, setActiveRouteColor } from '../routeColor.svelte';
   import {
     DEPTH_UNITS,
     DISTANCE_UNITS,
@@ -22,11 +62,36 @@
     sources: Snippet;
     /** Alarmes (surveillance et historique). */
     alarms?: Snippet;
-    /** Dossier des cartes. */
+    /** Dossiers des cartes, ENC, îles et amers. */
     charts?: Snippet;
   }
 
   let { simulator, status, sources, alarms, charts }: Props = $props();
+
+  let section = $state<SettingsSection>(loadSection());
+
+  /** Sections disponibles (Alarmes et Cartes sont facultatives). */
+  const available = $derived(
+    SETTINGS_SECTIONS.filter((s) => (s.id !== 'alarms' || alarms) && (s.id !== 'charts' || charts)),
+  );
+
+  function select(id: SettingsSection): void {
+    section = id;
+    saveSection(id);
+  }
+
+  /** Flèches haut/bas (ou gauche/droite) : section voisine. */
+  function onNavKeydown(event: KeyboardEvent): void {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+    if (step === undefined) return;
+    event.preventDefault();
+    const ids = available.map((s) => s.id);
+    const next = ids[(ids.indexOf(section) + step + ids.length) % ids.length];
+    if (next) {
+      select(next);
+      document.getElementById(`settings-tab-${next}`)?.focus();
+    }
+  }
 
   let speedText = $state('');
   let speedError = $state<string | null>(null);
@@ -81,77 +146,156 @@
 <section class="settings-view" aria-label="Paramètres">
   {@render status()}
 
-  <div class="columns">
-    <section class="card" aria-labelledby="units-title">
-      <h2 id="units-title">Unités</h2>
-      <label>
-        Vitesse
-        <select
-          value={units.speed}
-          onchange={(e) => changeSpeedUnit(e.currentTarget.value as SpeedUnit)}
-        >
-          {#each options(SPEED_UNITS) as o (o.key)}<option value={o.key}>{o.label}</option>{/each}
-        </select>
-      </label>
-      <label>
-        Distance
-        <select
-          value={units.distance}
-          onchange={(e) => setUnits({ distance: e.currentTarget.value as DistanceUnit })}
-        >
-          {#each options(DISTANCE_UNITS) as o (o.key)}<option value={o.key}>{o.label}</option
-            >{/each}
-        </select>
-      </label>
-      <label>
-        Profondeur
-        <select
-          value={units.depth}
-          onchange={(e) => setUnits({ depth: e.currentTarget.value as DepthUnit })}
-        >
-          {#each options(DEPTH_UNITS) as o (o.key)}<option value={o.key}>{o.label}</option>{/each}
-        </select>
-      </label>
-      <p class="hint">Le moteur calcule toujours en unités SI ; seul l'affichage change.</p>
-    </section>
+  <div class="layout">
+    <nav class="sections" aria-label="Sections des paramètres">
+      <div role="tablist" aria-orientation="vertical" tabindex="-1" onkeydown={onNavKeydown}>
+        {#each available as s (s.id)}
+          <button
+            type="button"
+            role="tab"
+            id={`settings-tab-${s.id}`}
+            aria-selected={section === s.id}
+            aria-controls={`settings-panel-${s.id}`}
+            tabindex={section === s.id ? 0 : -1}
+            onclick={() => select(s.id)}
+          >
+            <span class="label">{s.label}</span>
+            <span class="hint">{s.hint}</span>
+          </button>
+        {/each}
+      </div>
+    </nav>
 
-    <section class="card" aria-labelledby="sim-title">
-      <h2 id="sim-title">Simulateur</h2>
-      <form onsubmit={saveSpeed}>
-        <label>
-          Vitesse du bateau simulé ({SPEED_UNITS[units.speed].label})
-          <input
-            type="text"
-            inputmode="decimal"
-            bind:value={speedText}
-            oninput={() => (speedSaved = false)}
-          />
-        </label>
-        <button type="submit" disabled={busy}>Enregistrer</button>
-      </form>
-      <p class="hint">Vitesse suivie sur la route active en mode simulateur (0 à 30 nœuds).</p>
-      {#if speedError}
-        <p class="error" role="alert">{speedError}</p>
-      {:else if speedSaved}
-        <p class="ok" role="status">Vitesse enregistrée.</p>
+    <div class="content">
+      <div
+        role="tabpanel"
+        id="settings-panel-general"
+        aria-labelledby="settings-tab-general"
+        hidden={section !== 'general'}
+      >
+        <section class="card" aria-labelledby="units-title">
+          <h2 id="units-title">Unités</h2>
+          <div class="fields">
+            <label>
+              <span>Vitesse</span>
+              <select
+                value={units.speed}
+                onchange={(e) => changeSpeedUnit(e.currentTarget.value as SpeedUnit)}
+              >
+                {#each options(SPEED_UNITS) as o (o.key)}<option value={o.key}>{o.label}</option
+                  >{/each}
+              </select>
+            </label>
+            <label>
+              <span>Distance</span>
+              <select
+                value={units.distance}
+                onchange={(e) => setUnits({ distance: e.currentTarget.value as DistanceUnit })}
+              >
+                {#each options(DISTANCE_UNITS) as o (o.key)}<option value={o.key}>{o.label}</option
+                  >{/each}
+              </select>
+            </label>
+            <label>
+              <span>Profondeur</span>
+              <select
+                value={units.depth}
+                onchange={(e) => setUnits({ depth: e.currentTarget.value as DepthUnit })}
+              >
+                {#each options(DEPTH_UNITS) as o (o.key)}<option value={o.key}>{o.label}</option
+                  >{/each}
+              </select>
+            </label>
+          </div>
+          <p class="note">Le moteur calcule toujours en unités SI ; seul l'affichage change.</p>
+        </section>
+
+        <section class="card" aria-labelledby="route-color-title">
+          <h2 id="route-color-title">Carte</h2>
+          <div class="row">
+            <label class="inline">
+              <input
+                type="color"
+                value={routeStyle.activeColor}
+                oninput={(e) => setActiveRouteColor(e.currentTarget.value)}
+              />
+              <span>Couleur de la route active</span>
+            </label>
+            <button
+              type="button"
+              disabled={routeStyle.activeColor === DEFAULT_ACTIVE_ROUTE_COLOR}
+              onclick={() => setActiveRouteColor(DEFAULT_ACTIVE_ROUTE_COLOR)}>Jaune (défaut)</button
+            >
+          </div>
+          <p class="note">
+            Bordée d'un liseré sombre et toujours affichée ; les autres routes restent violettes.
+          </p>
+        </section>
+
+        <section class="card" aria-labelledby="sim-title">
+          <h2 id="sim-title">Simulateur</h2>
+          <form class="row" onsubmit={saveSpeed}>
+            <label class="inline">
+              <span>Vitesse du bateau simulé ({SPEED_UNITS[units.speed].label})</span>
+              <input
+                class="number"
+                type="text"
+                inputmode="decimal"
+                bind:value={speedText}
+                oninput={() => (speedSaved = false)}
+              />
+            </label>
+            <button type="submit" disabled={busy}>Enregistrer</button>
+          </form>
+          {#if speedError}
+            <p class="error" role="alert">{speedError}</p>
+          {:else if speedSaved}
+            <p class="ok" role="status">Vitesse enregistrée.</p>
+          {/if}
+          <p class="note">
+            Vitesse suivie sur la route active en mode simulateur (0 à 30 nœuds). Le bateau se place
+            aussi sur la carte (barre d'outils ou clic droit).
+          </p>
+        </section>
+      </div>
+
+      <div
+        role="tabpanel"
+        id="settings-panel-sources"
+        aria-labelledby="settings-tab-sources"
+        hidden={section !== 'sources'}
+      >
+        <section class="card" aria-label="Sources">
+          {@render sources()}
+        </section>
+      </div>
+
+      {#if alarms}
+        <div
+          role="tabpanel"
+          id="settings-panel-alarms"
+          aria-labelledby="settings-tab-alarms"
+          hidden={section !== 'alarms'}
+        >
+          <section class="card">
+            {@render alarms()}
+          </section>
+        </div>
       {/if}
-    </section>
 
-    <section class="card sources" aria-label="Sources">
-      {@render sources()}
-    </section>
-
-    {#if alarms}
-      <section class="card sources">
-        {@render alarms()}
-      </section>
-    {/if}
-
-    {#if charts}
-      <section class="card">
-        {@render charts()}
-      </section>
-    {/if}
+      {#if charts}
+        <div
+          role="tabpanel"
+          id="settings-panel-charts"
+          aria-labelledby="settings-tab-charts"
+          hidden={section !== 'charts'}
+        >
+          <section class="card">
+            {@render charts()}
+          </section>
+        </div>
+      {/if}
+    </div>
   </div>
 </section>
 
@@ -160,22 +304,87 @@
     position: absolute;
     inset: 0;
     z-index: 3;
+    display: flex;
+    flex-direction: column;
     overflow: auto;
-    padding: 1rem 1rem 2.5rem;
+    padding: 0.75rem 1rem 2.5rem;
     background: var(--bg);
     color: var(--fg);
   }
 
-  .columns {
+  .layout {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
-    gap: 0.75rem;
-    margin-top: 0.75rem;
+    grid-template-columns: 13rem minmax(0, 46rem);
+    gap: 1rem;
     align-items: start;
+    margin-top: 0.75rem;
+  }
+
+  /* Navigation collée en haut pendant le défilement d'une longue section. */
+  .sections {
+    position: sticky;
+    top: 0;
+  }
+
+  [role='tablist'] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  [role='tab'] {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.05rem;
+    padding: 0.45rem 0.7rem;
+    border: 1px solid transparent;
+    border-left: 3px solid transparent;
+    border-radius: 0.35rem;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  [role='tab']:hover {
+    background: var(--button-bg);
+  }
+
+  [role='tab'][aria-selected='true'] {
+    border-color: var(--border);
+    border-left-color: var(--fg);
+    background: var(--panel-bg);
+  }
+
+  [role='tab'] .label {
+    font-weight: 600;
+  }
+
+  [role='tab'] .hint {
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+
+  .content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  [role='tabpanel'] {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  [role='tabpanel'][hidden] {
+    display: none;
   }
 
   .card {
-    padding: 0.75rem 1rem;
+    padding: 0.7rem 0.9rem;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     background: var(--panel-bg);
@@ -183,14 +392,39 @@
 
   h2 {
     margin: 0 0 0.5rem;
-    font-size: 1.1rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
   }
 
-  label {
+  /* Trois unités sur une ligne, repliées si la place manque. */
+  .fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    gap: 0.5rem 0.75rem;
+  }
+
+  .fields label {
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    margin-bottom: 0.6rem;
+    font-size: 0.85rem;
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  label.inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
     font-size: 0.9rem;
   }
 
@@ -205,22 +439,73 @@
     font: inherit;
   }
 
+  input.number {
+    width: 5.5rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  input[type='color'] {
+    width: 2.5rem;
+    height: 2rem;
+    padding: 0.1rem;
+    cursor: pointer;
+  }
+
   button {
     cursor: pointer;
   }
 
-  .hint {
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .note {
+    margin: 0.5rem 0 0;
     color: var(--muted);
     font-size: 0.8rem;
   }
 
   .error {
+    margin: 0.4rem 0 0;
     color: var(--error-fg);
     font-weight: 600;
     font-size: 0.85rem;
   }
 
   .ok {
+    margin: 0.4rem 0 0;
     font-size: 0.85rem;
+  }
+
+  /* Fenêtre étroite : sections en onglets horizontaux au-dessus. */
+  @media (max-width: 760px) {
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0.6rem;
+    }
+
+    .sections {
+      position: static;
+    }
+
+    [role='tablist'] {
+      flex-direction: row;
+      overflow-x: auto;
+    }
+
+    [role='tab'] {
+      flex: none;
+      border-left-width: 1px;
+    }
+
+    [role='tab'][aria-selected='true'] {
+      border-bottom: 3px solid var(--fg);
+    }
+
+    [role='tab'] .hint {
+      display: none;
+    }
   }
 </style>

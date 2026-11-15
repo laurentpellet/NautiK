@@ -27,6 +27,21 @@
     ],
     routebar: ['M3 8h18v8H3z', 'M6 12h3', 'M11 12h2', 'M15 12h3'],
     stop: ['M7 7h10v10H7z'],
+    boat: ['M3 15h18l-3 5H6z', 'M12 3v12', 'M12 4l6 9h-6'],
+    ruler: ['M3 17L17 3l4 4L7 21z', 'M7 13l2 2', 'M10 10l2 2', 'M13 7l2 2'],
+    vrm: [
+      'M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16',
+      'M12 12L20 4',
+      'M12 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2',
+    ],
+    mark: ['M6 21V4', 'M6 4h11l-2 4 2 4H6'],
+    search: ['M10 4a6 6 0 1 0 0 12a6 6 0 1 0 0-12', 'M15 15l5 5'],
+    log: [
+      'M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z',
+      'M5 18a2 2 0 0 1 2-2h11',
+      'M9 8h6',
+      'M9 11h4',
+    ],
   } as const;
 
   export type IconName = keyof typeof PATHS;

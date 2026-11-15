@@ -1,18 +1,29 @@
 /**
- * Couches de surimpression : routes, route en cours de tracé, traces.
+ * Couches de surimpression : routes, route en cours d'édition, traces.
  *
  * Fonctions pures (GeoJSON et spécifications de couches) : ChartView se
  * contente de les appliquer. Le style étant entièrement local (pas de
- * glyphes), les waypoints sont des cercles ; leurs noms figurent dans le
- * panneau des routes.
+ * glyphes), les noms des waypoints sont des images d'étiquettes
+ * (`labels.ts`).
  */
 import type { Feature, FeatureCollection, LineString, Point, Position } from 'geojson';
-import type { LayerSpecification } from 'maplibre-gl';
+import type { ExpressionSpecification, LayerSpecification } from 'maplibre-gl';
 import type { LatLon, Route } from '../services/routing';
+import { labelImageExpression, labelText } from './labels';
+import type { Theme } from './style';
 
 export const ROUTES_SOURCE = 'nautik-routes';
 export const DRAFT_SOURCE = 'nautik-draft';
 export const TRACKS_SOURCE = 'nautik-tracks';
+
+/** Couche des points de la route en édition (déplaçables). */
+export const DRAFT_POINTS_LAYER = 'nautik-draft-points';
+
+/** Point d'une route en édition, tel qu'affiché. */
+export interface DraftPoint {
+  name: string;
+  position: LatLon;
+}
 
 type Properties = Record<string, string | boolean | number>;
 type Collection = FeatureCollection<LineString | Point, Properties>;
@@ -35,10 +46,23 @@ export function emptyCollection(): Collection {
   return { type: 'FeatureCollection', features: [] };
 }
 
-/** Routes enregistrées : un segment par route et un point par waypoint. */
-export function routesData(routes: Route[], targetIndex: number | null = null): Collection {
+/** Nom affiché d'un point en édition : son nom, sinon `WPnnn` provisoire. */
+export function draftPointName(name: string, index: number): string {
+  return name.trim() || `WP${String(index + 1).padStart(3, '0')}`;
+}
+
+/**
+ * Routes enregistrées : un segment par route et un point par waypoint.
+ * `hiddenId` : route en cours d'édition, affichée par le brouillon.
+ */
+export function routesData(
+  routes: Route[],
+  targetIndex: number | null = null,
+  hiddenId: string | null = null,
+): Collection {
   const features: Collection['features'] = [];
   for (const route of routes) {
+    if (route.id === hiddenId) continue;
     const positions = route.waypoints.map((w) => w.position);
     features.push(line(positions, { id: route.id, active: route.active }));
     route.waypoints.forEach((w, index) => {
@@ -48,6 +72,7 @@ export function routesData(routes: Route[], targetIndex: number | null = null): 
           routeId: route.id,
           active: route.active,
           target: route.active && index === targetIndex,
+          label: labelText(w.name),
         }),
       );
     });
@@ -55,11 +80,23 @@ export function routesData(routes: Route[], targetIndex: number | null = null): 
   return { type: 'FeatureCollection', features };
 }
 
-/** Route en cours de tracé. */
-export function draftData(points: LatLon[]): Collection {
-  const features: Collection['features'] = points.map((p, index) => point(p, { index }));
+/** Route en cours d'édition ; départ et arrivée sont distingués. */
+export function draftData(points: DraftPoint[]): Collection {
+  const last = points.length - 1;
+  const features: Collection['features'] = points.map((p, index) =>
+    point(p.position, {
+      index,
+      role: index === 0 ? 'start' : index === last ? 'end' : 'via',
+      label: labelText(draftPointName(p.name, index)),
+    }),
+  );
   if (points.length >= 2) {
-    features.unshift(line(points, {}));
+    features.unshift(
+      line(
+        points.map((p) => p.position),
+        {},
+      ),
+    );
   }
   return { type: 'FeatureCollection', features };
 }
@@ -72,8 +109,66 @@ export function tracksData(tracks: { id: string; points: LatLon[]; recording: bo
   return { type: 'FeatureCollection', features } satisfies Collection;
 }
 
+const isPoint: ExpressionSpecification = ['==', ['geometry-type'], 'Point'];
+const isLine: ExpressionSpecification = ['==', ['geometry-type'], 'LineString'];
+
+/** Étiquettes des waypoints, à droite du point ; masquées si elles se chevauchent. */
+function labelLayer(id: string, source: string, theme: Theme, minzoom: number): LayerSpecification {
+  return {
+    id,
+    type: 'symbol',
+    source,
+    filter: isPoint,
+    minzoom,
+    layout: {
+      'icon-image': labelImageExpression(theme, 'wp'),
+      'icon-anchor': 'left',
+      'icon-offset': [8, 0],
+      'icon-optional': true,
+      'icon-allow-overlap': false,
+    },
+  };
+}
+
+/** Couches d'étiquettes dont l'image dépend du thème. */
+export const OVERLAY_LABEL_LAYERS = ['nautik-routes-labels', 'nautik-draft-labels'] as const;
+
+/** Changements à appliquer aux étiquettes lors d'un changement de thème. */
+export function overlayThemeChanges(theme: Theme): [string, ExpressionSpecification][] {
+  return OVERLAY_LABEL_LAYERS.map((id) => [id, labelImageExpression(theme, 'wp')]);
+}
+
+/** Couleur par défaut de la route active (jaune, réglable dans les Paramètres). */
+export const DEFAULT_ACTIVE_ROUTE_COLOR = '#ffd600';
+/** Couleur des routes enregistrées non actives. */
+const ROUTE_COLOR = '#7b1fa2';
+
+const routeColor = (active: string): ExpressionSpecification => [
+  'case',
+  ['get', 'active'],
+  active,
+  ROUTE_COLOR,
+];
+
+/** Propriétés de peinture à changer quand la couleur de la route active change. */
+export function activeRouteColorChanges(
+  color: string,
+): [
+  layer: string,
+  property: 'line-color' | 'circle-stroke-color',
+  value: ExpressionSpecification,
+][] {
+  return [
+    ['nautik-routes-line', 'line-color', routeColor(color)],
+    ['nautik-routes-points', 'circle-stroke-color', routeColor(color)],
+  ];
+}
+
 /** Couches de surimpression, dans l'ordre d'empilement. */
-export function overlayLayers(): LayerSpecification[] {
+export function overlayLayers(
+  theme: Theme = 'day',
+  activeRouteColor: string = DEFAULT_ACTIVE_ROUTE_COLOR,
+): LayerSpecification[] {
   return [
     {
       id: 'nautik-tracks-line',
@@ -87,13 +182,23 @@ export function overlayLayers(): LayerSpecification[] {
       },
     },
     {
+      // Liseré sombre sous la route active : reste lisible quelle que soit
+      // sa couleur (jaune sur fond clair notamment).
+      id: 'nautik-routes-casing',
+      type: 'line',
+      source: ROUTES_SOURCE,
+      filter: ['all', isLine, ['==', ['get', 'active'], true]],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#212121', 'line-width': 7, 'line-opacity': 0.55 },
+    },
+    {
       id: 'nautik-routes-line',
       type: 'line',
       source: ROUTES_SOURCE,
-      filter: ['==', ['geometry-type'], 'LineString'],
+      filter: isLine,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': ['case', ['get', 'active'], '#d81b60', '#7b1fa2'],
+        'line-color': routeColor(activeRouteColor),
         'line-width': ['case', ['get', 'active'], 4, 2.5],
       },
     },
@@ -101,32 +206,35 @@ export function overlayLayers(): LayerSpecification[] {
       id: 'nautik-routes-points',
       type: 'circle',
       source: ROUTES_SOURCE,
-      filter: ['==', ['geometry-type'], 'Point'],
+      filter: isPoint,
       paint: {
         'circle-radius': ['case', ['get', 'target'], 8, 5],
         'circle-color': ['case', ['get', 'target'], '#ffeb3b', '#ffffff'],
-        'circle-stroke-color': ['case', ['get', 'active'], '#d81b60', '#7b1fa2'],
+        'circle-stroke-color': routeColor(activeRouteColor),
         'circle-stroke-width': 2.5,
       },
     },
+    labelLayer('nautik-routes-labels', ROUTES_SOURCE, theme, 8),
     {
       id: 'nautik-draft-line',
       type: 'line',
       source: DRAFT_SOURCE,
-      filter: ['==', ['geometry-type'], 'LineString'],
+      filter: isLine,
       paint: { 'line-color': '#ff6f00', 'line-width': 3, 'line-dasharray': [2, 1.5] },
     },
     {
-      id: 'nautik-draft-points',
+      id: DRAFT_POINTS_LAYER,
       type: 'circle',
       source: DRAFT_SOURCE,
-      filter: ['==', ['geometry-type'], 'Point'],
+      filter: isPoint,
       paint: {
-        'circle-radius': 5,
-        'circle-color': '#ffffff',
+        'circle-radius': ['match', ['get', 'role'], 'via', 6, 8],
+        // Départ vert, arrivée rouge, intermédiaires blancs.
+        'circle-color': ['match', ['get', 'role'], 'start', '#2e7d32', 'end', '#c62828', '#ffffff'],
         'circle-stroke-color': '#ff6f00',
         'circle-stroke-width': 2.5,
       },
     },
+    labelLayer('nautik-draft-labels', DRAFT_SOURCE, theme, 0),
   ];
 }

@@ -49,6 +49,13 @@ L'écran se compose :
 - de quatre onglets : **Carte**, **Instruments**, **Météo**,
   **Paramètres**.
 
+L'onglet **Paramètres** est découpé en quatre sections, choisies dans la
+colonne de gauche (ou les onglets du haut sur un écran étroit, flèches du
+clavier possibles) : **Général** (unités, couleur de la route active,
+vitesse du simulateur), **Source** (données du bord), **Alarmes**
+(surveillance et historique) et **Cartes** (MBTiles, ENC, îles et
+amers). La dernière section ouverte est retrouvée au prochain passage.
+
 Les alertes de position, de liaison et d'alarme restent visibles dans
 tous les onglets et en plein écran.
 
@@ -124,6 +131,23 @@ double complet de la base dans un sous-dossier (par exemple
 `00300420/`) : il est ignoré et peut être supprimé par vous pour
 gagner de la place.
 
+**Îles et amers (OpenStreetMap).** **Paramètres → Cartes → Îles et
+amers** propose onze régions du Pacifique (Polynésie française,
+Nouvelle-Calédonie, Wallis-et-Futuna, Fidji, Samoa, Tonga, îles Cook,
+Vanuatu…). **Télécharger** récupère, par Internet et à la demande
+seulement (service Overpass, jusqu'à quelques minutes), les noms des
+archipels, îles et îlots, les passes, balises, bouées, feux, amers,
+mouillages et ports de la région ; ils sont ensuite enregistrés et
+affichés hors ligne. **Mettre à jour** remplace les données de la région
+(en cas d'échec, les précédentes sont gardées) ; **✕** les supprime après
+confirmation. Sur la carte, les noms apparaissent selon le zoom
+(archipels de loin, îlots de près), les passes en violet, les balises et
+bouées à la couleur de leur catégorie (bâbord rouge, tribord vert,
+cardinales jaunes…), les feux en jaune avec leurs caractéristiques. Le
+calque **Îles et amers (OSM)** du menu **Calques** les masque. Ce sont des
+données collaboratives non officielles (© contributeurs OpenStreetMap,
+licence ODbL) : elles complètent les cartes marines sans les remplacer.
+
 Sur la carte :
 
 - molette ou pincement : zoom ; clic droit glissé : rotation.
@@ -135,10 +159,27 @@ Sur la carte :
 - menu **Calques ▾** (icône des calques) : groupe **Cartes** (cartes
   MBTiles quand plusieurs sont chargées, la plus détaillée en tête, puis
   **Cartes ENC (S-57)** et, si une base est trouvée, **Cartes CM93**),
-  puis, après un séparateur, routes, traces et cibles AIS. Le menu se ferme par Échap ou un clic ailleurs. Une carte ou
+  puis, après un séparateur, routes, traces, cibles AIS et îles et
+  amers. Le menu se ferme par Échap ou un clic ailleurs. Une carte ou
   un calque masqués sont rappelés en haut à droite de la carte (« Masqué :
   … ») et par une pastille sur le bouton ; une carte seule est toujours
   affichée ;
+- bateau **Positionner le bateau ici** : avec la source **Simulateur**
+  seulement, le clic suivant sur la carte y place le bateau simulé (Échap
+  pour annuler) ; s'il suit une route, il repart vers le même waypoint.
+  Avec une source réelle ou un rejeu, l'outil est grisé et le moteur
+  refuse : une position réelle n'est jamais remplacée. Le déplacement
+  n'est pas mémorisé (au redémarrage, le bateau repart de son point par
+  défaut) ;
+- règle **Mesurer** : cliquez des points sur la carte ; un panneau en
+  haut à gauche donne la distance totale, le dernier segment, son
+  relèvement vrai et la durée à la vitesse prévue du plan de route
+  (valeurs calculées par le moteur). **Annuler le point**, **Effacer** ;
+  Échap, **✕** ou un nouveau clic sur la règle ferme la mesure. Indisponible
+  pendant le tracé d'une route ;
+- **clic droit** sur la carte (sans glisser ; le glisser droit tourne la
+  carte) : menu avec la position visée, **Bateau ici** et **Mesurer
+  depuis ici** ;
 - **Deux cartes côte à côte** : partage la carte en deux volets (l'un
   au-dessus de l'autre dans une fenêtre étroite). Le volet de droite a son
   propre choix de cartes, ENC et CM93 comprises (étiquette « Droite :
@@ -214,18 +255,45 @@ environnement lorsque ces données sont reçues. Une donnée obsolète est
 estompée et signalée ; une donnée absente reste vide.
 
 Les **Données historiques** (15 min, 1 h, 6 h) sont conservées en mémoire
-depuis le lancement. Les unités se règlent dans **Paramètres → Unités**.
+depuis le lancement. Les unités se règlent dans **Paramètres → Général → Unités**.
 
 ## 6. Routes, navigation et traces
 
-Les routes ont leur propre **panneau Route** (à droite de la carte, sous
-Mouillage et Navigation ; la colonne défile si la fenêtre est basse) :
-navigation active, liste des routes, tracé et import GPX. Les traces
-restent dans le panneau de gauche.
+Routes et traces partagent le panneau **Routes et traces** (à droite de
+la carte, sous Mouillage et Navigation ; la colonne défile si la fenêtre
+est basse), avec trois onglets **Routes**, **Traces** et **Marques** (le dernier
+onglet choisi est mémorisé).
 
-- **Nouvelle route** : cliquez les points de passage sur la carte, puis
-  **Enregistrer**.
-- **Naviguer** : active la route ; NautiK affiche la distance et le
+- **Nouvelle route** : cliquez les points de passage sur la carte. Le
+  premier point s'appelle « Départ » (vert), le dernier est marqué en
+  rouge ; les noms des points s'affichent sur la carte. Pendant
+  l'édition :
+  - **+ Départ** / **+ Arrivée** : le prochain clic ajoute un point en
+    tête ou en fin de route ; **↳** après un point insère le clic suivant
+    juste après lui ;
+  - un point se **déplace en le glissant** sur la carte ;
+  - chaque point se **nomme** dans la liste (vide : nom automatique
+    WP001…) et se supprime par **✕** ; au-dessus de chaque point, la
+    longueur et le relèvement du segment qui y arrive (« … » pendant le
+    recalcul) ;
+  - **Enregistrer** garde la route, **Annuler** abandonne les changements.
+- **Modifier** reprend une route enregistrée dans l'éditeur (impossible
+  pour la route en cours de navigation).
+- **Plan de route** : pour la route sélectionnée ou en édition, NautiK
+  calcule (moteur) la longueur, la durée à la vitesse prévue (réglable,
+  dans l'unité choisie) et, si une heure de départ UTC est donnée
+  (**Maintenant** ou saisie), l'heure d'arrivée à chaque point et en fin
+  de route. Tableau par branche : distance, relèvement, durée, cumul.
+  Ces estimations supposent une vitesse constante et ne tiennent compte
+  ni du vent ni du courant.
+- **Zoomer** : la carte se cadre sur l'emprise de la route (y compris de
+  part et d'autre de l'antiméridien). Sélectionner une route ou afficher
+  une trace cadre aussi la carte dessus.
+- **Naviguer** : active la route, dessinée sur la carte en jaune bordé
+  d'un liseré sombre (couleur réglable dans **Paramètres → Général →
+  Carte → Couleur de la route active**, bouton **Jaune (défaut)** pour revenir ;
+  les autres routes restent violettes ; décocher le calque **Routes**
+  masque les autres routes, jamais la route active) ; NautiK affiche la distance et le
   relèvement du prochain point, l'écart de route (XTE), la distance
   restante et l'heure d'arrivée estimée. Un point est considéré atteint à
   0,1 mille. **Arrêter la navigation** la désactive.
@@ -249,12 +317,73 @@ restent dans le panneau de gauche.
   autres panneaux, elle se déplace par sa poignée et se masque par **×**
   (icône **Barre de route** de la barre d'outils pour la réafficher).
 - Une route peut être inversée ou supprimée.
-- **Traces** : **Enregistrer** démarre l'enregistrement (un point toutes
-  les 5 s au plus, et seulement après 10 m parcourus). Une trace
-  interrompue par un arrêt brutal est clôturée au redémarrage, à l'heure
-  de son dernier point.
+- **Traces** (onglet **Traces**) : **Enregistrer** démarre
+  l'enregistrement (un point toutes les 5 s au plus, et seulement après
+  10 m parcourus). Une trace interrompue par un arrêt brutal est clôturée
+  au redémarrage, à l'heure de son dernier point. Pour une trace
+  affichée : longueur, durée (du premier au dernier point), **Zoomer** et
+  **Renommer**.
+- **Relire** (onglet **Traces**) : statistiques de la trace calculées par
+  NautiK (distance, durée totale et en route, vitesses moyenne et
+  maximale, profondeur minimale), trace colorée selon la vitesse (bleu à
+  l'arrêt → rouge au-delà de 9 nœuds ; gris si la vitesse est inconnue),
+  curseur et lecture accélérée (×10 à ×30 min/s) avec l'heure, la vitesse,
+  la distance parcourue et la profondeur enregistrées au point courant.
 - **GPX** : import et export des routes, points et traces. Un fichier
   dont une coordonnée est invalide est refusé en entier.
+
+### Marques
+
+L'onglet **Marques** du panneau Routes et traces regroupe vos points
+personnels (repère, mouillage, danger, plongée, pêche, carburant,
+information), avec une note libre :
+
+- **clic droit sur la carte → Marque ici**, ou **+ Au bateau** (position
+  récente requise) ; nom, type et note se règlent avant **Enregistrer** ;
+- cliquer le nom d'une marque cadre la carte dessus ; ✎ la modifie, ✕ la
+  supprime (avec confirmation) ;
+- **Importer KML** / **Exporter KML** : échange avec Google Earth,
+  OpenCPN, Navionics… Seuls les points sont importés ; les lignes et
+  surfaces sont écartées et signalées. Un fichier invalide est refusé en
+  entier ;
+- le calque **Marques** les affiche ou les masque.
+
+### Recherche d'un lieu
+
+La loupe de la barre d'outils cherche, sans Internet, dans vos marques,
+waypoints, points de routes et îles et amers téléchargés (sans tenir
+compte des majuscules ni des accents). Elle accepte aussi des
+coordonnées : `-17.5 -149.6`, `17°32,1'S 149°34,2'W`,
+`S 17 32.1 O 149 34.2`… Choisir un résultat cadre la carte dessus.
+
+### Aides à la navigation
+
+- **Vecteur et ligne de cap** (calque) : la route fond prévue à 6 min et
+  le cap du bateau, tracés à partir de données récentes seulement.
+- **VMG et laylines** : avec le vent réel, la carte Navigation affiche la
+  VMG face au vent et vers le waypoint, et la route sur l'autre amure ; le
+  calque **Laylines** trace les laylines du waypoint visé (45° au près,
+  150° au portant). Ce sont des repères géométriques : ils ne tiennent
+  compte ni des polaires ni du courant.
+- **VRM/EBL** (bouton de la barre d'outils) : cercle de distance et ligne
+  de relèvement autour du bateau. Un clic sur la carte les fait passer
+  par ce point ; rayon et relèvement se règlent aussi à la main. Sans
+  position récente, rien n'est tracé.
+
+### Journal de bord
+
+L'onglet **Journal** liste les entrées, de la plus récente à la plus
+ancienne :
+
+- **Ajouter** : entrée libre (ris pris, moteur, mouillage…), complétée
+  automatiquement par l'heure UTC, la position et les valeurs du bord ;
+- **Relevés automatiques** : toutes les 15 min, 30 min, 1 h (défaut) ou
+  4 h, à heure ronde, même sans interface (service `nautikd`) ;
+- seules des valeurs récentes sont reprises ; une position ancienne est
+  gardée mais marquée **obsolète**, une donnée absente s'affiche « — » et
+  les entrées prises en simulation sont marquées ;
+- **Exporter CSV** : fichier pour tableur (séparateur `;`, nœuds,
+  degrés, hPa).
 
 ## 7. AIS
 
@@ -269,7 +398,16 @@ NautiK suit jusqu'à 2 000 cibles. Le calcul du point de rapprochement
 
 ## 8. Alarmes
 
-Deux alarmes sont évaluées par le moteur, même sans interface :
+Trois alarmes sont évaluées par le moteur, même sans interface :
+
+- **Homme à la mer (MOB)** : bouton rouge **MOB** de la barre d'outils ou
+  **Ctrl+M**. Le point est posé à la dernière position reçue ; si elle
+  est ancienne, il est marqué **approximatif** ; sans aucune position, le
+  MOB est refusé (notez l'heure et le cap). Un panneau affiche en grand,
+  dans tous les onglets, le relèvement et la distance au MOB et le temps
+  écoulé ; la carte montre le marqueur et la ligne bateau → MOB. **Couper
+  l'alarme** arrête le son ; **Fin du MOB** (confirmée) termine l'alerte.
+  Le MOB survit à un redémarrage et ne peut pas être désactivé.
 
 - **Mouillage** : carte **Mouillage → Mouiller ici** (position récente
   requise), rayon de 10 à 2 000 m et temporisation. Le cercle d'évitage

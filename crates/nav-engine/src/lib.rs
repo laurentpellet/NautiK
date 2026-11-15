@@ -15,8 +15,12 @@
 
 pub mod alarms;
 pub mod engine;
+pub mod logbook;
+pub mod marks;
+pub mod own_ship;
 pub mod position;
 pub mod routing;
+pub mod search;
 pub mod secrets;
 pub mod service;
 pub mod simulator;

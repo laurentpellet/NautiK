@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { Route } from '../services/routing';
 import {
+  DRAFT_POINTS_LAYER,
   DRAFT_SOURCE,
+  OVERLAY_LABEL_LAYERS,
   ROUTES_SOURCE,
   TRACKS_SOURCE,
   draftData,
+  draftPointName,
+  DEFAULT_ACTIVE_ROUTE_COLOR,
+  activeRouteColorChanges,
   overlayLayers,
+  overlayThemeChanges,
   routesData,
   tracksData,
 } from './overlays';
@@ -18,6 +24,7 @@ const route = (id: string, active: boolean): Route => ({
   description: null,
   totalDistanceM: 1000,
   active,
+  bounds: null,
   waypoints: [
     { id: `${id}-1`, name: 'WP001', position: p(-14.968, -147.638), description: null },
     { id: `${id}-2`, name: 'WP002', position: p(-14.9, -147.6), description: null },
@@ -47,11 +54,33 @@ describe('surimpressions', () => {
   });
 
   it("n'ajoute la ligne du tracé qu'à partir de deux points", () => {
+    const d = (name: string, lat: number, lon: number) => ({ name, position: p(lat, lon) });
     expect(draftData([]).features).toHaveLength(0);
-    expect(draftData([p(0, 0)]).features).toHaveLength(1);
-    const two = draftData([p(0, 0), p(0, 1)]);
-    expect(two.features).toHaveLength(3);
-    expect(two.features[0]?.geometry.type).toBe('LineString');
+    expect(draftData([d('', 0, 0)]).features).toHaveLength(1);
+    const three = draftData([d('Départ', 0, 0), d('', 0, 1), d('Arrivée', 0, 2)]);
+    expect(three.features).toHaveLength(4);
+    expect(three.features[0]?.geometry.type).toBe('LineString');
+    expect(three.features.slice(1).map((f) => f.properties.role)).toEqual(['start', 'via', 'end']);
+    expect(three.features.slice(1).map((f) => f.properties.label)).toEqual([
+      'Départ',
+      'WP002',
+      'Arrivée',
+    ]);
+  });
+
+  it('nomme provisoirement les points sans nom', () => {
+    expect(draftPointName('  ', 0)).toBe('WP001');
+    expect(draftPointName(' Passe ', 4)).toBe('Passe');
+  });
+
+  it('étiquette les waypoints et masque la route en édition', () => {
+    const data = routesData([route('a', false), route('b', false)], null, 'a');
+    expect(data.features.map((f) => f.properties.routeId ?? f.properties.id)).toEqual([
+      'b',
+      'b',
+      'b',
+    ]);
+    expect(data.features[1]?.properties.label).toBe('WP001');
   });
 
   it('ignore les traces de moins de deux points', () => {
@@ -65,6 +94,42 @@ describe('surimpressions', () => {
   it('déclare des couches sur les seules sources de surimpression', () => {
     const sources = new Set(overlayLayers().map((l) => ('source' in l ? l.source : null)));
     expect(sources).toEqual(new Set([ROUTES_SOURCE, DRAFT_SOURCE, TRACKS_SOURCE]));
-    expect(overlayLayers().some((l) => l.type === 'symbol')).toBe(false);
+    const symbols = overlayLayers().filter((l) => l.type === 'symbol');
+    expect(symbols.map((l) => l.id)).toEqual([...OVERLAY_LABEL_LAYERS]);
+    expect(overlayLayers().some((l) => l.id === DRAFT_POINTS_LAYER)).toBe(true);
+  });
+
+  it('dessine la route active dans la couleur choisie, avec un liseré', () => {
+    const paint = (layers: ReturnType<typeof overlayLayers>, id: string) =>
+      JSON.stringify(layers.find((l) => l.id === id && 'paint' in l)?.paint);
+    const byDefault = overlayLayers();
+    expect(paint(byDefault, 'nautik-routes-line')).toContain(DEFAULT_ACTIVE_ROUTE_COLOR);
+    expect(paint(byDefault, 'nautik-routes-points')).toContain(DEFAULT_ACTIVE_ROUTE_COLOR);
+    const custom = overlayLayers('night', '#00e5ff');
+    expect(paint(custom, 'nautik-routes-line')).toContain('#00e5ff');
+    expect(paint(custom, 'nautik-routes-line')).not.toContain(DEFAULT_ACTIVE_ROUTE_COLOR);
+    // Le liseré est sous la ligne et ne concerne que la route active.
+    const ids = custom.map((l) => l.id);
+    expect(ids.indexOf('nautik-routes-casing')).toBe(ids.indexOf('nautik-routes-line') - 1);
+    const casing = custom.find((l) => l.id === 'nautik-routes-casing');
+    expect(JSON.stringify(casing && 'filter' in casing ? casing.filter : null)).toContain('active');
+
+    const changes = activeRouteColorChanges('#00e5ff');
+    expect(changes.map(([id, property]) => [id, property])).toEqual([
+      ['nautik-routes-line', 'line-color'],
+      ['nautik-routes-points', 'circle-stroke-color'],
+    ]);
+    for (const [id, property, value] of changes) {
+      const layer = custom.find((l) => l.id === id);
+      expect(
+        layer && 'paint' in layer ? (layer.paint as Record<string, unknown>)[property] : null,
+      ).toEqual(value);
+    }
+  });
+
+  it('change l’image des étiquettes avec le thème', () => {
+    const changes = overlayThemeChanges('night');
+    expect(changes.map(([id]) => id)).toEqual([...OVERLAY_LABEL_LAYERS]);
+    expect(JSON.stringify(changes[0]?.[1])).toContain('night:wp:');
   });
 });

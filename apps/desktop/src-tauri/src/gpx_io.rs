@@ -127,13 +127,41 @@ pub async fn import_gpx(
     import_file(&state, &file_path(path)?).await.map(Some)
 }
 
-async fn save_dialog(app: &AppHandle, title: &str, name: &str) -> CommandResult<Option<PathBuf>> {
+/// Fichier à lire choisi par l'utilisateur (`None` si annulé).
+pub(crate) async fn pick_file(
+    app: &AppHandle,
+    title: &str,
+    filter: &str,
+    extension: &str,
+) -> CommandResult<Option<PathBuf>> {
     let (tx, rx) = oneshot::channel();
     app.dialog()
         .file()
         .set_title(title)
-        .set_file_name(safe_file_name(name))
-        .add_filter("GPX", &["gpx"])
+        .add_filter(filter, &[extension])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    match rx.await.map_err(|_| "dialogue interrompu".to_owned())? {
+        Some(path) => file_path(path).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Fichier à écrire choisi par l'utilisateur (`None` si annulé).
+pub(crate) async fn save_file(
+    app: &AppHandle,
+    title: &str,
+    file_name: &str,
+    filter: &str,
+    extension: &str,
+) -> CommandResult<Option<PathBuf>> {
+    let (tx, rx) = oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title(title)
+        .set_file_name(file_name)
+        .add_filter(filter, &[extension])
         .save_file(move |path| {
             let _ = tx.send(path);
         });
@@ -163,7 +191,15 @@ pub async fn export_route_gpx(
         .await
         .map_err(|e| e.to_string())?
         .ok_or("route introuvable")?;
-    let Some(path) = save_dialog(&app, "Exporter la route", &route.name).await? else {
+    let Some(path) = save_file(
+        &app,
+        "Exporter la route",
+        &safe_file_name(&route.name),
+        "GPX",
+        "gpx",
+    )
+    .await?
+    else {
         return Ok(false);
     };
     write_gpx(&path, gpx::write(&[], std::slice::from_ref(&route), &[])).await?;
@@ -188,7 +224,15 @@ pub async fn export_track_gpx(
         .name
         .trim_start_matches(SIMULATED_TRACK_PREFIX)
         .to_owned();
-    let Some(path) = save_dialog(&app, "Exporter la trace", &name).await? else {
+    let Some(path) = save_file(
+        &app,
+        "Exporter la trace",
+        &safe_file_name(&name),
+        "GPX",
+        "gpx",
+    )
+    .await?
+    else {
         return Ok(false);
     };
     write_gpx(&path, gpx::write(&[], &[], std::slice::from_ref(&track))).await?;

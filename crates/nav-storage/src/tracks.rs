@@ -233,6 +233,22 @@ impl Db {
         }))
     }
 
+    /// Renomme une trace (nom déjà validé). Retourne `false` si elle
+    /// n'existait pas.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::Database`] en cas d'échec SQLite.
+    pub async fn rename_track(&self, id: Uuid, name: &str) -> Result<bool, StorageError> {
+        let updated = sqlx::query("UPDATE tracks SET name = ? WHERE id = ?")
+            .bind(name)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        Ok(updated > 0)
+    }
+
     /// Supprime une trace et ses points. Retourne `false` si elle
     /// n'existait pas.
     ///

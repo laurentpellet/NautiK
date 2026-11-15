@@ -596,6 +596,113 @@ Critères (TEST_PLAN.md §7) :
     téléphone).
   - Reste : durée écoulée du trajet (heure d'activation à fournir par le
     moteur).
+- [x] Onglet Routes et traces et édition de route sur la carte :
+  - panneau **Routes et traces** à onglets (onglet mémorisé, forcé sur
+    Routes pendant une édition) ;
+  - édition : ajout au clic, insertion en tête (+ Départ), en fin
+    (+ Arrivée) ou après un point, déplacement par glisser, nom de chaque
+    waypoint (étiquettes dessinées sur la carte, sans polices), longueur
+    et relèvement de chaque segment dans la liste des points, départ
+    vert / arrivée rouge ; modification d'une route enregistrée en
+    gardant les identifiants des points (`Route::from_edits`,
+    `apply_edit`, refus des identifiants inconnus ou en double ; refusée
+    pour la route active) ;
+  - route active en jaune par défaut, avec liseré sombre ; couleur
+    réglable dans Paramètres → Carte (préférence locale validée
+    `#rrggbb`, appliquée sans recharger la carte) ; la route active reste
+    affichée même si le calque Routes est masqué ;
+  - plan de route calculé par le moteur (`nav_routing::plan`) : longueur,
+    durée à vitesse prévue (0,1–30 m/s), ETA par point si départ UTC,
+    emprise compatible antiméridien ;
+  - zoom automatique sur l'emprise d'une route ou d'une trace ; traces :
+    longueur, durée, renommage (`rename_track`, `PATCH /tracks/{id}`,
+    `PUT /routes/{id}`) ;
+  - tests Rust (plan, édition, stockage, REST) et frontend (contrôleur,
+    étiquettes, couches, onglets) ; vérifié dans le navigateur.
+- [x] Îles et amers du Pacifique (OpenStreetMap) :
+  - crate `nav-poi` : 11 régions, requête Overpass, analyse validée
+    (références OSM, natures, catégories IALA, caractéristiques des feux),
+    réponse incomplète (`remark`) refusée, plafonds de taille et de
+    nombre ; téléchargement (feature `download`, reqwest + rustls) à la
+    demande uniquement ;
+  - migration `pois` / `poi_regions` ; remplacement par région en
+    transaction (échec : données précédentes gardées) ;
+  - commandes Tauri `list_poi_regions`, `download_pois`, `delete_pois`,
+    `get_pois` (un seul téléchargement à la fois) ;
+  - panneau Paramètres → Cartes → Îles et amers ; calque **Îles et amers
+    (OSM)** : noms selon le zoom, passes, balises et bouées colorées, feux,
+    mouillages, ports ; attribution ODbL affichée ;
+  - tests : analyse malformée, stockage, services, couches, panneau ;
+    téléchargement réel vérifié (test ignoré) sur Wallis-et-Futuna ;
+    Polynésie française ≈ 65 s, 270 Ko.
+- [x] Outils de la carte (barre d'outils et clic droit) :
+  - **bateau ici** : `Engine::place_simulated_boat` (erreur
+    `NotSimulator` hors simulateur, rejeu compris), relevé toujours marqué
+    simulé, route suivie reprise vers le même waypoint ; commande Tauri
+    `place_simulated_boat` (position validée WGS84) ; non persistant ;
+  - **mesure** : points cliqués, distance totale, dernier segment,
+    relèvement et durée calculés par le moteur (`plan_route`), 100 points
+    au plus ; couche dédiée au-dessus des surimpressions ;
+  - **menu contextuel** : clic droit sans glisser (le glisser droit garde
+    la rotation), position visée, Bateau ici, Mesurer depuis ici ; Échap
+    ou clic ailleurs le ferme ;
+  - tests : moteur (modes, rejeu), simulateur, contrôleur, couche, menu ;
+    vérifié dans le navigateur (mesure, clic droit, bateau ici).
+- [x] Onglet Paramètres réorganisé : sections Général (unités, couleur
+  de la route active, simulateur), Source, Alarmes, Cartes ; navigation
+  latérale (onglets horizontaux sur écran étroit, flèches du clavier),
+  section mémorisée ; alertes de sûreté toujours visibles au-dessus ;
+  tests du composant et de l'application adaptés.
+- [x] Homme à la mer (MOB) :
+  - bouton MOB rouge dans la barre d'outils, raccourci Ctrl/Cmd+M ; le
+    point est posé à la dernière position reçue, horodaté UTC ; position
+    obsolète : point marqué « approximatif » ; sans aucune position, refus
+    explicite (`EngineError::NoPosition`), jamais de position inventée ;
+    un second appui ne déplace pas le point ;
+  - alarme `manOverboard` levée par le moteur (`Machine::trigger`),
+    acquittement (son coupé) et fin explicite en deux temps, historisée
+    et persistée (re-sonne après redémarrage) ; impossible à désactiver ;
+  - marqueur MOB pulsant sur la carte, ligne bateau → MOB, panneau MOB
+    dans tous les onglets : relèvement et distance en grand (moteur),
+    temps écoulé, « — » et avertissement si la position est obsolète ;
+  - commandes Tauri `mark_mob` / `clear_mob`, REST `POST/DELETE
+    /alarms/mob` ; tests moteur, stockage, REST et interface.
+- [x] Vecteur de route, ligne de cap, VMG et laylines
+  (`nav_routing::sailing`, `nav_engine::own_ship`, événement `own-ship`) :
+  vecteur COG/SOG à 6 min, ligne de cap, VMG vent et VMG waypoint, route
+  sur l'autre amure, laylines vers le waypoint visé (45° au près, 150° au
+  portant) ; données fraîches uniquement ; calques **Vecteur et ligne de
+  cap** et **Laylines** ; tests.
+- [x] Outil VRM/EBL : cercle de distance et ligne de relèvement centrés
+  sur le bateau (position fraîche requise), réglés au clic (distance et
+  relèvement calculés par le moteur) ou à la main ; tests.
+- [x] Marques personnelles et KML :
+  - modèle `nav_routing::mark` (7 icônes, nom et note validés, 10 000
+    marques au plus), migration `marks`, repository, commandes
+    `list_marks`, `save_mark`, `delete_mark` ;
+  - import KML (`Placemark`/`Point`, entités, géométries non ponctuelles
+    écartées avec avertissement, une transaction, 16 Mo au plus) et
+    export KML 2.2 par boîte de dialogue native ;
+  - onglet **Marques** du panneau Routes et traces, « Marque ici » au
+    clic droit, marque au bateau, calque **Marques** ; tests (KML
+    malformé, stockage corrompu, interface).
+- [x] Journal de bord :
+  - entrées manuelles et relevés automatiques à heure ronde (15 min,
+    30 min, 1 h, 4 h ou désactivés ; réglage persistant), écrits par le
+    moteur même sans interface ; valeurs fraîches seulement, position
+    obsolète gardée mais marquée, simulation signalée ;
+  - migration `logbook_entries`, pagination par date, export CSV (`;`,
+    unités nautiques, BOM UTF-8, formules neutralisées) ;
+  - onglet **Journal** ; tests (stockage, échéances, CSV, interface).
+- [x] Relecture de trace : profil calculé par le moteur
+  (`nav_routing::track_profile` : distance, durées totale et en route,
+  vitesses moyenne et max, profondeur min ; vitesse de chaque point,
+  enregistrée ou déduite du segment, jamais inventée) ; trace colorée
+  selon la vitesse, curseur, lecture accélérée ; tests.
+- [x] Recherche de lieux (`nav_routing::search`, `search_places`) :
+  coordonnées saisies (décimales, degrés-minutes-secondes, hémisphères
+  N/S/E/W/O), marques, waypoints, points de routes, îles et amers ;
+  sans casse ni accents ; 50 résultats ; tests.
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).

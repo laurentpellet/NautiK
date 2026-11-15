@@ -134,6 +134,7 @@ where
     // Réglages enregistrés, source de données, puis boucle moteur.
     nav_engine::simulator::restore(&service).await;
     nav_engine::alarms::restore(&service).await;
+    nav_engine::logbook::restore(&service).await;
     nav_engine::sources::restore(&service).await;
     let engine = tokio::spawn(Arc::clone(&service).run());
 

@@ -14,7 +14,7 @@ use nav_engine::routing::{NavigationStateView, RouteView, TrackView};
 use nav_engine::simulator::SimulatorSettings;
 use nav_engine::sources::{SourcesRequest, SourcesView};
 use nav_engine::{alarms, routing, simulator, sources, EngineEvent};
-use nav_routing::Waypoint;
+use nav_routing::{Waypoint, WaypointEdit};
 use nav_storage::TrackSummary;
 use serde::Deserialize;
 
@@ -31,6 +31,7 @@ pub(crate) fn routes() -> Router<ApiState> {
         .route("/state", get(state))
         .route("/alarms", get(get_alarms))
         .route("/alarms/anchor", post(drop_anchor).delete(raise_anchor))
+        .route("/alarms/mob", post(mark_mob).delete(clear_mob))
         .route("/alarms/events", get(alarm_events))
         .route("/alarms/{kind}/acknowledge", post(acknowledge))
         .route("/alarms/{kind}/enabled", put(set_alarm_enabled))
@@ -39,12 +40,15 @@ pub(crate) fn routes() -> Router<ApiState> {
             get(navigation).put(activate).delete(deactivate),
         )
         .route("/routes", get(list_routes).post(create_route))
-        .route("/routes/{id}", delete(delete_route))
+        .route("/routes/{id}", delete(delete_route).put(update_route))
         .route("/routes/{id}/reverse", post(reverse_route))
         .route("/waypoints", get(list_waypoints))
         .route("/waypoints/{id}", delete(delete_waypoint))
         .route("/tracks", get(list_tracks))
-        .route("/tracks/{id}", get(get_track).delete(delete_track))
+        .route(
+            "/tracks/{id}",
+            get(get_track).delete(delete_track).patch(rename_track),
+        )
         .route("/recording", post(start_recording).delete(stop_recording))
         .route("/sources", get(get_sources).put(set_sources))
         .route("/serial-ports", get(serial_ports))
@@ -85,6 +89,14 @@ async fn drop_anchor(
 
 async fn raise_anchor(State(s): State<ApiState>) -> ApiResult<AlarmsSnapshot> {
     Ok(Json(alarms::raise_anchor(&s.service).await?))
+}
+
+async fn mark_mob(State(s): State<ApiState>) -> ApiResult<AlarmsSnapshot> {
+    Ok(Json(alarms::mark_mob(&s.service).await?))
+}
+
+async fn clear_mob(State(s): State<ApiState>) -> ApiResult<AlarmsSnapshot> {
+    Ok(Json(alarms::clear_mob(&s.service).await?))
 }
 
 async fn acknowledge(
@@ -220,6 +232,38 @@ async fn start_recording(State(s): State<ApiState>) -> ApiResult<TrackSummary> {
 
 async fn stop_recording(State(s): State<ApiState>) -> Result<Response, ApiError> {
     routing::stop_recording(&s.service).await?;
+    Ok(no_content())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RouteEditRequest {
+    name: String,
+    waypoints: Vec<WaypointEdit>,
+}
+
+async fn update_route(
+    State(s): State<ApiState>,
+    Path(id): Path<String>,
+    Json(r): Json<RouteEditRequest>,
+) -> ApiResult<RouteView> {
+    Ok(Json(
+        routing::save_route(&s.service, Some(&id), &r.name, &r.waypoints).await?,
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TrackRenameRequest {
+    name: String,
+}
+
+async fn rename_track(
+    State(s): State<ApiState>,
+    Path(id): Path<String>,
+    Json(r): Json<TrackRenameRequest>,
+) -> Result<Response, ApiError> {
+    routing::rename_track(&s.service, &id, &r.name).await?;
     Ok(no_content())
 }
 

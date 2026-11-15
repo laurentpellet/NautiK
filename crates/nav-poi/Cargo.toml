@@ -1,0 +1,32 @@
+[package]
+name = "nav-poi"
+description = "NautiK — îles et amers nautiques (passes, balises, feux) issus d'OpenStreetMap : régions, requête, validation et téléchargement optionnel."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Téléchargement depuis un service Overpass (https). Sans cette option, la
+# crate ne fait aucun accès réseau (modèle, régions, analyse des réponses).
+download = ["dep:reqwest", "dep:rustls", "dep:url"]
+
+[dependencies]
+nav-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# Téléchargement (option `download`), comme nav-weather : TLS `ring`.
+reqwest = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+# Encodage du corps de la requête Overpass (`application/x-www-form-urlencoded`).
+url = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

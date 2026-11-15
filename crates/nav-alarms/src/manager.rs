@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::machine::{AlarmState, Machine, Transition};
-use crate::rules::{AnchorConfig, PositionLostConfig, CLEAR_DELAY_S, DEFAULT_ANCHOR_RADIUS_M};
+use crate::rules::{
+    AnchorConfig, MobMark, PositionLostConfig, CLEAR_DELAY_S, DEFAULT_ANCHOR_RADIUS_M,
+};
 
 /// Alarme gérée.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -17,11 +19,13 @@ pub enum AlarmKind {
     Anchor,
     /// Position perdue ou obsolète (ALR-002).
     PositionLost,
+    /// Homme à la mer (déclenchement manuel, MOB).
+    ManOverboard,
 }
 
 impl AlarmKind {
     /// Toutes les alarmes, dans l'ordre d'affichage.
-    pub const ALL: [Self; 2] = [Self::Anchor, Self::PositionLost];
+    pub const ALL: [Self; 3] = [Self::Anchor, Self::PositionLost, Self::ManOverboard];
 
     /// Identifiant stable (table `alarms`).
     #[must_use]
@@ -29,6 +33,7 @@ impl AlarmKind {
         match self {
             Self::Anchor => Uuid::from_u128(0x6e61_7574_696b_4000_8000_0000_0000_0001),
             Self::PositionLost => Uuid::from_u128(0x6e61_7574_696b_4000_8000_0000_0000_0002),
+            Self::ManOverboard => Uuid::from_u128(0x6e61_7574_696b_4000_8000_0000_0000_0003),
         }
     }
 
@@ -38,6 +43,7 @@ impl AlarmKind {
         match self {
             Self::Anchor => "anchor",
             Self::PositionLost => "positionLost",
+            Self::ManOverboard => "manOverboard",
         }
     }
 
@@ -53,6 +59,7 @@ impl AlarmKind {
         match self {
             Self::Anchor => "Mouillage",
             Self::PositionLost => "Perte de position",
+            Self::ManOverboard => "Homme à la mer",
         }
     }
 }
@@ -160,6 +167,20 @@ pub struct AnchorView {
     pub bearing_rad: Option<f64>,
 }
 
+/// Homme à la mer en cours, pour l'affichage.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobView {
+    /// Point MOB.
+    #[serde(flatten)]
+    pub mark: MobMark,
+    /// Distance du bateau au MOB (m), si la position est fraîche.
+    pub distance_m: Option<f64>,
+    /// Relèvement du MOB depuis le bateau (rad, vrai), si la position est
+    /// fraîche.
+    pub bearing_rad: Option<f64>,
+}
+
 /// État de toutes les alarmes, diffusé périodiquement.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -170,6 +191,8 @@ pub struct AlarmsSnapshot {
     pub alarms: Vec<AlarmView>,
     /// Mouillage surveillé.
     pub anchor: Option<AnchorView>,
+    /// Homme à la mer en cours.
+    pub mob: Option<MobView>,
     /// Rayon proposé pour le prochain mouillage (dernier utilisé).
     pub anchor_radius_m: f64,
     /// Une alarme non acquittée doit être signalée par un son.
@@ -189,6 +212,8 @@ pub struct AlarmSettings {
     pub position_lost_enabled: bool,
     /// Configuration de la perte de position.
     pub position_lost: PositionLostConfig,
+    /// Homme à la mer en cours (`None` : aucun). Conservé au redémarrage.
+    pub mob: Option<MobMark>,
 }
 
 impl Default for AlarmSettings {
@@ -198,6 +223,7 @@ impl Default for AlarmSettings {
             anchor_radius_m: DEFAULT_ANCHOR_RADIUS_M,
             position_lost_enabled: true,
             position_lost: PositionLostConfig::default(),
+            mob: None,
         }
     }
 }
@@ -209,24 +235,35 @@ pub struct AlarmManager {
     settings: AlarmSettings,
     anchor: Machine,
     position_lost: Machine,
+    mob: Machine,
     /// Une position fraîche a été reçue depuis le choix de la source.
     armed: bool,
     distance_m: Option<f64>,
     bearing_rad: Option<f64>,
+    mob_distance_m: Option<f64>,
+    mob_bearing_rad: Option<f64>,
     simulated: bool,
 }
 
 impl AlarmManager {
-    /// Gestionnaire restauré depuis une configuration.
+    /// Gestionnaire restauré depuis une configuration. Un homme à la mer
+    /// en cours reste en alarme (sonore) après un redémarrage.
     #[must_use]
     pub fn new(settings: AlarmSettings) -> Self {
+        let mut mob = Machine::new(settings.mob.is_some());
+        if let Some(mark) = settings.mob {
+            mob.trigger(mark.marked_at);
+        }
         Self {
             anchor: Machine::new(settings.anchor.is_some()),
             position_lost: Machine::new(settings.position_lost_enabled),
+            mob,
             settings,
             armed: false,
             distance_m: None,
             bearing_rad: None,
+            mob_distance_m: None,
+            mob_bearing_rad: None,
             simulated: false,
         }
     }
@@ -263,6 +300,7 @@ impl AlarmManager {
                 distance_m: match alarm {
                     AlarmKind::Anchor => self.distance_m,
                     AlarmKind::PositionLost => None,
+                    AlarmKind::ManOverboard => self.mob_distance_m,
                 },
                 simulated: self.simulated,
             },
@@ -308,6 +346,48 @@ impl AlarmManager {
         Some(event)
     }
 
+    /// Homme à la mer : déclenche immédiatement l'alarme MOB au point
+    /// `mark`. `None` si un MOB est déjà en cours (le point n'est jamais
+    /// déplacé par un second appui).
+    pub fn mark_mob(&mut self, mark: MobMark, now: DateTime<Utc>) -> Option<AlarmEvent> {
+        if self.settings.mob.is_some() {
+            return None;
+        }
+        self.settings.mob = Some(mark);
+        self.mob = Machine::new(true);
+        self.mob.trigger(now);
+        self.mob_distance_m = None;
+        self.mob_bearing_rad = None;
+        let message = format!(
+            "HOMME À LA MER — point {}{}",
+            format_position(mark.position),
+            if mark.approximate {
+                " (position obsolète : point approximatif)"
+            } else {
+                ""
+            }
+        );
+        Some(self.event(AlarmKind::ManOverboard, EventKind::Activated, now, message))
+    }
+
+    /// Fin de l'alerte homme à la mer, décidée par l'utilisateur. `None`
+    /// si aucun MOB n'était en cours.
+    pub fn clear_mob(&mut self, now: DateTime<Utc>) -> Option<AlarmEvent> {
+        let mark = self.settings.mob?;
+        let minutes = (now - mark.marked_at).num_minutes().max(0);
+        let event = self.event(
+            AlarmKind::ManOverboard,
+            EventKind::Disabled,
+            now,
+            format!("Fin de l'alerte homme à la mer ({minutes} min après le déclenchement)"),
+        );
+        self.settings.mob = None;
+        self.mob.disable();
+        self.mob_distance_m = None;
+        self.mob_bearing_rad = None;
+        Some(event)
+    }
+
     /// Active ou désactive l'alarme de perte de position. `None` si rien
     /// ne change.
     pub fn set_position_lost_enabled(
@@ -344,6 +424,7 @@ impl AlarmManager {
         let acknowledged = match alarm {
             AlarmKind::Anchor => self.anchor.acknowledge(),
             AlarmKind::PositionLost => self.position_lost.acknowledge(),
+            AlarmKind::ManOverboard => self.mob.acknowledge(),
         };
         acknowledged.then(|| {
             self.event(
@@ -368,6 +449,11 @@ impl AlarmManager {
             self.armed = true;
         }
         let clear_delay = Duration::seconds(CLEAR_DELAY_S);
+
+        // Homme à la mer : l'alarme ne se résout jamais seule.
+        let offset = self.settings.mob.and_then(|m| m.from_boat(position));
+        self.mob_distance_m = offset.map(|(d, _)| d);
+        self.mob_bearing_rad = offset.and_then(|(_, b)| b);
 
         // Perte de position.
         let condition =
@@ -460,6 +546,23 @@ impl AlarmManager {
         }
     }
 
+    fn mob_message(&self) -> String {
+        let Some(mark) = self.settings.mob else {
+            return "Aucun homme à la mer".to_owned();
+        };
+        let approx = if mark.approximate {
+            " — point approximatif"
+        } else {
+            ""
+        };
+        match self.mob_distance_m {
+            Some(d) => format!("HOMME À LA MER — {d:.0} m{approx}"),
+            None => {
+                format!("HOMME À LA MER — distance inconnue (position absente ou obsolète){approx}")
+            }
+        }
+    }
+
     /// État des alarmes.
     #[must_use]
     pub fn snapshot(&self, now: DateTime<Utc>) -> AlarmsSnapshot {
@@ -478,6 +581,13 @@ impl AlarmManager {
                 since: self.position_lost.active_since(),
                 message: self.position_message(),
             },
+            AlarmView {
+                kind: AlarmKind::ManOverboard,
+                label: AlarmKind::ManOverboard.label(),
+                state: self.mob.state(),
+                since: self.mob.active_since(),
+                message: self.mob_message(),
+            },
         ];
         AlarmsSnapshot {
             computed_at: now,
@@ -488,16 +598,123 @@ impl AlarmManager {
                 distance_m: self.distance_m,
                 bearing_rad: self.bearing_rad,
             }),
+            mob: self.settings.mob.map(|mark| MobView {
+                mark,
+                distance_m: self.mob_distance_m,
+                bearing_rad: self.mob_bearing_rad,
+            }),
             anchor_radius_m: self.settings.anchor_radius_m,
             simulated: self.simulated,
         }
     }
 }
 
+/// Position en degrés et minutes décimales (« 17°32,100'S 149°34,200'W »).
+fn format_position(p: nav_core::GeoPosition) -> String {
+    fn dm(value: f64, pos: char, neg: char) -> String {
+        let hemi = if value < 0.0 { neg } else { pos };
+        let abs = value.abs();
+        let mut deg = abs.trunc();
+        let mut min = ((abs - deg) * 60.0 * 1000.0).round() / 1000.0;
+        if min >= 60.0 {
+            deg += 1.0;
+            min -= 60.0;
+        }
+        format!("{deg:.0}°{:06.3}'{hemi}", min).replace('.', ",")
+    }
+    format!(
+        "{} {}",
+        dm(p.latitude_deg(), 'N', 'S'),
+        dm(p.longitude_deg(), 'E', 'W')
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use nav_core::{GeoPosition, PositionFix, PositionStatus, SourceKind};
+
+    fn mob_mark(s: i64, approximate: bool) -> MobMark {
+        MobMark {
+            position: p(0.0, 0.0),
+            marked_at: t(s),
+            approximate,
+        }
+    }
+
+    #[test]
+    fn mob_triggers_at_once_and_ends_only_explicitly() {
+        let mut m = AlarmManager::new(AlarmSettings::default());
+        assert_eq!(state(&m, AlarmKind::ManOverboard), AlarmState::Off);
+        let e = m.mark_mob(mob_mark(0, false), t(0)).expect("MOB");
+        assert_eq!(
+            (e.alarm, e.kind),
+            (AlarmKind::ManOverboard, EventKind::Activated)
+        );
+        assert!(e.details.message.contains("0°00,000'N 0°00,000'E"));
+        assert!(
+            m.mark_mob(mob_mark(5, false), t(5)).is_none(),
+            "point conservé"
+        );
+        assert_eq!(m.settings().mob.map(|k| k.marked_at), Some(t(0)));
+
+        // Le bateau s'éloigne vers le nord : distance et relèvement (sud).
+        m.evaluate(&snapshot(10, Some(110.574), false), t(10));
+        let snap = m.snapshot(t(10));
+        assert!(snap.sounding);
+        let mob = snap.mob.expect("vue MOB");
+        assert!((mob.distance_m.expect("d") - 110.574).abs() < 1.0);
+        let b = mob.bearing_rad.expect("relèvement");
+        assert!((b - std::f64::consts::PI).abs() < 1e-3, "{b}");
+        assert!(snap.alarms[2].message.contains("111 m"));
+
+        // Position obsolète : distance inconnue, alarme maintenue.
+        for s in 11..40 {
+            assert!(m
+                .evaluate(&snapshot(s, Some(10.0), true), t(s))
+                .iter()
+                .all(|e| e.alarm != AlarmKind::ManOverboard));
+        }
+        let snap = m.snapshot(t(40));
+        assert_eq!(snap.mob.and_then(|v| v.distance_m), None);
+        assert!(snap.alarms[2].message.contains("distance inconnue"));
+        assert_eq!(state(&m, AlarmKind::ManOverboard), AlarmState::Active);
+
+        let ack = m
+            .acknowledge(AlarmKind::ManOverboard, t(41))
+            .expect("acquit");
+        assert_eq!(ack.kind, EventKind::Acknowledged);
+        assert_eq!(state(&m, AlarmKind::ManOverboard), AlarmState::Acknowledged);
+
+        let end = m.clear_mob(t(120)).expect("fin");
+        assert_eq!(end.kind, EventKind::Disabled);
+        assert!(end.details.message.contains("2 min"));
+        assert!(m.clear_mob(t(121)).is_none());
+        assert!(m.snapshot(t(121)).mob.is_none());
+        assert_eq!(state(&m, AlarmKind::ManOverboard), AlarmState::Off);
+    }
+
+    #[test]
+    fn approximate_mob_is_flagged_and_restart_keeps_it_sounding() {
+        let mut m = AlarmManager::new(AlarmSettings::default());
+        let e = m.mark_mob(mob_mark(0, true), t(0)).expect("MOB");
+        assert!(e.details.message.contains("approximatif"));
+        m.acknowledge(AlarmKind::ManOverboard, t(1));
+        let restarted = AlarmManager::new(m.settings());
+        let snap = restarted.snapshot(t(2));
+        assert!(snap.sounding, "un MOB en cours ressonne au redémarrage");
+        assert_eq!(snap.alarms[2].since, Some(t(0)));
+        assert!(snap.alarms[2].message.contains("approximatif"));
+    }
+
+    #[test]
+    fn positions_are_formatted_in_degrees_and_minutes() {
+        assert_eq!(
+            format_position(p(-17.535, -149.57)),
+            "17°32,100'S 149°34,200'W"
+        );
+        assert_eq!(format_position(p(0.9999999, 0.0)), "1°00,000'N 0°00,000'E");
+    }
 
     fn t(s: i64) -> DateTime<Utc> {
         DateTime::<Utc>::from_timestamp(1_800_000_000 + s, 0).expect("t")

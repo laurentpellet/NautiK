@@ -18,7 +18,7 @@ type Properties = { role: 'circle' | 'limit' | 'anchor'; alerting: boolean };
 type Collection = FeatureCollection<Polygon | Point, Properties>;
 
 /** Point à `distance` m dans la direction `bearing` (rad), sphère. */
-function destination(lat: number, lon: number, bearing: number, distance: number): Position {
+export function destination(lat: number, lon: number, bearing: number, distance: number): Position {
   const lat1 = (lat * Math.PI) / 180;
   const lon1 = (lon * Math.PI) / 180;
   const angle = distance / EARTH_RADIUS_M;

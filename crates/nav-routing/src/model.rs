@@ -28,6 +28,12 @@ pub enum ValidationError {
     /// Index hors limites.
     #[error("index de waypoint hors limites : {0}")]
     IndexOutOfRange(usize),
+    /// Waypoint qui n'appartient pas à la route modifiée.
+    #[error("waypoint inconnu dans cette route : {0}")]
+    UnknownWaypoint(Uuid),
+    /// Waypoint présent deux fois dans la route modifiée.
+    #[error("waypoint en double dans la route : {0}")]
+    DuplicateWaypoint(Uuid),
 }
 
 /// Valide et normalise un nom (espaces de bord supprimés).

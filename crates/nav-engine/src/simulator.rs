@@ -1,5 +1,6 @@
 //! Réglages du bateau simulé (vitesse), enregistrés en base.
 
+use nav_core::GeoPosition;
 use serde::{Deserialize, Serialize};
 
 use crate::position::SIMULATED_SPEED_MPS;
@@ -94,10 +95,43 @@ pub async fn set(service: &Service, speed_mps: f64) -> CommandResult<SimulatorSe
     Ok(settings)
 }
 
+/// Place le bateau simulé à `position` (outil « bateau ici » de la
+/// carte). Non enregistré : au redémarrage, le bateau repart du point de
+/// départ par défaut.
+///
+/// # Errors
+///
+/// Message lisible hors du mode simulateur (une position réelle n'est
+/// jamais remplacée).
+pub fn place_boat(service: &Service, position: GeoPosition) -> CommandResult<()> {
+    service
+        .engine()
+        .place_simulated_boat(position)
+        .map_err(|e| e.to_string())?;
+    tracing::info!(
+        latitude = position.latitude_deg(),
+        longitude = position.longitude_deg(),
+        "bateau simulé déplacé"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::service::test_service as state;
+
+    #[tokio::test]
+    async fn boat_is_placed_only_in_simulator_mode() {
+        let state = state().await;
+        let here = GeoPosition::new(-17.5, -149.6).expect("pos");
+        place_boat(&state, here).expect("simulateur");
+        state
+            .engine()
+            .set_mode(crate::engine::SourceMode::SignalK, false);
+        let error = place_boat(&state, here).expect_err("source réelle");
+        assert!(error.contains("simulateur"), "{error}");
+    }
 
     #[test]
     fn speed_is_bounded() {

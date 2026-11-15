@@ -23,6 +23,8 @@ nav-alarms.workspace = true
 nav-charts.workspace = true
 nav-core.workspace = true
 nav-engine.workspace = true
+# Îles et amers OpenStreetMap, téléchargés à la demande.
+nav-poi = { workspace = true, features = ["download"] }
 nav-routing.workspace = true
 nav-storage.workspace = true
 nav-weather.workspace = true

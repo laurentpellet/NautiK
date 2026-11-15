@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  visibleRoutes,
   DEFAULT_LAYERS,
   MAX_HIDDEN_CHARTS,
   hiddenChartNames,
@@ -36,17 +37,39 @@ describe('calques', () => {
       ais: false,
       enc: true,
       cm93: true,
+      poi: true,
+      marks: true,
+      vectors: true,
+      laylines: true,
     });
     expect(loadLayers(store('{"enc":false}')).enc).toBe(false);
+    expect(loadLayers(store('{"poi":false}')).poi).toBe(false);
     expect(loadLayers(store('{"cm93":false}')).cm93).toBe(false);
+    expect(loadLayers(store('{"laylines":false}')).laylines).toBe(false);
   });
 
   it('mémorise et liste les calques masqués', () => {
     let saved = '';
-    const layers = { routes: true, tracks: false, ais: false, enc: false, cm93: false };
+    const layers = {
+      routes: true,
+      tracks: false,
+      ais: false,
+      enc: false,
+      cm93: false,
+      poi: false,
+      marks: true,
+      vectors: false,
+      laylines: true,
+    };
     saveLayers(layers, { setItem: (_k, v) => (saved = v) });
     expect(JSON.parse(saved)).toEqual(layers);
-    expect(hiddenLayers(layers)).toEqual(['Traces', 'Cibles AIS', 'Cartes ENC (S-57)']);
+    expect(hiddenLayers(layers)).toEqual([
+      'Traces',
+      'Cibles AIS',
+      'Cartes ENC (S-57)',
+      'Îles et amers (OSM)',
+      'Vecteur et ligne de cap',
+    ]);
     // CM93 rappelée seulement si une base est trouvée.
     expect(hiddenLayers(layers, true)).toContain('Cartes CM93');
   });
@@ -58,6 +81,24 @@ describe('calques', () => {
     expect(vectorLabel({ enc: true, cm93: true }, false)).toEqual(['ENC']);
     expect(vectorLabel({ enc: false, cm93: true }, true)).toEqual(['CM93']);
     expect(vectorLabel({ enc: false, cm93: false }, true)).toEqual([]);
+  });
+});
+
+describe('routes affichées', () => {
+  const routes = [
+    { id: 'a', active: false },
+    { id: 'b', active: true },
+    { id: 'c', active: false },
+  ];
+
+  it('affiche toutes les routes quand le calque est visible', () => {
+    expect(visibleRoutes(routes, { routes: true })).toEqual(routes);
+  });
+
+  it('garde la route active quand le calque est masqué', () => {
+    expect(visibleRoutes(routes, { routes: false }).map((r) => r.id)).toEqual(['b']);
+    expect(visibleRoutes([{ id: 'a', active: false }], { routes: false })).toEqual([]);
+    expect(visibleRoutes([], { routes: false })).toEqual([]);
   });
 });
 

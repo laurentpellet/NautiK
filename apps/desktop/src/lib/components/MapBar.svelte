@@ -8,6 +8,7 @@
   import { instrumentTiles, positionTile, type Tile } from '../instrumentTiles';
   import { PANEL_LABELS, type PanelId, type PanelLayout } from '../panels';
   import type { InstrumentsSnapshot } from '../services/instruments';
+  import type { MapTool } from '../mapTools.svelte';
 
   interface Props {
     snapshot: InstrumentsSnapshot | null;
@@ -25,6 +26,18 @@
     locked: boolean;
     onsplit: () => void;
     onlock: () => void;
+    /** Outil de la carte actif (un clic lui est destiné). */
+    tool: MapTool;
+    /** Le bateau peut être placé (mode simulateur). */
+    canPlaceBoat: boolean;
+    onplaceboat: () => void;
+    onmeasure: () => void;
+    onrangebearing: () => void;
+    /** Homme à la mer en cours. */
+    mobActive: boolean;
+    onmob: () => void;
+    /** Contenu du menu Recherche. */
+    searchMenu?: Snippet;
     onnorthup: () => void;
     oncenter: () => void;
     ontoggle: (id: PanelId) => void;
@@ -43,6 +56,14 @@
     locked,
     onsplit,
     onlock,
+    tool,
+    canPlaceBoat,
+    onplaceboat,
+    onmeasure,
+    onrangebearing,
+    mobActive,
+    onmob,
+    searchMenu,
     onnorthup,
     oncenter,
     ontoggle,
@@ -66,6 +87,16 @@
 </script>
 
 <div class="bar" data-testid="map-bar">
+  <button
+    type="button"
+    class="mob"
+    class:on={mobActive}
+    aria-label="Homme à la mer"
+    title={mobActive
+      ? 'Homme à la mer en cours (le point n’est pas déplacé)'
+      : 'Homme à la mer : marque le point MOB à la position du bateau (Ctrl+M)'}
+    onclick={onmob}>MOB</button
+  >
   <div class="group" role="toolbar" aria-label="Carte">
     <button
       type="button"
@@ -119,6 +150,53 @@
       >
         <Icon name={locked ? 'lock' : 'unlock'} />
       </button>
+    {/if}
+    <button
+      type="button"
+      class="toggle"
+      aria-label="Positionner le bateau ici"
+      aria-pressed={tool === 'placeBoat'}
+      disabled={!canPlaceBoat && tool !== 'placeBoat'}
+      title={canPlaceBoat
+        ? 'Positionner le bateau simulé : cliquer ensuite sur la carte (clic droit : menu)'
+        : 'Positionner le bateau : seulement avec la source Simulateur'}
+      onclick={onplaceboat}
+    >
+      <Icon name="boat" />
+    </button>
+    <button
+      type="button"
+      class="toggle"
+      aria-label="Mesurer"
+      aria-pressed={tool === 'measure'}
+      title={tool === 'measure'
+        ? 'Terminer la mesure'
+        : 'Mesurer distances et relèvements : cliquer les points sur la carte'}
+      onclick={onmeasure}
+    >
+      <Icon name="ruler" />
+    </button>
+    <button
+      type="button"
+      class="toggle"
+      aria-label="Distance et relèvement (VRM/EBL)"
+      aria-pressed={tool === 'rangeBearing'}
+      title={tool === 'rangeBearing'
+        ? 'Fermer VRM/EBL'
+        : 'Cercle de distance et ligne de relèvement autour du bateau (VRM/EBL)'}
+      onclick={onrangebearing}
+    >
+      <Icon name="vrm" />
+    </button>
+    {#if searchMenu}
+      <Dropdown
+        label="Rechercher"
+        title="Rechercher une île, un amer, un waypoint, une position"
+        testid="search-menu"
+      >
+        {#snippet button()}<Icon name="search" />{/snippet}
+        {@render searchMenu()}
+      </Dropdown>
     {/if}
   </div>
 
@@ -189,6 +267,28 @@
     gap: 0.5rem;
     padding: 0.25rem 0.35rem;
     flex-wrap: wrap;
+  }
+
+  .mob {
+    padding: 0.2rem 0.55rem;
+    border: 2px solid #e53935;
+    border-radius: 0.35rem;
+    background: #e53935;
+    color: #fff;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+  }
+
+  .mob.on {
+    animation: mob-blink 1s steps(2, start) infinite;
+  }
+
+  @keyframes mob-blink {
+    to {
+      background: transparent;
+      color: #e53935;
+    }
   }
 
   .group {

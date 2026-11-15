@@ -64,6 +64,36 @@ describe('parseAlarmsSnapshot', () => {
     expect(s.anchor?.distanceM).toBeNull();
   });
 
+  it('lit un homme à la mer en cours', () => {
+    const s = parseAlarmsSnapshot({
+      ...snapshot,
+      mob: {
+        position: { latitudeDeg: -17.5, longitudeDeg: -149.6 },
+        markedAt: '2026-11-12T09:59:00Z',
+        approximate: true,
+        distanceM: 120,
+        bearingRad: 3.1,
+      },
+    });
+    expect(s.mob?.approximate).toBe(true);
+    expect(s.mob?.markedAt).toBe(Date.parse('2026-11-12T09:59:00Z'));
+    expect(s.mob?.distanceM).toBe(120);
+    expect(parseAlarmsSnapshot(snapshot).mob).toBeNull();
+    expect(() => parseAlarmsSnapshot({ ...snapshot, mob: { ...s.mob, markedAt: 'x' } })).toThrow();
+    expect(() =>
+      parseAlarmsSnapshot({
+        ...snapshot,
+        mob: {
+          position: { latitudeDeg: 0, longitudeDeg: 0 },
+          markedAt: '2026-11-12T09:59:00Z',
+          approximate: false,
+          distanceM: -3,
+          bearingRad: null,
+        },
+      }),
+    ).toThrow();
+  });
+
   it('rejette les réponses malformées', () => {
     expect(() => parseAlarmsSnapshot({ ...snapshot, sounding: 'oui' })).toThrow();
     expect(() =>
@@ -120,6 +150,8 @@ describe('AlarmsApi', () => {
     await api.get();
     await api.dropAnchor(60, 10);
     await api.raiseAnchor();
+    await api.markMob();
+    await api.clearMob();
     await api.acknowledge('anchor');
     await api.setEnabled('positionLost', false);
     expect(await api.events(50)).toHaveLength(1);
@@ -127,6 +159,8 @@ describe('AlarmsApi', () => {
       ['get_alarms', undefined],
       ['drop_anchor', { radiusM: 60, delayS: 10 }],
       ['raise_anchor', undefined],
+      ['mark_mob', undefined],
+      ['clear_mob', undefined],
       ['acknowledge_alarm', { kind: 'anchor' }],
       ['set_alarm_enabled', { kind: 'positionLost', enabled: false }],
       ['list_alarm_events', { limit: 50 }],
