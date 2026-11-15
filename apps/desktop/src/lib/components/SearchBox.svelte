@@ -9,9 +9,21 @@
     onselect: (place: Place) => void;
     /** Commande du moteur (remplaçable dans les tests). */
     call?: InvokeFn;
+    /** Nom accessible du champ. */
+    label?: string;
+    /** Focus sur le champ à l'ouverture. */
+    autofocus?: boolean;
+    /** Efface la recherche après un choix. */
+    clearOnSelect?: boolean;
   }
 
-  let { onselect, call }: Props = $props();
+  let {
+    onselect,
+    call,
+    label = 'Rechercher un lieu',
+    autofocus = true,
+    clearOnSelect = false,
+  }: Props = $props();
 
   let query = $state('');
   let results = $state.raw<Place[]>([]);
@@ -21,8 +33,18 @@
   let input: HTMLInputElement;
 
   $effect(() => {
-    input.focus();
+    if (autofocus) input.focus();
   });
+
+  function choose(place: Place) {
+    onselect(place);
+    if (clearOnSelect) {
+      seq += 1;
+      query = '';
+      results = [];
+      searched = false;
+    }
+  }
 
   async function search(event: SubmitEvent) {
     event.preventDefault();
@@ -46,7 +68,7 @@
       type="search"
       maxlength={MAX_QUERY_CHARS}
       placeholder="Nom, ou 17°32,1'S 149°34,2'W"
-      aria-label="Rechercher un lieu"
+      aria-label={label}
       bind:value={query}
     />
     <button type="submit">Chercher</button>
@@ -60,7 +82,7 @@
     <ul role="listbox" aria-label="Résultats">
       {#each results as place, i (i)}
         <li>
-          <button type="button" role="option" aria-selected="false" onclick={() => onselect(place)}>
+          <button type="button" role="option" aria-selected="false" onclick={() => choose(place)}>
             <span class="name">{place.name}</span>
             <span class="meta">
               {PLACE_KIND_LABELS[place.kind]}{place.detail ? ` — ${place.detail}` : ''}
@@ -81,7 +103,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
-    width: min(22rem, 80vw);
+    width: var(--search-width, min(22rem, 80vw));
     font-size: 0.85rem;
   }
 

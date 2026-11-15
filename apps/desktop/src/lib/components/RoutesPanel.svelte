@@ -9,11 +9,22 @@
   import { SPEED_UNITS, speedIn, speedToMps, units } from '../units.svelte';
   import type { PlannedLeg } from '../services/routing';
 
+  import SearchBox from './SearchBox.svelte';
+  import type { Place } from '../services/search';
+  import type { InvokeFn } from '../services/engine';
+
   interface Props {
     nav: NavigationController;
+    /** Commande du moteur pour la recherche (remplaçable dans les tests). */
+    call?: InvokeFn;
   }
 
-  let { nav }: Props = $props();
+  let { nav, call }: Props = $props();
+
+  /** Lieu trouvé placé en départ ou en arrivée de la route éditée. */
+  function choose(role: 'start' | 'arrival', place: Place) {
+    nav.setEndpoint(role, place.name, place.position);
+  }
 
   const editor = $derived(nav.editor);
   const plan = $derived(nav.plan);
@@ -184,6 +195,30 @@
         <button type="button" onclick={() => nav.cancelDrawing()}>Abandonner</button>
       </div>
     </form>
+
+    <!-- Hors du formulaire d'édition : la recherche a son propre formulaire. -->
+    <div class="endpoints" role="group" aria-label="Rechercher le départ ou l'arrivée">
+      <div>
+        <span class="role start">D</span>
+        <SearchBox
+          label="Rechercher le départ"
+          autofocus={false}
+          clearOnSelect
+          {call}
+          onselect={(place) => choose('start', place)}
+        />
+      </div>
+      <div>
+        <span class="role end">A</span>
+        <SearchBox
+          label="Rechercher l'arrivée"
+          autofocus={false}
+          clearOnSelect
+          {call}
+          onselect={(place) => choose('arrival', place)}
+        />
+      </div>
+    </div>
   {:else}
     <div class="actions">
       <button type="button" onclick={() => nav.startDrawing()}>Nouvelle route</button>
@@ -432,6 +467,21 @@
   .role.end {
     background: #c62828;
     color: #fff;
+  }
+
+  .endpoints {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    --search-width: 100%;
+  }
+
+  .endpoints > div {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    min-width: 0;
   }
 
   .hint {

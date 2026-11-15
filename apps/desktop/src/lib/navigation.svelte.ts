@@ -17,6 +17,7 @@ import type {
   TrackSummary,
   WaypointEdit,
 } from './services/routing';
+import { formatUtcClock } from './format';
 
 /** Trace affichée sur la carte. */
 export interface DisplayedTrack {
@@ -115,8 +116,12 @@ export class NavigationController {
   error = $state<string | null>(null);
   notice = $state<string | null>(null);
   busy = $state(false);
+  /** Longueurs (m, moteur) des segments de la route active ; `null` : inconnues. */
+  activeLegs = $state.raw<number[] | null>(null);
 
   private planSeq = 0;
+  private legsSeq = 0;
+  private activeLegsKey = '';
   private focusSeq = 0;
 
   readonly displayedTracks: DisplayedTrack[] = $derived(
@@ -179,8 +184,35 @@ export class NavigationController {
       if (state.recordingTrackId !== null && !(state.recordingTrackId in this.shownTracks)) {
         this.shownTracks = { ...this.shownTracks, [state.recordingTrackId]: [] };
       }
+      await this.refreshActiveLegs();
     } catch (e) {
       this.error = message(e);
+    }
+  }
+
+  /**
+   * Longueurs des segments de la route active (moteur), recalculées
+   * seulement quand la route active ou ses waypoints changent. En cas
+   * d'échec, rien n'est affiché (pas de longueur inventée).
+   */
+  private async refreshActiveLegs(): Promise<void> {
+    const route = this.routes.find((r) => r.id === this.activeRouteId) ?? null;
+    const positions = route ? $state.snapshot(route.waypoints.map((w) => w.position)) : [];
+    const key = route ? JSON.stringify([route.id, positions]) : '';
+    if (key === this.activeLegsKey) return;
+    this.activeLegsKey = key;
+    const seq = ++this.legsSeq;
+    if (positions.length < 2) {
+      this.activeLegs = null;
+      return;
+    }
+    try {
+      const plan = await this.api.planRoute(positions, this.speedMps, null);
+      if (seq === this.legsSeq) this.activeLegs = plan.legs.map((l) => l.distanceM);
+    } catch {
+      if (seq !== this.legsSeq) return;
+      this.activeLegs = null;
+      this.activeLegsKey = '';
     }
   }
 
@@ -252,6 +284,32 @@ export class NavigationController {
       editor.insert = 'end';
     }
     editor.points = points;
+  }
+
+  /**
+   * Départ ou arrivée choisi par la recherche : remplace le départ ou
+   * l'arrivée existant d'une route d'au moins deux points, sinon l'ajoute
+   * (avant ou après le point unique). Le nom est celui du lieu, borné.
+   */
+  setEndpoint(role: 'start' | 'arrival', name: string, position: LatLon): void {
+    const editor = this.editor;
+    if (!editor) return;
+    const point: WaypointEdit = {
+      id: null,
+      name: [...name.trim()].slice(0, 50).join(''),
+      position,
+    };
+    const points = [...editor.points];
+    if (role === 'start') {
+      if (points.length >= 2) points[0] = point;
+      else points.unshift(point);
+    } else if (points.length >= 2) {
+      points[points.length - 1] = point;
+    } else {
+      points.push(point);
+    }
+    editor.points = points;
+    editor.insert = 'end';
   }
 
   movePoint(index: number, position: LatLon): void {
@@ -342,6 +400,42 @@ export class NavigationController {
   async activate(id: string): Promise<void> {
     await this.run(() => this.api.activateRoute(id));
     await this.refresh();
+  }
+
+  /**
+   * « Naviguer jusqu'ici » : crée une route directe du bateau à `target`
+   * et l'active. Refusé sans position fraîche du bateau (aucune position
+   * n'est inventée) ou pendant l'édition d'une route.
+   */
+  async goTo(boat: LatLon | null, target: LatLon, now: number = Date.now()): Promise<boolean> {
+    if (this.editor) {
+      this.error = 'Terminez d’abord la route en cours d’édition.';
+      return false;
+    }
+    if (!boat) {
+      this.error = 'Position du bateau inconnue ou obsolète : navigation directe impossible.';
+      return false;
+    }
+    const name = `Direct ${formatUtcClock(now)} UTC`;
+    const route = await this.run(() =>
+      this.api.saveRoute(null, name, [
+        { id: null, name: 'Départ', position: boat },
+        { id: null, name: 'Destination', position: target },
+      ]),
+    );
+    if (!route) {
+      await this.refresh();
+      return false;
+    }
+    const activated = await this.run(async () => {
+      await this.api.activateRoute(route.id);
+      return true;
+    });
+    this.selectedRouteId = route.id;
+    await this.refresh();
+    if (!activated) return false;
+    this.notice = `Route « ${route.name} » active`;
+    return true;
   }
 
   async deactivate(): Promise<void> {

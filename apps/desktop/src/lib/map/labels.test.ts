@@ -29,6 +29,7 @@ describe('étiquettes de la carte', () => {
       text: 'Départ',
     });
     expect(parseLabelImageId(`${LABEL_IMAGE_PREFIX}day:mark:a:b`)?.text).toBe('a:b');
+    expect(parseLabelImageId(`${LABEL_IMAGE_PREFIX}night:leg:4.2 NM`)?.style).toBe('leg');
   });
 
   it('refuse les identifiants inconnus ou trop longs', () => {

@@ -70,3 +70,45 @@ describe('marque depuis le menu', () => {
     expect(screen.queryByRole('menuitem', { name: 'Marque ici' })).toBeNull();
   });
 });
+
+describe('distance, relèvement et navigation depuis le menu', () => {
+  function menu(extra: Record<string, unknown>) {
+    const props = {
+      position,
+      x: 0,
+      y: 0,
+      canPlaceBoat: false,
+      onplaceboat: vi.fn(),
+      onmeasure: vi.fn(),
+      onclose: vi.fn(),
+      ongoto: vi.fn(),
+      ...extra,
+    };
+    render(MapContextMenu, props);
+    return props;
+  }
+
+  it('affiche distance et relèvement puis navigue jusqu’au point', async () => {
+    const props = menu({ fromBoat: { kind: 'ok', distanceM: 2 * 1852, bearingRad: Math.PI / 2 } });
+    const text = screen.getByTestId('context-from-boat').textContent ?? '';
+    expect(text).toContain('2.0 NM');
+    expect(text).toContain('090°');
+    await fireEvent.click(screen.getByRole('menuitem', { name: "Naviguer jusqu'ici" }));
+    expect(props.onclose).toHaveBeenCalled();
+    expect(props.ongoto).toHaveBeenCalledWith(position);
+  });
+
+  it('signale l’attente et l’indisponibilité, bloque la navigation', () => {
+    menu({ fromBoat: { kind: 'pending' } });
+    expect(screen.getByTestId('context-from-boat').textContent).toMatch(/relèvement…/);
+    document.body.innerHTML = '';
+    menu({
+      fromBoat: { kind: 'unavailable', reason: 'Position du bateau inconnue ou obsolète' },
+      goToBlocked: 'Position du bateau inconnue ou obsolète',
+    });
+    expect(screen.getByTestId('context-from-boat').textContent).toMatch(/obsolète/);
+    const go = screen.getByRole('menuitem', { name: "Naviguer jusqu'ici" }) as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    expect(go.title).toMatch(/obsolète/);
+  });
+});

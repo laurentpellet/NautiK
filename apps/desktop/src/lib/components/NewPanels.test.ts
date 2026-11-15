@@ -5,6 +5,9 @@ import MarksPanel from './MarksPanel.svelte';
 import TrackReplayPanel from './TrackReplayPanel.svelte';
 import SearchBox from './SearchBox.svelte';
 import LogbookView from './LogbookView.svelte';
+import RoutesPanel from './RoutesPanel.svelte';
+import { NavigationController } from '../navigation.svelte';
+import { RoutingApi } from '../services/routing';
 import { MarksController } from '../marks.svelte';
 import { MarksApi } from '../services/marks';
 import { ReplayController } from '../replay.svelte';
@@ -150,5 +153,37 @@ describe('journal de bord', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Ajouter' }));
     expect(await screen.findByText('Ris pris')).toBeTruthy();
     expect(call).toHaveBeenCalledWith('add_log_entry', { text: 'Ris pris' });
+  });
+});
+
+describe('recherche du départ et de l’arrivée d’une route', () => {
+  it('place le lieu choisi en départ puis en arrivée', async () => {
+    const nav = new NavigationController(new RoutingApi(vi.fn(() => Promise.resolve([]))));
+    nav.startDrawing();
+    const call = vi.fn((_command: string, args?: Record<string, unknown>) =>
+      Promise.resolve([
+        {
+          kind: 'poi',
+          name: String(args?.query) === 'pap' ? 'Papeete' : 'Passe Taapuna',
+          detail: null,
+          position:
+            String(args?.query) === 'pap' ? pos : { latitudeDeg: -17.6, longitudeDeg: -149.6 },
+        },
+      ]),
+    );
+    render(RoutesPanel, { nav, call });
+    const searches = screen.getAllByRole('button', { name: 'Chercher' });
+    await fireEvent.input(screen.getByLabelText('Rechercher le départ'), {
+      target: { value: 'pap' },
+    });
+    await fireEvent.click(searches[0] as HTMLElement);
+    await fireEvent.click(await screen.findByRole('option'));
+    await fireEvent.input(screen.getByLabelText("Rechercher l'arrivée"), {
+      target: { value: 'taa' },
+    });
+    await fireEvent.click(searches[1] as HTMLElement);
+    await fireEvent.click(await screen.findByRole('option'));
+    expect(nav.draft.map((w) => w.name)).toEqual(['Papeete', 'Passe Taapuna']);
+    expect(screen.queryByRole('option'), 'résultats effacés après le choix').toBeNull();
   });
 });

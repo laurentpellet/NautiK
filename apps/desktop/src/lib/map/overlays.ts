@@ -54,17 +54,28 @@ export function draftPointName(name: string, index: number): string {
 /**
  * Routes enregistrées : un segment par route et un point par waypoint.
  * `hiddenId` : route en cours d'édition, affichée par le brouillon.
+ * `legLabels` : longueurs (déjà formatées, calculées par le moteur) des
+ * segments de la route active, affichées au milieu de chaque segment ;
+ * ignorées si leur nombre ne correspond pas aux segments.
  */
 export function routesData(
   routes: Route[],
   targetIndex: number | null = null,
   hiddenId: string | null = null,
+  legLabels: string[] | null = null,
 ): Collection {
   const features: Collection['features'] = [];
   for (const route of routes) {
     if (route.id === hiddenId) continue;
     const positions = route.waypoints.map((w) => w.position);
     features.push(line(positions, { id: route.id, active: route.active }));
+    if (route.active && legLabels && legLabels.length === positions.length - 1) {
+      legLabels.forEach((text, index) => {
+        const from = positions[index];
+        const to = positions[index + 1];
+        if (from && to) features.push(line([from, to], { leg: index, label: labelText(text) }));
+      });
+    }
     route.waypoints.forEach((w, index) => {
       features.push(
         point(w.position, {
@@ -130,12 +141,89 @@ function labelLayer(id: string, source: string, theme: Theme, minzoom: number): 
   };
 }
 
-/** Couches d'étiquettes dont l'image dépend du thème. */
-export const OVERLAY_LABEL_LAYERS = ['nautik-routes-labels', 'nautik-draft-labels'] as const;
+/** Image de la flèche de sens des routes (pointe vers la droite). */
+export const ROUTE_ARROW_IMAGE = 'nautik-route-arrow';
+
+/**
+ * Flèche de sens : chevron blanc cerné de sombre, lisible sur toutes les
+ * couleurs de route. `null` si le canevas est indisponible.
+ */
+export function routeArrowImage(ratio = 1): ImageData | null {
+  const size = Math.ceil(14 * ratio);
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const s = size / 14;
+  ctx.beginPath();
+  ctx.moveTo(3 * s, 2.5 * s);
+  ctx.lineTo(10.5 * s, 7 * s);
+  ctx.lineTo(3 * s, 11.5 * s);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+  ctx.lineWidth = 4.5 * s;
+  ctx.stroke();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2 * s;
+  ctx.stroke();
+  return ctx.getImageData(0, 0, size, size);
+}
+
+/** Flèches de sens le long des segments (routes enregistrées ou en édition). */
+function arrowLayer(
+  id: string,
+  source: string,
+  filter: ExpressionSpecification,
+): LayerSpecification {
+  return {
+    id,
+    type: 'symbol',
+    source,
+    filter,
+    minzoom: 5,
+    layout: {
+      'symbol-placement': 'line',
+      'symbol-spacing': 140,
+      'icon-image': ROUTE_ARROW_IMAGE,
+      'icon-rotation-alignment': 'map',
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+    },
+  };
+}
+
+/** Segment de la route active portant sa longueur. */
+const isLeg: ExpressionSpecification = ['has', 'leg'];
+
+/** Longueurs des segments de la route active, en italique au milieu du segment. */
+function legLabelLayer(theme: Theme): LayerSpecification {
+  return {
+    id: 'nautik-routes-leg-labels',
+    type: 'symbol',
+    source: ROUTES_SOURCE,
+    filter: ['all', isLine, isLeg],
+    minzoom: 6,
+    layout: {
+      'symbol-placement': 'line-center',
+      'icon-image': labelImageExpression(theme, 'leg'),
+      'icon-rotation-alignment': 'viewport',
+      'icon-allow-overlap': false,
+    },
+  };
+}
+
+/** Couches d'étiquettes dont l'image dépend du thème, avec leur style. */
+export const OVERLAY_LABEL_LAYERS = [
+  ['nautik-routes-labels', 'wp'],
+  ['nautik-routes-leg-labels', 'leg'],
+  ['nautik-draft-labels', 'wp'],
+] as const;
 
 /** Changements à appliquer aux étiquettes lors d'un changement de thème. */
 export function overlayThemeChanges(theme: Theme): [string, ExpressionSpecification][] {
-  return OVERLAY_LABEL_LAYERS.map((id) => [id, labelImageExpression(theme, 'wp')]);
+  return OVERLAY_LABEL_LAYERS.map(([id, style]) => [id, labelImageExpression(theme, style)]);
 }
 
 /** Couleur par défaut de la route active (jaune, réglable dans les Paramètres). */
@@ -195,7 +283,7 @@ export function overlayLayers(
       id: 'nautik-routes-line',
       type: 'line',
       source: ROUTES_SOURCE,
-      filter: isLine,
+      filter: ['all', isLine, ['!', isLeg]],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
         'line-color': routeColor(activeRouteColor),
@@ -214,6 +302,8 @@ export function overlayLayers(
         'circle-stroke-width': 2.5,
       },
     },
+    arrowLayer('nautik-routes-arrows', ROUTES_SOURCE, ['all', isLine, ['!', isLeg]]),
+    legLabelLayer(theme),
     labelLayer('nautik-routes-labels', ROUTES_SOURCE, theme, 8),
     {
       id: 'nautik-draft-line',
@@ -222,6 +312,7 @@ export function overlayLayers(
       filter: isLine,
       paint: { 'line-color': '#ff6f00', 'line-width': 3, 'line-dasharray': [2, 1.5] },
     },
+    arrowLayer('nautik-draft-arrows', DRAFT_SOURCE, isLine),
     {
       id: DRAFT_POINTS_LAYER,
       type: 'circle',

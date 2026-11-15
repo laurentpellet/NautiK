@@ -100,7 +100,7 @@
     type GeoBounds,
     type LatLon,
   } from './lib/services/routing';
-  import { MapToolsController } from './lib/mapTools.svelte';
+  import { MapToolsController, type FromBoat } from './lib/mapTools.svelte';
   import MeasurePanel from './lib/components/MeasurePanel.svelte';
   import MapContextMenu from './lib/components/MapContextMenu.svelte';
   import MobPanel from './lib/components/MobPanel.svelte';
@@ -491,6 +491,29 @@
     y: number;
   }
   let contextMenu = $state<ContextMenuState | null>(null);
+  /** Distance et relèvement du bateau au point du menu (moteur). */
+  let menuFromBoat = $state.raw<FromBoat>({ kind: 'pending' });
+
+  // Calculés une fois à l'ouverture du menu ; une réponse tardive est ignorée.
+  $effect(() => {
+    const menu = contextMenu;
+    if (!menu) return;
+    let current = true;
+    menuFromBoat = { kind: 'pending' };
+    void untrack(() => tools.fromBoat(menu.position)).then((r) => {
+      if (current) menuFromBoat = r;
+    });
+    return () => {
+      current = false;
+    };
+  });
+
+  /** « Naviguer jusqu'ici » : route directe activée, panneau Route affiché. */
+  async function goTo(target: LatLon): Promise<void> {
+    if (await nav.goTo(freshBoat, target)) {
+      if (!layout.route.visible) updatePanel('route', { visible: true });
+    }
+  }
 
   /** Clic sur la carte : tracé de route d'abord, sinon l'outil actif. */
   function onMapClick(position: LatLon): void {
@@ -753,6 +776,7 @@
                 {northUp}
                 routes={shownRoutes}
                 targetIndex={nav.status?.targetIndex ?? null}
+                activeLegs={nav.activeLegs}
                 draft={nav.draft}
                 editedRouteId={nav.editor?.routeId ?? null}
                 onpointmove={(i, p) => nav.movePoint(i, p)}
@@ -794,6 +818,7 @@
                   {northUp}
                   routes={shownRoutes}
                   targetIndex={nav.status?.targetIndex ?? null}
+                  activeLegs={nav.activeLegs}
                   draft={nav.draft}
                   editedRouteId={nav.editor?.routeId ?? null}
                   onpointmove={(i, p) => nav.movePoint(i, p)}
@@ -866,6 +891,13 @@
         canMeasure={!nav.drawing}
         onmeasure={(at) => void tools.measureFrom(at)}
         onmark={newMark}
+        fromBoat={menuFromBoat}
+        ongoto={(at) => void goTo(at)}
+        goToBlocked={nav.drawing
+          ? 'Indisponible pendant le tracé d’une route'
+          : freshBoat
+            ? null
+            : 'Position du bateau inconnue ou obsolète'}
         onclose={() => (contextMenu = null)}
       />
     {/snippet}

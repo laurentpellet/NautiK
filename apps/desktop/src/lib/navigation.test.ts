@@ -292,4 +292,95 @@ describe('NavigationController', () => {
     expect(c.error).toBe('IPC');
     expect(c.busy).toBe(false);
   });
+
+  it('navigue jusqu’à un point : route directe créée puis activée', async () => {
+    const { call, state } = fakeEngine();
+    const c = new NavigationController(new RoutingApi(call));
+    await c.refresh();
+    const now = Date.UTC(2026, 10, 14, 9, 5);
+    expect(await c.goTo(p(-17.5, -149.6), p(-17.6, -149.7), now)).toBe(true);
+    expect(call).toHaveBeenCalledWith('save_route', {
+      id: null,
+      name: 'Direct 09:05 UTC',
+      waypoints: [
+        { id: null, name: 'Départ', position: p(-17.5, -149.6) },
+        { id: null, name: 'Destination', position: p(-17.6, -149.7) },
+      ],
+    });
+    expect(state.activeRouteId).toBe('b');
+    expect(c.activeRouteId).toBe('b');
+    expect(c.selectedRouteId).toBe('b');
+    expect(c.notice).toBe('Route « Direct 09:05 UTC » active');
+  });
+
+  it('refuse de naviguer sans position fraîche ou pendant un tracé', async () => {
+    const { call } = fakeEngine();
+    const c = new NavigationController(new RoutingApi(call));
+    expect(await c.goTo(null, p(0, 1))).toBe(false);
+    expect(c.error).toMatch(/Position du bateau inconnue/);
+    c.startDrawing();
+    expect(await c.goTo(p(0, 0), p(0, 1))).toBe(false);
+    expect(c.error).toMatch(/route en cours d’édition/);
+    expect(call).not.toHaveBeenCalledWith('save_route', expect.anything());
+  });
+
+  it('garde l’erreur si l’activation est refusée', async () => {
+    const { call } = fakeEngine();
+    const base = call.getMockImplementation();
+    call.mockImplementation((command: string, args?: Record<string, unknown>) =>
+      command === 'activate_route'
+        ? Promise.reject(new Error('route introuvable'))
+        : (base?.(command, args) ?? Promise.resolve(null)),
+    );
+    const c = new NavigationController(new RoutingApi(call));
+    expect(await c.goTo(p(0, 0), p(0, 1))).toBe(false);
+    expect(c.error).toBe('route introuvable');
+    expect(c.activeRouteId).toBeNull();
+  });
+});
+
+describe('route active et recherche de départ/arrivée', () => {
+  it('obtient du moteur la longueur des segments de la route active', async () => {
+    const { call } = fakeEngine();
+    const c = new NavigationController(new RoutingApi(call));
+    await c.refresh();
+    expect(c.activeLegs).toBeNull();
+    await c.activate('a');
+    expect(c.activeLegs).toEqual([1000]);
+    const plans = () => call.mock.calls.filter(([command]) => command === 'plan_route').length;
+    const before = plans();
+    await c.refresh();
+    expect(plans(), 'route inchangée : pas de recalcul').toBe(before);
+    await c.deactivate();
+    expect(c.activeLegs).toBeNull();
+  });
+
+  it('n’invente pas de longueurs si le moteur refuse le calcul', async () => {
+    const { call } = fakeEngine();
+    const base = call.getMockImplementation();
+    call.mockImplementation((command: string, args?: Record<string, unknown>) =>
+      command === 'plan_route'
+        ? Promise.reject(new Error('plan indisponible'))
+        : (base?.(command, args) ?? Promise.resolve(null)),
+    );
+    const c = new NavigationController(new RoutingApi(call));
+    await c.activate('a');
+    expect(c.activeRouteId).toBe('a');
+    expect(c.activeLegs).toBeNull();
+  });
+
+  it('place le départ et l’arrivée trouvés, en remplaçant ceux existants', () => {
+    const c = new NavigationController(new RoutingApi(fakeEngine().call));
+    c.setEndpoint('start', 'Ignoré', p(0, 0));
+    expect(c.draft).toEqual([]);
+    c.startDrawing();
+    c.setEndpoint('arrival', 'Passe Taapuna', p(1, 1));
+    c.setEndpoint('start', ' Papeete ', p(0, 0));
+    expect(c.draft.map((w) => w.name)).toEqual(['Papeete', 'Passe Taapuna']);
+    c.addPoint(p(2, 2));
+    c.setEndpoint('arrival', 'Moorea', p(3, 3));
+    c.setEndpoint('start', 'x'.repeat(80), p(4, 4));
+    expect(c.draft.map((w) => w.position)).toEqual([p(4, 4), p(1, 1), p(3, 3)]);
+    expect(c.draft[0]?.name).toHaveLength(50);
+  });
 });

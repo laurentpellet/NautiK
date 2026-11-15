@@ -151,13 +151,18 @@
 </section>
 
 <style>
+  /* Au-dessus de la carte, qui reste montée sous les autres onglets. */
   .logbook {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    height: 100%;
-    padding: 0.6rem;
+    gap: 0.6rem;
     overflow: auto;
+    padding: 1rem 1rem 2.5rem;
+    background: var(--bg);
+    color: var(--fg);
     font-size: 0.85rem;
   }
 

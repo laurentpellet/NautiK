@@ -5,6 +5,7 @@ import {
   DRAFT_SOURCE,
   OVERLAY_LABEL_LAYERS,
   ROUTES_SOURCE,
+  ROUTE_ARROW_IMAGE,
   TRACKS_SOURCE,
   draftData,
   draftPointName,
@@ -46,6 +47,34 @@ describe('surimpressions', () => {
     const targets = data.features.filter((f) => f.properties.target === true);
     expect(targets).toHaveLength(1);
     expect(targets[0]?.properties.id).toBe('b-2');
+  });
+
+  it('ajoute la longueur de chaque segment de la route active, au milieu', () => {
+    const data = routesData([route('a', false), route('b', true)], null, null, ['4.2 NM']);
+    const legs = data.features.filter((f) => 'leg' in f.properties);
+    expect(legs).toHaveLength(1);
+    expect(legs[0]?.properties).toEqual({ leg: 0, label: '4.2 NM' });
+    expect(legs[0]?.geometry.type).toBe('LineString');
+    // Nombre incohérent avec les segments : rien d'affiché.
+    const wrong = routesData([route('b', true)], null, null, ['1', '2']);
+    expect(wrong.features.some((f) => 'leg' in f.properties)).toBe(false);
+    // Les segments étiquetés ne sont pas redessinés comme routes.
+    const line = overlayLayers().find((l) => l.id === 'nautik-routes-line');
+    expect(JSON.stringify(line && 'filter' in line ? line.filter : null)).toContain('leg');
+  });
+
+  it('oriente des flèches de sens le long des routes et du tracé', () => {
+    const arrows = overlayLayers().filter((l) => l.id.endsWith('-arrows'));
+    expect(arrows.map((l) => ('source' in l ? l.source : null))).toEqual([
+      ROUTES_SOURCE,
+      DRAFT_SOURCE,
+    ]);
+    for (const layer of arrows) {
+      const layout = ('layout' in layer ? layer.layout : {}) as Record<string, unknown>;
+      expect(layout['symbol-placement']).toBe('line');
+      expect(layout['icon-image']).toBe(ROUTE_ARROW_IMAGE);
+      expect(layout['icon-rotation-alignment']).toBe('map');
+    }
   });
 
   it('ne marque aucune cible sans route active', () => {
@@ -95,7 +124,16 @@ describe('surimpressions', () => {
     const sources = new Set(overlayLayers().map((l) => ('source' in l ? l.source : null)));
     expect(sources).toEqual(new Set([ROUTES_SOURCE, DRAFT_SOURCE, TRACKS_SOURCE]));
     const symbols = overlayLayers().filter((l) => l.type === 'symbol');
-    expect(symbols.map((l) => l.id)).toEqual([...OVERLAY_LABEL_LAYERS]);
+    expect(symbols.map((l) => l.id)).toEqual([
+      'nautik-routes-arrows',
+      'nautik-routes-leg-labels',
+      'nautik-routes-labels',
+      'nautik-draft-arrows',
+      'nautik-draft-labels',
+    ]);
+    expect(
+      OVERLAY_LABEL_LAYERS.map(([id]) => id).every((id) => symbols.some((l) => l.id === id)),
+    ).toBe(true);
     expect(overlayLayers().some((l) => l.id === DRAFT_POINTS_LAYER)).toBe(true);
   });
 
@@ -129,7 +167,8 @@ describe('surimpressions', () => {
 
   it('change l’image des étiquettes avec le thème', () => {
     const changes = overlayThemeChanges('night');
-    expect(changes.map(([id]) => id)).toEqual([...OVERLAY_LABEL_LAYERS]);
+    expect(changes.map(([id]) => id)).toEqual(OVERLAY_LABEL_LAYERS.map(([id]) => id));
     expect(JSON.stringify(changes[0]?.[1])).toContain('night:wp:');
+    expect(JSON.stringify(changes[1]?.[1])).toContain('night:leg:');
   });
 });

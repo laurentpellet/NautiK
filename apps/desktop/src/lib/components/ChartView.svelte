@@ -49,10 +49,13 @@
     overlayLayers,
     overlayThemeChanges,
     routesData,
+    ROUTE_ARROW_IMAGE,
+    routeArrowImage,
     tracksData,
     type DraftPoint,
   } from '../map/overlays';
   import { labelImage, parseLabelImageId } from '../map/labels';
+  import { formatDistance } from '../format';
   import {
     POI_SOURCE,
     emptyPoiCollection,
@@ -87,6 +90,8 @@
     routes?: Route[];
     /** Index du waypoint visé sur la route active. */
     targetIndex?: number | null;
+    /** Longueurs (m, moteur) des segments de la route active. */
+    activeLegs?: number[] | null;
     /** Points de la route en cours d'édition. */
     draft?: DraftPoint[];
     /** Route en cours d'édition : dessinée par le brouillon, pas en double. */
@@ -147,6 +152,7 @@
     northUp,
     routes = [],
     targetIndex = null,
+    activeLegs = null,
     draft = [],
     editedRouteId = null,
     onpointmove,
@@ -277,7 +283,9 @@
         ? soundingImage(sounding.label, sounding.shallow, sounding.theme, ratio)
         : label
           ? labelImage(label.text, label.style, label.theme, ratio)
-          : null;
+          : id === ROUTE_ARROW_IMAGE
+            ? routeArrowImage(ratio)
+            : null;
       if (image) m.addImage(id, image, { pixelRatio: ratio });
     });
     m.on('load', () => {
@@ -533,7 +541,8 @@
   }
 
   $effect(() => {
-    const data = routesData(routes, targetIndex, editedRouteId);
+    const legLabels = activeLegs ? activeLegs.map((m) => formatDistance(m)) : null;
+    const data = routesData(routes, targetIndex, editedRouteId, legLabels);
     if (map && loaded) setData(ROUTES_SOURCE, data);
   });
 

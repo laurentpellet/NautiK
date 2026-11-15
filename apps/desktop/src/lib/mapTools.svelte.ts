@@ -18,6 +18,12 @@ export interface RangeBearingMark {
   bearingRad: number | null;
 }
 
+/** Distance et relèvement depuis le bateau (menu contextuel). */
+export type FromBoat =
+  | { kind: 'pending' }
+  | { kind: 'unavailable'; reason: string }
+  | { kind: 'ok'; distanceM: number; bearingRad: number | null };
+
 /** Rayon maximal du VRM (m) : 100 milles. */
 export const MAX_VRM_M = 100 * 1852;
 
@@ -158,6 +164,23 @@ export class MapToolsController {
     } catch (e) {
       if (seq !== this.seq) return;
       this.error = `Relèvement indisponible : ${message(e)}`;
+    }
+  }
+
+  /**
+   * Distance et relèvement vrai du bateau à `position` (moteur), pour le
+   * menu contextuel. Sans position fraîche du bateau : indisponible.
+   */
+  async fromBoat(position: LatLon): Promise<FromBoat> {
+    const boat = this.boat();
+    if (!boat) return { kind: 'unavailable', reason: 'Position du bateau inconnue ou obsolète' };
+    try {
+      const plan = await this.routing.planRoute([boat, position], this.speedMps(), null);
+      const leg = plan.legs[0];
+      if (!leg) return { kind: 'unavailable', reason: 'Relèvement indisponible' };
+      return { kind: 'ok', distanceM: leg.distanceM, bearingRad: leg.bearingRad };
+    } catch (e) {
+      return { kind: 'unavailable', reason: `Relèvement indisponible : ${message(e)}` };
     }
   }
 

@@ -178,8 +178,12 @@ Sur la carte :
   Échap, **✕** ou un nouveau clic sur la règle ferme la mesure. Indisponible
   pendant le tracé d'une route ;
 - **clic droit** sur la carte (sans glisser ; le glisser droit tourne la
-  carte) : menu avec la position visée, **Bateau ici** et **Mesurer
-  depuis ici** ;
+  carte) : menu avec la position visée et, en dessous, sa distance et son
+  relèvement vrai depuis le bateau (calculés par le moteur ; « Position du
+  bateau inconnue ou obsolète » sans position fraîche), puis
+  **Naviguer jusqu'ici** (crée la route directe « Direct HH:MM UTC » du
+  bateau à ce point et l'active ; impossible sans position fraîche ou
+  pendant le tracé d'une route), **Bateau ici** et **Mesurer depuis ici** ;
 - **Deux cartes côte à côte** : partage la carte en deux volets (l'un
   au-dessus de l'autre dans une fenêtre étroite). Le volet de droite a son
   propre choix de cartes, ENC et CM93 comprises (étiquette « Droite :
@@ -271,6 +275,11 @@ onglet choisi est mémorisé).
   - **+ Départ** / **+ Arrivée** : le prochain clic ajoute un point en
     tête ou en fin de route ; **↳** après un point insère le clic suivant
     juste après lui ;
+  - champs **Rechercher le départ** / **Rechercher l'arrivée** (sous
+    l'éditeur) : même recherche que la loupe (coordonnées, marques,
+    waypoints, îles, amers) ; le lieu choisi remplace le départ ou
+    l'arrivée (ou s'ajoute tant que la route a moins de deux points), avec
+    son nom ;
   - un point se **déplace en le glissant** sur la carte ;
   - chaque point se **nomme** dans la liste (vide : nom automatique
     WP001…) et se supprime par **✕** ; au-dessus de chaque point, la
@@ -297,6 +306,11 @@ onglet choisi est mémorisé).
   relèvement du prochain point, l'écart de route (XTE), la distance
   restante et l'heure d'arrivée estimée. Un point est considéré atteint à
   0,1 mille. **Arrêter la navigation** la désactive.
+- **Sur la carte**, chaque segment de route porte de petites flèches
+  blanches indiquant le sens de parcours (routes enregistrées et route en
+  cours de tracé) ; pour la route active, la longueur de chaque segment
+  (calculée par le moteur, dans l'unité choisie) s'affiche en italique au
+  milieu du segment.
 - **Barre de route** : pendant la navigation, une barre s'affiche en bas
   de la carte, au-dessus de la barre d'outils. Elle rappelle la route,
   le waypoint visé (rang / nombre de points) et la mention SIMULATION le

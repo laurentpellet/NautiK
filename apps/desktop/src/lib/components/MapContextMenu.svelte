@@ -1,8 +1,10 @@
 <script lang="ts">
-  // Menu du clic droit sur la carte : position visée, « bateau ici »
-  // (simulateur seulement) et mesure depuis ce point. Se ferme par Échap,
-  // un clic ailleurs ou après un choix.
-  import { formatLatitude, formatLongitude } from '../format';
+  // Menu du clic droit sur la carte : position visée avec distance et
+  // relèvement depuis le bateau (moteur), « naviguer jusqu'ici », « bateau
+  // ici » (simulateur seulement) et mesure depuis ce point. Se ferme par
+  // Échap, un clic ailleurs ou après un choix.
+  import { formatBearing, formatDistance, formatLatitude, formatLongitude } from '../format';
+  import type { FromBoat } from '../mapTools.svelte';
   import type { LatLon } from '../services/routing';
 
   interface Props {
@@ -18,6 +20,12 @@
     onmeasure: (position: LatLon) => void;
     /** Pose une marque personnelle à ce point. */
     onmark?: (position: LatLon) => void;
+    /** Distance et relèvement depuis le bateau ; absent : non affichés. */
+    fromBoat?: FromBoat;
+    /** Crée une route directe du bateau à ce point et l'active. */
+    ongoto?: (position: LatLon) => void;
+    /** Raison du refus de « naviguer jusqu'ici » ; `null` : possible. */
+    goToBlocked?: string | null;
     onclose: () => void;
   }
 
@@ -30,6 +38,9 @@
     onplaceboat,
     onmeasure,
     onmark,
+    fromBoat,
+    ongoto,
+    goToBlocked = null,
     onclose,
   }: Props = $props();
 
@@ -69,13 +80,34 @@
   aria-label="Menu de la carte"
   bind:this={menu}
   style:left={`min(${x}px, calc(100% - 15rem))`}
-  style:top={`min(${y}px, calc(100% - 10rem))`}
+  style:top={`min(${y}px, calc(100% - 14rem))`}
   onkeydown={onKeydown}
   oncontextmenu={(e) => e.preventDefault()}
 >
   <p class="where" data-testid="context-position">
     {formatLatitude(position.latitudeDeg)}<br />{formatLongitude(position.longitudeDeg)}
+    {#if fromBoat}
+      <span class="range" data-testid="context-from-boat">
+        {#if fromBoat.kind === 'ok'}
+          <strong>{formatDistance(fromBoat.distanceM)}</strong> ·
+          <strong>{formatBearing(fromBoat.bearingRad)}</strong> depuis le bateau
+        {:else if fromBoat.kind === 'pending'}
+          Distance et relèvement…
+        {:else}
+          {fromBoat.reason}
+        {/if}
+      </span>
+    {/if}
   </p>
+  {#if ongoto}
+    <button
+      type="button"
+      role="menuitem"
+      disabled={goToBlocked !== null}
+      title={goToBlocked ?? 'Créer une route directe du bateau à ce point et l’activer'}
+      onclick={() => choose(ongoto)}>Naviguer jusqu'ici</button
+    >
+  {/if}
   <button
     type="button"
     role="menuitem"
@@ -127,6 +159,16 @@
     color: var(--muted);
     font-size: 0.78rem;
     font-variant-numeric: tabular-nums;
+  }
+
+  .range {
+    display: block;
+    margin-top: 0.25rem;
+  }
+
+  .range strong {
+    color: var(--fg);
+    font-size: 0.9rem;
   }
 
   button {

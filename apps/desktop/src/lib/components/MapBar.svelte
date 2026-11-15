@@ -95,8 +95,21 @@
     title={mobActive
       ? 'Homme à la mer en cours (le point n’est pas déplacé)'
       : 'Homme à la mer : marque le point MOB à la position du bateau (Ctrl+M)'}
-    onclick={onmob}>MOB</button
+    onclick={onmob}
   >
+    <!-- Bouée couronne lancée vers la personne à la mer. -->
+    <svg class="buoy" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <path class="wave" d="M1 29.5q2.5-2.2 5 0t5 0t5 0t5 0t5 0t5 0" />
+      <path class="rope" d="M8.7 21.3q-4.5 1.5-5.5 6.7" />
+      <circle class="ring" cx="17" cy="13" r="9" />
+      <path
+        class="band"
+        d="M21.2 17.2L25.5 21.5M12.8 17.2L8.5 21.5M12.8 8.8L8.5 4.5M21.2 8.8L25.5 4.5"
+      />
+      <circle class="edge" cx="17" cy="13" r="12" />
+      <circle class="edge" cx="17" cy="13" r="6" />
+    </svg>
+  </button>
   <div class="group" role="toolbar" aria-label="Carte">
     <button
       type="button"
@@ -270,14 +283,56 @@
   }
 
   .mob {
-    padding: 0.2rem 0.55rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.1rem 0.25rem;
     border: 2px solid #e53935;
     border-radius: 0.35rem;
-    background: #e53935;
-    color: #fff;
-    font-weight: 800;
-    letter-spacing: 0.06em;
+    background: #fff;
     cursor: pointer;
+  }
+
+  .buoy {
+    width: 1.9rem;
+    height: 1.9rem;
+  }
+
+  .buoy .ring {
+    fill: none;
+    stroke: #e53935;
+    stroke-width: 6;
+  }
+
+  .buoy .band {
+    fill: none;
+    stroke: #fff;
+    stroke-width: 4.2;
+  }
+
+  .buoy .edge {
+    fill: none;
+    stroke: #8e1b18;
+    stroke-width: 0.8;
+  }
+
+  .buoy .rope {
+    fill: none;
+    stroke: #6d4c41;
+    stroke-width: 1.3;
+    stroke-linecap: round;
+  }
+
+  .buoy .wave {
+    fill: none;
+    stroke: #1e88e5;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+  }
+
+  .mob:hover,
+  .mob:focus-visible {
+    background: #ffebee;
   }
 
   .mob.on {
@@ -286,8 +341,7 @@
 
   @keyframes mob-blink {
     to {
-      background: transparent;
-      color: #e53935;
+      background: #e53935;
     }
   }
 

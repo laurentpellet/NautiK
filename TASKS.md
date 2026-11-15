@@ -703,6 +703,16 @@ Critères (TEST_PLAN.md §7) :
   coordonnées saisies (décimales, degrés-minutes-secondes, hémisphères
   N/S/E/W/O), marques, waypoints, points de routes, îles et amers ;
   sans casse ni accents ; 50 résultats ; tests.
+- [x] Menu contextuel : distance et relèvement depuis le bateau (moteur,
+  `plan_route` ; indisponible sans position fraîche), **Naviguer
+  jusqu'ici** (route directe Départ → Destination créée puis activée ;
+  refus sans position fraîche ou pendant un tracé) ; tests.
+- [x] Routes sur la carte : flèches de sens le long des segments (routes
+  et tracé) ; longueur de chaque segment de la route active en italique
+  au milieu du segment (moteur, recalculée seulement si la route change,
+  rien d'affiché en cas d'échec) ; tests.
+- [x] Éditeur de route : recherche du départ et de l'arrivée (lieu choisi
+  remplaçant le départ ou l'arrivée) ; tests.
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).

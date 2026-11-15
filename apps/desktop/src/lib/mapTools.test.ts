@@ -147,3 +147,33 @@ describe('outils de la carte', () => {
     expect(tools.error).toMatch(/Position du bateau inconnue/);
   });
 });
+
+describe('distance et relèvement du menu contextuel', () => {
+  it('calcule depuis le bateau avec le moteur', async () => {
+    const { tools, calls } = setup(undefined, p(-17.5, -149.6));
+    expect(await tools.fromBoat(p(-17.53, -149.6))).toEqual({
+      kind: 'ok',
+      distanceM: 1852,
+      bearingRad: Math.PI,
+    });
+    expect(calls.at(-1)?.[0]).toBe('plan_route');
+  });
+
+  it('reste indisponible sans position fraîche ou sur refus du moteur', async () => {
+    const { tools, calls } = setup();
+    const none = await tools.fromBoat(p(0, 0));
+    expect(none.kind).toBe('unavailable');
+    expect(calls).toHaveLength(0);
+    const call = vi.fn(() => Promise.reject(new Error('position invalide')));
+    const refused = new MapToolsController(
+      new RoutingApi(call),
+      new SimulatorApi(call),
+      () => 3,
+      () => p(0, 0),
+    );
+    expect(await refused.fromBoat(p(0, 1))).toEqual({
+      kind: 'unavailable',
+      reason: 'Relèvement indisponible : position invalide',
+    });
+  });
+});
