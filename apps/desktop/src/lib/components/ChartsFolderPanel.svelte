@@ -3,6 +3,15 @@
   // dialogue du système côté moteur), relecture et retour au dossier par
   // défaut. Un dossier absent est signalé, jamais remplacé en silence.
   import type { ChartCatalog, ChartsApi, ChartsDirSource } from '../services/charts';
+  import {
+    CHART_SORTS,
+    MAX_CHART_NAME_CHARS,
+    chartNames,
+    chartSort,
+    setChartName,
+    setChartSort,
+    sortCharts,
+  } from '../chartNames.svelte';
 
   interface Props {
     api: ChartsApi;
@@ -61,6 +70,61 @@
         {/if}
       </p>
     {/if}
+    {#if !catalog.error && catalog.charts.length > 0}
+      <!-- Cartes chargées, triées au choix : nom affiché dans l'application (calques, volet
+           de droite), modifiable ; vide : nom des métadonnées. -->
+      <label class="sort">
+        Trier par
+        <select value={chartSort.value} onchange={(e) => setChartSort(e.currentTarget.value)}>
+          {#each CHART_SORTS as s (s.id)}
+            <option value={s.id}>{s.label}</option>
+          {/each}
+        </select>
+      </label>
+      <table class="charts" aria-label="Cartes chargées">
+        <thead>
+          <tr>
+            <th scope="col">Nom dans l'application</th>
+            <th scope="col">Fichier</th>
+            <th scope="col">Zooms</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each sortCharts(catalog.charts, chartSort.value, chartNames.names) as chart (chart.id)}
+            <tr data-chart={chart.id}>
+              <td>
+                <div class="name">
+                  <input
+                    type="text"
+                    maxlength={MAX_CHART_NAME_CHARS}
+                    aria-label="Nom de la carte {chart.fileName}"
+                    placeholder={chart.name}
+                    value={chartNames.names[chart.id] ?? ''}
+                    onchange={(e) => setChartName(chart.id, e.currentTarget.value)}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!chartNames.names[chart.id]}
+                    aria-label="Nom d'origine pour {chart.fileName}"
+                    title="Revenir au nom d'origine : {chart.name}"
+                    onclick={() => setChartName(chart.id, '')}>↺</button
+                  >
+                </div>
+                {#if chartNames.names[chart.id]}
+                  <span class="muted">Nom d'origine : {chart.name}</span>
+                {/if}
+              </td>
+              <td><code class="path">{chart.fileName}</code></td>
+              <td class="zooms">{chart.minZoom}–{chart.maxZoom}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+
     <div class="row">
       <button type="button" disabled={busy || locked} onclick={() => run(() => api.chooseDir())}>
         Choisir un dossier…
@@ -136,6 +200,46 @@
     color: var(--fg);
     font: inherit;
     cursor: pointer;
+  }
+
+  .sort {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+  }
+
+  .charts {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+
+  .charts th {
+    color: var(--muted);
+    font-weight: 600;
+    text-align: left;
+  }
+
+  .charts th,
+  .charts td {
+    padding: 0.25rem 0.4rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .charts .name {
+    display: flex;
+    gap: 0.3rem;
+  }
+
+  .charts input {
+    flex: 1;
+    min-width: 8rem;
+  }
+
+  .charts .zooms {
+    white-space: nowrap;
   }
 
   button:disabled {

@@ -11,6 +11,8 @@
     type EncCellSummary,
     type EncFolder,
   } from '../services/enc';
+  import { MAX_CHART_NAME_CHARS, cm93Name, setCm93Name } from '../chartNames.svelte';
+  import { LAYER_LABELS } from '../layers';
 
   interface Props {
     api: EncApi;
@@ -112,6 +114,29 @@
           Base CM93 trouvée{inventory.cm93 === '.' ? '' : ` (${inventory.cm93})`} : affichée sous les
           ENC officielles. Cartes non officielles et anciennes, à recouper.
         </p>
+        <!-- Nom de la CM93 dans l'application (calques, volet de droite) ;
+             vide : « Cartes CM93 ». -->
+        <div class="cm93-name">
+          <label for="cm93-name">Nom dans l'application</label>
+          <input
+            id="cm93-name"
+            type="text"
+            maxlength={MAX_CHART_NAME_CHARS}
+            placeholder={LAYER_LABELS.cm93}
+            value={cm93Name.name ?? ''}
+            onchange={(e) => setCm93Name(e.currentTarget.value)}
+            onkeydown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur();
+            }}
+          />
+          <button
+            type="button"
+            disabled={!cm93Name.name}
+            aria-label="Nom d'origine pour la CM93"
+            title="Revenir au nom par défaut : {LAYER_LABELS.cm93}"
+            onclick={() => setCm93Name('')}>↺</button
+          >
+        </div>
       {/if}
       {#if inventory.truncated}
         <p class="warn" role="status">
@@ -250,6 +275,18 @@
 </section>
 
 <style>
+  .cm93-name {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+  }
+
+  .cm93-name input {
+    flex: 1;
+    min-width: 8rem;
+  }
+
   .panel {
     display: flex;
     flex-direction: column;

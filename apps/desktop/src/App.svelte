@@ -17,6 +17,7 @@
   import { EncMapController } from './lib/encMap.svelte';
   import FloatingPanel from './lib/components/FloatingPanel.svelte';
   import MapBar from './lib/components/MapBar.svelte';
+  import MobButton from './lib/components/MobButton.svelte';
   import PlacementMenu from './lib/components/PlacementMenu.svelte';
   import {
     PANEL_LABELS,
@@ -89,11 +90,12 @@
     type AlarmsSnapshot,
   } from './lib/services/alarms';
   import NavigationPanel from './lib/components/NavigationPanel.svelte';
-  import PositionPanel from './lib/components/PositionPanel.svelte';
   import RoutesTracksPanel from './lib/components/RoutesTracksPanel.svelte';
+  import { followBoat } from './lib/followBoat.svelte';
+  import { chartNames, chartSort, cm93Name, withChartNames } from './lib/chartNames.svelte';
   import RouteBar from './lib/components/RouteBar.svelte';
   import SourcePanel from './lib/components/SourcePanel.svelte';
-  import { describeConnection, isEngineSilent } from './lib/format';
+  import { describeConnection, formatAge, formatDistance, isEngineSilent } from './lib/format';
   import type { Theme } from './lib/map/style';
   import { subscribeAis, type AisSnapshot } from './lib/services/ais';
   import { ChartsApi, fetchChartCatalog, type ChartCatalog } from './lib/services/charts';
@@ -149,6 +151,9 @@
   let engineError = $state<string | null>(null);
   let catalog = $state<ChartCatalog | null>(null);
   let catalogError = $state<string | null>(null);
+  /** Cartes avec le nom choisi dans Paramètres → Cartes (affichage seul :
+   *  la carte n'est pas recréée quand un nom change). */
+  const namedCharts = $derived(withChartNames(catalog?.charts ?? [], chartNames.names));
   let snapshot = $state<InstrumentsSnapshot | null>(null);
   /** Réception du dernier instantané (horloge locale). */
   let snapshotAt = $state<number | null>(null);
@@ -209,9 +214,10 @@
   // Une carte seule est toujours affichée, dans les deux volets.
   const rightHiddenCharts = $derived((catalog?.charts.length ?? 0) > 1 ? split.hiddenCharts : []);
   const rightChartsLabel = $derived.by(() => {
-    const shown = (catalog?.charts ?? []).filter((c) => !rightHiddenCharts.includes(c.id));
+    const shown = namedCharts.filter((c) => !rightHiddenCharts.includes(c.id));
     const names = [...shown].reverse().map((c) => c.name);
-    if (encFolderSet) names.unshift(...vectorLabel(rightVector, cm93Available));
+    if (encFolderSet)
+      names.unshift(...vectorLabel(rightVector, cm93Available, cm93Name.name, encAvailable));
     return names.length === 0 ? 'aucune carte' : names.join(', ');
   });
 
@@ -238,7 +244,16 @@
     if (user) leader = pane;
   }
 
+  /** La carte défile avec le bateau (option « Suivre le bateau »). */
+  let following = $state(false);
+  const follow = $derived(following && followBoat.enabled);
+
+  /** Centrer : une fois, ou suivi du bateau (interrupteur) si l'option est active. */
   function recenter(): void {
+    if (followBoat.enabled) {
+      following = !following;
+      if (!following) return;
+    }
     leader = 'left';
     chartView?.recenter();
     if (split.enabled && !split.locked) chartViewRight?.recenter();
@@ -291,6 +306,8 @@
 
   /** Une base CM93 est trouvée dans le dossier ENC : son choix est proposé. */
   const cm93Available = $derived(Boolean(encMap.index?.cm93));
+  /** Le dossier ENC contient des cellules S-57 : leur choix est proposé. */
+  const encAvailable = $derived((encMap.index?.cells.length ?? 0) > 0);
   /** Un dossier ENC est choisi : le choix ENC/CM93 a un sens. */
   const encFolderSet = $derived(Boolean(encMap.index?.dir));
   /** Cartes vectorielles de chaque volet (ENC officielles, CM93). */
@@ -305,8 +322,8 @@
   const rightEnc = $derived(encMap.layer(rightVector));
   /** Cartes et calques masqués, rappelés sur la carte. */
   const hiddenOnMap = $derived([
-    ...hiddenChartNames(catalog?.charts ?? [], shownHiddenCharts),
-    ...hiddenLayers(layers, cm93Available),
+    ...hiddenChartNames(namedCharts, shownHiddenCharts),
+    ...hiddenLayers(layers, cm93Available, cm93Name.name, encAvailable),
   ]);
 
   // ENC de la zone affichée, après un court délai (déplacements rapides).
@@ -315,6 +332,9 @@
     const wanted = wantedVector;
     if (!wanted.enc && !wanted.cm93) {
       encMap.hide();
+      // Index lu quand même : sans lui, la CM93 ne serait pas proposée
+      // dans le menu Calques tant que les ENC restent décochées.
+      if (untrack(() => encMap.index === null && encMap.error === null)) void encMap.refresh();
       return;
     }
     const timer = setTimeout(() => void encMap.show(view, wanted), 200);
@@ -477,7 +497,10 @@
   const replay = new ReplayController((id) =>
     getTrackProfile(id, (command, args) => invokeFn(command, args)),
   );
-  const logbook = new LogbookController(new LogbookApi((command, args) => invokeFn(command, args)));
+  const logbook = new LogbookController(
+    new LogbookApi((command, args) => invokeFn(command, args)),
+    (limit) => alarmsApi.events(limit),
+  );
   const shownMarks = $derived(marksData(layers.marks ? marks.marks : []));
   const replayFeatures = $derived(
     replay.profile ? replayData(replay.profile.points, replay.index) : replayData([], null),
@@ -491,10 +514,19 @@
     nav.zoomTo(boundsAround(position));
   }
 
-  /** Nouvelle marque : panneau Routes et traces affiché sur l'onglet Marques. */
+  /**
+   * Cible choisie dans le panneau AIS : sélectionnée et cadrée sur sa
+   * dernière position connue (sans position valide : sélection seule).
+   */
+  function selectTarget(mmsi: string): void {
+    selectedTarget = mmsi;
+    const position = ais?.targets.find((t) => t.mmsi === mmsi)?.position;
+    if (position) zoomToPoint(position);
+  }
+
+  /** Nouvelle marque : panneau d'édition affiché sur la carte. */
   function newMark(position: LatLon): void {
     marks.startNew(position);
-    if (!layout.route.visible) updatePanel('route', { visible: true });
   }
 
   // Outils de la carte : mesure et « bateau ici » (barre d'outils, clic droit).
@@ -503,6 +535,17 @@
     simulator,
     () => nav.speedMps,
     () => (fix && !stale ? { latitudeDeg: fix.latitudeDeg, longitudeDeg: fix.longitudeDeg } : null),
+  );
+  /** Mesure convertie en route enregistrée ; l'outil se ferme si c'est fait. */
+  async function convertMeasure(): Promise<void> {
+    if (await nav.createFromPoints(tools.points)) tools.close();
+  }
+
+  /** Longueurs des segments de la mesure (moteur), si le calcul est à jour. */
+  const measureLegs = $derived(
+    tools.plan && tools.plan.legs.length === tools.points.length - 1
+      ? tools.plan.legs.map((l) => formatDistance(l.distanceM))
+      : null,
   );
   /** Le bateau simulé peut être placé (le moteur refuse hors simulateur, rejeu compris). */
   const canPlaceBoat = $derived((alarms?.simulated ?? false) && !nav.drawing);
@@ -531,11 +574,36 @@
     };
   });
 
-  /** « Naviguer jusqu'ici » : route directe activée, panneau Route affiché. */
+  /** Tracé de route ou marque en cours : édition sur la carte. */
+  const editing = $derived(nav.editor !== null || marks.draft !== null);
+
+  /** Fermer le panneau d'édition annule l'édition en cours. */
+  function cancelEditing(): void {
+    if (nav.editor) nav.cancelDrawing();
+    if (marks.draft) marks.cancel();
+  }
+
+  // Depuis le gestionnaire (Paramètres → Routes) : cadrer, tracer, poser
+  // une marque ou relire une trace se fait sur la carte, affichée aussitôt.
+  let lastFocus = untrack(() => nav.focus?.seq ?? 0);
+  let wasEditing = untrack(() => editing);
+  let wasReplaying = untrack(() => replay.active);
+  $effect(() => {
+    const focus = nav.focus?.seq ?? 0;
+    const edit = editing;
+    const replaying = replay.active;
+    untrack(() => {
+      const started = focus !== lastFocus || (edit && !wasEditing) || (replaying && !wasReplaying);
+      if (started && tab === 'settings') tab = 'chart';
+    });
+    lastFocus = focus;
+    wasEditing = edit;
+    wasReplaying = replaying;
+  });
+
+  /** « Naviguer jusqu'ici » : route directe activée (barre de route). */
   async function goTo(target: LatLon): Promise<void> {
-    if (await nav.goTo(freshBoat, target)) {
-      if (!layout.route.visible) updatePanel('route', { visible: true });
-    }
+    await nav.goTo(freshBoat, target);
   }
 
   /** Clic sur la carte : tracé de route d'abord, sinon l'outil actif. */
@@ -809,6 +877,16 @@
 
 <svelte:window onkeydown={onKeydown} />
 
+<!-- Erreur et avis des routes et traces (gestionnaire et édition). -->
+{#snippet navMessages()}
+  {#if nav.error}
+    <p class="error" role="alert">{nav.error}</p>
+  {/if}
+  {#if nav.notice}
+    <p class="notice" role="status">{nav.notice}</p>
+  {/if}
+{/snippet}
+
 <div class="app">
   <!-- En-tête conservé en plein écran : onglets, état des données, heure. -->
   <AppHeader
@@ -822,7 +900,18 @@
     {fullscreen}
     onfullscreen={() => setFullscreen(!fullscreen)}
     tools={tab === 'chart' ? mapTools : undefined}
+    afterStatus={mobButton}
   />
+
+  <!-- Homme à la mer : à droite de l'état des données, dans tous les onglets. -->
+  {#snippet mobButton()}
+    <MobButton
+      active={mob !== null}
+      onmob={() => {
+        if (!mob) void markMob();
+      }}
+    />
+  {/snippet}
 
   <!-- Outils de la carte, intégrés à la barre du haut (onglet Carte). -->
   {#snippet mapTools()}
@@ -831,6 +920,8 @@
       {silent}
       {northUp}
       canCenter={fix !== null}
+      following={followBoat.enabled ? following : null}
+      routeActive={nav.status !== null}
       {layout}
       hiddenLayers={hiddenOnMap}
       onnorthup={() => (northUp = !northUp)}
@@ -848,14 +939,11 @@
       onrangebearing={() => {
         if (!nav.drawing) tools.toggleRangeBearing();
       }}
-      mobActive={mob !== null}
-      onmob={() => {
-        if (!mob) void markMob();
-      }}
       ontoggle={(id) => updatePanel(id, { visible: !layout[id].visible })}
       recording={nav.recordingId !== null}
       recordBusy={nav.busy}
       onrecord={() => void (nav.recordingId ? nav.stopRecording() : nav.startRecording())}
+      onroutes={() => openSettings('routes')}
       onweather={() => openSettings('weather')}
       onlogbook={() => openSettings('logbook')}
     >
@@ -866,10 +954,13 @@
         <MapLayersMenu
           {layers}
           onchange={setLayers}
-          charts={catalog?.charts ?? []}
+          charts={namedCharts}
           hiddenCharts={shownHiddenCharts}
           onchartschange={setHiddenCharts}
           cm93={cm93Available}
+          cm93Name={cm93Name.name}
+          sort={chartSort.value}
+          enc={encAvailable}
         />
       {/snippet}
     </MapBar>
@@ -897,9 +988,8 @@
             status={nav.status}
             {now}
             stale={navStale}
-            routePanel={layout.route.visible}
             collapsed={routeBarCollapsed}
-            ontoggleroute={() => updatePanel('route', { visible: !layout.route.visible })}
+            onroutes={() => openSettings('routes')}
             ondeactivate={() => nav.deactivate()}
             oncollapse={collapseRouteBar}
             side={routeBarSide}
@@ -916,6 +1006,8 @@
               <div class="pane">
                 <ChartView
                   bind:this={chartView}
+                  {follow}
+                  onunfollow={() => (following = false)}
                   {catalog}
                   hiddenCharts={shownHiddenCharts}
                   {fix}
@@ -932,6 +1024,7 @@
                   drawing={nav.drawing || tools.picking}
                   onmapclick={onMapClick}
                   measure={tools.points}
+                  {measureLegs}
                   oncontextmenu={(position, point) =>
                     (contextMenu = { pane: 'left', position, ...point })}
                   ais={layers.ais ? ais : null}
@@ -958,6 +1051,8 @@
                 <div class="pane" data-testid="split-pane">
                   <ChartView
                     bind:this={chartViewRight}
+                    follow={follow && !split.locked}
+                    onunfollow={() => (following = false)}
                     {catalog}
                     hiddenCharts={rightHiddenCharts}
                     {fix}
@@ -974,6 +1069,7 @@
                     drawing={nav.drawing || tools.picking}
                     onmapclick={onMapClick}
                     measure={tools.points}
+                    {measureLegs}
                     oncontextmenu={(position, point) =>
                       (contextMenu = { pane: 'right', position, ...point })}
                     ais={layers.ais ? ais : null}
@@ -1001,7 +1097,7 @@
                         title="Choisir les cartes du volet droit"
                         variant="chip"
                         marked={rightHiddenCharts.length > 0 ||
-                          (encFolderSet && !rightVector.enc) ||
+                          (encAvailable && !rightVector.enc) ||
                           (cm93Available && !rightVector.cm93)}
                         testid="right-charts-menu"
                       >
@@ -1011,12 +1107,15 @@
                         <MapLayersMenu
                           {layers}
                           onchange={setLayers}
-                          charts={catalog.charts}
+                          charts={namedCharts}
                           hiddenCharts={rightHiddenCharts}
                           onchartschange={(hidden) => setSplit({ ...split, hiddenCharts: hidden })}
                           vector={rightVector}
                           onvectorchange={(vector) => setSplit({ ...split, vector })}
                           cm93={cm93Available}
+                          cm93Name={cm93Name.name}
+                          sort={chartSort.value}
+                          enc={encAvailable}
                           objects={false}
                         />
                       </Dropdown>
@@ -1052,6 +1151,11 @@
 
       {#snippet statusStrip()}
         <StatusStrip {position} {silent} {connection} />
+        {#if engine}
+          <p class="muted" data-testid="engine-status">
+            Moteur {engine.version} — protocole v{engine.protocolVersion}
+          </p>
+        {/if}
       {/snippet}
 
       {#snippet chartsSection()}
@@ -1099,7 +1203,7 @@
               <TrackReplayPanel {replay} />
             {/if}
             {#if tools.measuring}
-              <MeasurePanel {tools} />
+              <MeasurePanel {tools} onconvert={convertMeasure} />
             {:else if tools.tool === 'rangeBearing'}
               <RangeBearingPanel {tools} boatKnown={fix !== null && !stale} />
             {:else}
@@ -1142,7 +1246,7 @@
                   snapshot={ais}
                   {silent}
                   selected={selectedTarget}
-                  onselect={(mmsi) => (selectedTarget = mmsi)}
+                  onselect={selectTarget}
                 />
                 {#if aisError}
                   <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
@@ -1156,33 +1260,29 @@
               État de navigation rejeté : {navEventError}
             </p>
           {/if}
-          <!-- Panneau Route gardé monté (brouillon de route en cours). -->
-          <div class="route-slot" hidden={!layout.route.visible}>
-            <FloatingPanel {...panel('route')}>
-              <section class="panel" aria-label="Panneau Routes et traces">
-                {#if nav.status}
-                  <NavigationPanel
-                    status={nav.status}
-                    {now}
-                    ondeactivate={() => nav.deactivate()}
+          <!-- Édition sur la carte (tracé de route, marque) : petit panneau
+               affiché le temps de l'édition ; la gestion complète est dans
+               Paramètres → Routes. Fermer annule l'édition. -->
+          {#if editing}
+            <div class="route-slot">
+              <FloatingPanel
+                {...panel('route')}
+                panel={{ ...layout.route, visible: true }}
+                onhide={cancelEditing}
+              >
+                <section class="panel" aria-label="Édition sur la carte">
+                  {@render navMessages()}
+                  <RoutesTracksPanel
+                    {nav}
+                    {marks}
+                    boat={freshBoat}
+                    onzoom={zoomToPoint}
+                    onreplay={(id, name) => void replay.load(id, name)}
                   />
-                {/if}
-                {#if nav.error}
-                  <p class="error" role="alert">{nav.error}</p>
-                {/if}
-                {#if nav.notice}
-                  <p class="notice" role="status">{nav.notice}</p>
-                {/if}
-                <RoutesTracksPanel
-                  {nav}
-                  {marks}
-                  boat={freshBoat}
-                  onzoom={zoomToPoint}
-                  onreplay={(id, name) => void replay.load(id, name)}
-                />
-              </section>
-            </FloatingPanel>
-          </div>
+                </section>
+              </FloatingPanel>
+            </div>
+          {/if}
         </div>
         <!-- Barres du bas empilées (vent, route, outils) : une barre qui passe
            sur plusieurs lignes repousse les autres, sans recouvrement. -->
@@ -1235,6 +1335,19 @@
               embedded
             />
           {/snippet}
+          {#snippet routesView()}
+            {#if nav.status}
+              <NavigationPanel status={nav.status} {now} ondeactivate={() => nav.deactivate()} />
+            {/if}
+            {@render navMessages()}
+            <RoutesTracksPanel
+              {nav}
+              {marks}
+              boat={freshBoat}
+              onzoom={zoomToPoint}
+              onreplay={(id, name) => void replay.load(id, name)}
+            />
+          {/snippet}
           {#snippet logbookView()}
             <LogbookView {logbook} embedded />
           {/snippet}
@@ -1247,79 +1360,62 @@
         </SettingsView>
       {/if}
 
-      <!-- Panneau latéral toujours monté (brouillon de route, sélection). -->
-      <div class="side-slot" hidden={tab !== 'chart' || !layout.side.visible}>
-        <FloatingPanel {...panel('side')}>
-          <aside class="panel">
-            <header>
-              {#if engine}
-                <span class="version" data-testid="engine-status">
-                  Moteur {engine.version} — protocole v{engine.protocolVersion}
-                </span>
-              {/if}
-            </header>
-
-            {#if engineError}
-              <p class="error" role="alert">Moteur indisponible : {engineError}</p>
-            {/if}
-
-            <PositionPanel {position} {silent} error={snapshotError} />
-
-            {#if linkAlert}
-              <p class="error" role="alert" data-testid="link-alert">Liaison : {linkAlert}</p>
-            {/if}
-            {#if connectionError}
-              <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
-            {/if}
-
-            <!-- Cibles AIS : panneau ouvert par l'icône AIS de la barre d'outils.
-                 Une erreur reste signalée ici, panneau fermé. -->
-            {#if aisError && !layout.ais.visible}
-              <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
-            {/if}
-
-            <!-- Erreur des routes et traces : dans leur panneau, ici s'il est masqué. -->
-            {#if nav.error && !layout.route.visible}
-              <p class="error" role="alert">{nav.error}</p>
-            {/if}
-
-            <section class="charts" aria-label="Cartes">
-              <h2>Cartes</h2>
-              {#if catalogError}
-                <p class="error" role="alert">Catalogue indisponible : {catalogError}</p>
-              {:else if catalog}
-                {#if catalog.error}
-                  <p class="error" role="alert">Cartes indisponibles : {catalog.error}</p>
-                {:else if catalog.charts.length === 0}
-                  <p class="hint" data-testid="no-charts">
-                    Aucune carte. Déposez des fichiers <code>.mbtiles</code> dans :
-                    <code class="path">{catalog.chartsDir}</code>
-                    ou choisissez un autre dossier dans Paramètres → Cartes.
-                  </p>
-                {:else}
-                  <ul>
-                    {#each [...catalog.charts].reverse() as chart (chart.id)}
-                      <li title={chart.description ?? chart.fileName}>
-                        {chart.name} <span class="muted">z{chart.minZoom}–{chart.maxZoom}</span>
-                        {#if chart.warnings.length > 0}
-                          <span class="warn" title={chart.warnings.join('\n')}>⚠</span>
-                        {/if}
-                      </li>
-                    {/each}
-                  </ul>
-                {/if}
-                {#each catalog.failures as failure (failure.fileName)}
-                  <p class="error" role="alert">
-                    Carte ignorée {failure.fileName} : {failure.reason}
-                  </p>
-                {/each}
-              {:else}
-                <p class="muted">Chargement des cartes…</p>
-              {/if}
-            </section>
-          </aside>
-        </FloatingPanel>
-      </div>
+      <!-- Alertes de la carte (ex-panneau latéral) : seulement ce qui ne
+           va pas, jamais masquable. Position, liaison et moteur sont aussi
+           résumés par l'état des données de l'en-tête. -->
+      {#if tab === 'chart'}
+        <div class="map-alerts" aria-label="Alertes de la carte">
+          {#if engineError}
+            <p class="error" role="alert">Moteur indisponible : {engineError}</p>
+          {/if}
+          {#if silent}
+            <p class="error" role="alert">Moteur muet : données non actualisées</p>
+          {/if}
+          {#if !position}
+            <p class="error" role="alert">Aucune position</p>
+          {:else if position.stale}
+            <p class="error" role="alert">Position obsolète ({formatAge(position.ageMs)})</p>
+          {/if}
+          {#if position?.fix.source === 'simulator'}
+            <p class="note" role="status">POSITION SIMULÉE</p>
+          {:else if position?.fix.source === 'replay'}
+            <p class="note" role="status">REJEU — POSITION NON ACTUELLE</p>
+          {/if}
+          {#if snapshotError}
+            <p class="error" role="alert">Données rejetées : {snapshotError}</p>
+          {/if}
+          {#if linkAlert}
+            <p class="error" role="alert" data-testid="link-alert">Liaison : {linkAlert}</p>
+          {/if}
+          {#if connectionError}
+            <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
+          {/if}
+          <!-- Erreur des routes et traces : ici, hors édition (son panneau l'affiche). -->
+          {#if nav.error && !editing}
+            <p class="error" role="alert">{nav.error}</p>
+          {:else if nav.notice && !editing}
+            <p role="status">{nav.notice}</p>
+          {/if}
+          <!-- Erreur AIS : dans le panneau des cibles, ici s'il est fermé. -->
+          {#if aisError && !layout.ais.visible}
+            <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
+          {/if}
+          {#if catalogError}
+            <p class="error" role="alert">Catalogue indisponible : {catalogError}</p>
+          {:else if catalog?.error}
+            <p class="error" role="alert">Cartes indisponibles : {catalog.error}</p>
+          {:else if catalog && catalog.charts.length === 0}
+            <p class="hint" role="status" data-testid="no-charts">
+              Aucune carte. Déposez des fichiers <code>.mbtiles</code> dans
+              <code class="path">{catalog.chartsDir}</code> ou choisissez un autre dossier dans Paramètres
+              → Cartes.
+            </p>
+          {/if}
+          {#each catalog?.failures ?? [] as failure (failure.fileName)}
+            <p class="error" role="alert">Carte ignorée {failure.fileName} : {failure.reason}</p>
+          {/each}
+        </div>
+      {/if}
     </div>
     <!-- Navigation : barre fixe à côté de la carte (en bas par défaut,
          comme la barre du haut), en grands caractères ; affichée au
@@ -1595,26 +1691,42 @@
     background: var(--panel-bg);
   }
 
-  .side-slot[hidden] {
-    display: none;
-  }
-
-  .side-slot {
+  /* Alertes : en haut de la carte, à droite de la barre de route. */
+  .map-alerts {
     position: absolute;
     top: 0.75rem;
     left: calc(var(--route-left) + 0.75rem);
+    z-index: 6;
     display: flex;
     flex-direction: column;
-    max-height: calc(100% - 6.5rem);
+    gap: 0.3rem;
+    max-width: min(26rem, calc(100% - 2rem));
+    pointer-events: none;
+  }
+
+  .map-alerts:empty {
+    display: none;
+  }
+
+  .map-alerts p {
+    margin: 0;
+    padding: 0.3rem 0.6rem;
+    border-radius: 0.3rem;
+    background: var(--panel-bg);
+    box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+    font-size: 0.85rem;
+    pointer-events: auto;
+  }
+
+  .map-alerts .note {
+    color: var(--alert-fg);
+    font-weight: 700;
+    letter-spacing: 0.04em;
   }
 
   .panel {
     width: min(20rem, calc(100vw - 5rem));
     padding: 0.5rem 1rem 0.75rem;
-  }
-
-  .route-slot[hidden] {
-    display: none;
   }
 
   /* Colonne de droite : Mouillage et Navigation gardent leur taille, le
@@ -1643,23 +1755,9 @@
 
   /* Barre de route affichée en bas : colonnes raccourcies d'autant. */
 
-  header {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .version,
   .muted {
     color: var(--muted);
     font-size: 0.75rem;
-  }
-
-  .charts ul {
-    margin: 0.25rem 0;
-    padding-left: 1.1rem;
-    font-size: 0.85rem;
   }
 
   .hint {
@@ -1674,11 +1772,6 @@
 
   .warn {
     color: var(--alert-fg);
-  }
-
-  h2 {
-    margin: 0.75rem 0 0.25rem;
-    font-size: 1rem;
   }
 
   .notice {

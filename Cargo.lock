@@ -2377,7 +2377,7 @@ dependencies = [
 
 [[package]]
 name = "nautik-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2394,7 +2394,7 @@ dependencies = [
 
 [[package]]
 name = "nautik-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2421,7 +2421,7 @@ dependencies = [
 
 [[package]]
 name = "nav-ais"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "nav-core",
@@ -2433,7 +2433,7 @@ dependencies = [
 
 [[package]]
 name = "nav-alarms"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "nav-core",
@@ -2446,7 +2446,7 @@ dependencies = [
 
 [[package]]
 name = "nav-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "chrono",
@@ -2467,7 +2467,7 @@ dependencies = [
 
 [[package]]
 name = "nav-charts"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "nav-core",
@@ -2483,7 +2483,7 @@ dependencies = [
 
 [[package]]
 name = "nav-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2493,7 +2493,7 @@ dependencies = [
 
 [[package]]
 name = "nav-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "nav-ais",
@@ -2516,7 +2516,7 @@ dependencies = [
 
 [[package]]
 name = "nav-geodesy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geographiclib-rs",
  "nav-core",
@@ -2524,7 +2524,7 @@ dependencies = [
 
 [[package]]
 name = "nav-nmea0183"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "nav-ais",
@@ -2539,14 +2539,14 @@ dependencies = [
 
 [[package]]
 name = "nav-nmea2000"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nav-core",
 ]
 
 [[package]]
 name = "nav-poi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nav-core",
  "reqwest",
@@ -2561,7 +2561,7 @@ dependencies = [
 
 [[package]]
 name = "nav-routing"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "nav-core",
@@ -2575,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "nav-signalk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -2593,7 +2593,7 @@ dependencies = [
 
 [[package]]
 name = "nav-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "nav-alarms",
@@ -2612,7 +2612,7 @@ dependencies = [
 
 [[package]]
 name = "nav-weather"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "reqwest",

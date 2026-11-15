@@ -15,6 +15,8 @@
     silent: boolean;
     northUp: boolean;
     canCenter: boolean;
+    /** Suivi du bateau : `null` si l.option est désactivée (centrage unique). */
+    following?: boolean | null;
     layout: PanelLayout;
     /** Contenu du menu Calques, déroulé sous (ou sur) son bouton. */
     layersMenu: Snippet;
@@ -44,9 +46,10 @@
     recordBusy?: boolean;
     /** Démarre ou arrête l'enregistrement de la trace. */
     onrecord: () => void;
-    /** Homme à la mer en cours. */
-    mobActive: boolean;
-    onmob: () => void;
+    /** Une route est suivie : l'icône de la barre de route est proposée. */
+    routeActive?: boolean;
+    /** Ouvre le gestionnaire des routes, traces et marques (Paramètres). */
+    onroutes?: () => void;
     /** Ouvre la météo (fichiers GRIB) dans les Paramètres. */
     onweather?: () => void;
     /** Ouvre le journal de bord dans les Paramètres. */
@@ -58,6 +61,8 @@
     silent,
     northUp,
     canCenter,
+    following = null,
+    routeActive = false,
     layout,
     layersMenu,
     hiddenLayers,
@@ -77,8 +82,7 @@
     recording,
     recordBusy = false,
     onrecord,
-    mobActive,
-    onmob,
+    onroutes,
     onweather,
     onlogbook,
   }: Props = $props();
@@ -87,14 +91,6 @@
   const METRICS: { id: string; label: string }[] = [
     { id: 'sog', label: 'SOG' },
     { id: 'tws', label: 'VENT' },
-  ];
-  const TOGGLES: { id: PanelId; icon: IconName }[] = [
-    { id: 'side', icon: 'panel' },
-    { id: 'anchor', icon: 'anchor' },
-    { id: 'live', icon: 'gauge' },
-    { id: 'ais', icon: 'ais' },
-    { id: 'route', icon: 'route' },
-    { id: 'routeBar', icon: 'routebar' },
   ];
   const metrics = $derived.by(() => {
     // Vent réel : tuiles d'environnement (force).
@@ -125,9 +121,17 @@
     </button>
     <button
       type="button"
+      class:toggle={following !== null}
       aria-label="Centrer sur le bateau"
-      title={canCenter ? 'Centrer sur le bateau' : 'Centrer : aucune position'}
-      disabled={!canCenter}
+      aria-pressed={following ?? undefined}
+      title={!canCenter && !following
+        ? 'Centrer : aucune position'
+        : following === null
+          ? 'Centrer sur le bateau'
+          : following
+            ? 'La carte suit le bateau (cliquer, ou déplacer la carte, pour arrêter)'
+            : 'Centrer sur le bateau et faire défiler la carte avec lui'}
+      disabled={!canCenter && !following}
       onclick={oncenter}
     >
       <Icon name="center" />
@@ -214,7 +218,24 @@
     {/if}
   </div>
 
-  <div class="group" role="toolbar" aria-label="Trace">
+  <span class="sep" aria-hidden="true"></span>
+
+  <!-- Panneaux et outils de bord, dans l'ordre : mouillage, navigation,
+       trace, routes, barre de route, AIS, panneau, météo, journal. -->
+  {#snippet toggle(id: PanelId, icon: IconName)}
+    <button
+      type="button"
+      aria-label={PANEL_LABELS[id]}
+      aria-pressed={layout[id].visible}
+      title={layout[id].visible ? `Masquer ${PANEL_LABELS[id]}` : `Afficher ${PANEL_LABELS[id]}`}
+      onclick={() => ontoggle(id)}
+    >
+      <Icon name={icon} />
+    </button>
+  {/snippet}
+  <div class="group" role="toolbar" aria-label="Panneaux">
+    {@render toggle('anchor', 'anchor')}
+    {@render toggle('live', 'gauge')}
     <button
       type="button"
       class="record"
@@ -228,32 +249,41 @@
     >
       <Icon name={recording ? 'stop' : 'play'} />
     </button>
+    {#if onroutes}
+      <button
+        type="button"
+        aria-label="Routes, traces et marques"
+        title="Routes, traces et marques (gestionnaire dans les Paramètres)"
+        onclick={onroutes}
+      >
+        <Icon name="route" />
+      </button>
+    {/if}
+    {#if routeActive}
+      {@render toggle('routeBar', 'routebar')}
+    {/if}
+    {@render toggle('ais', 'ais')}
+    {#if onweather}
+      <button
+        type="button"
+        aria-label="Météo"
+        title="Météo : fichiers GRIB et vent"
+        onclick={onweather}
+      >
+        <Icon name="weather" />
+      </button>
+    {/if}
+    {#if onlogbook}
+      <button
+        type="button"
+        aria-label="Journal de bord"
+        title="Journal de bord"
+        onclick={onlogbook}
+      >
+        <Icon name="log" />
+      </button>
+    {/if}
   </div>
-
-  {#if onweather || onlogbook}
-    <div class="group" role="toolbar" aria-label="Météo et journal">
-      {#if onweather}
-        <button
-          type="button"
-          aria-label="Météo"
-          title="Météo : fichiers GRIB et vent"
-          onclick={onweather}
-        >
-          <Icon name="weather" />
-        </button>
-      {/if}
-      {#if onlogbook}
-        <button
-          type="button"
-          aria-label="Journal de bord"
-          title="Journal de bord"
-          onclick={onlogbook}
-        >
-          <Icon name="log" />
-        </button>
-      {/if}
-    </div>
-  {/if}
 
   <span class="sep" aria-hidden="true"></span>
 
@@ -276,48 +306,6 @@
       </div>
     {/each}
   </div>
-
-  <span class="sep" aria-hidden="true"></span>
-
-  <div class="group" role="toolbar" aria-label="Panneaux">
-    {#each TOGGLES as { id, icon } (id)}
-      <button
-        type="button"
-        aria-label={PANEL_LABELS[id]}
-        aria-pressed={layout[id].visible}
-        title={layout[id].visible ? `Masquer ${PANEL_LABELS[id]}` : `Afficher ${PANEL_LABELS[id]}`}
-        onclick={() => ontoggle(id)}
-      >
-        <Icon name={icon} />
-      </button>
-    {/each}
-  </div>
-
-  <!-- Homme à la mer : en fin de barre, juste à gauche de l'état des
-       données. -->
-  <button
-    type="button"
-    class="mob"
-    class:on={mobActive}
-    aria-label="Homme à la mer"
-    title={mobActive
-      ? 'Homme à la mer en cours (le point n’est pas déplacé)'
-      : 'Homme à la mer : marque le point MOB à la position du bateau (Ctrl+M)'}
-    onclick={onmob}
-  >
-    <!-- Bouée couronne lancée vers la personne à la mer. -->
-    <svg class="buoy" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <path class="wave" d="M1 29.5q2.5-2.2 5 0t5 0t5 0t5 0t5 0t5 0" />
-      <path class="rope" d="M8.7 21.3q-4.5 1.5-5.5 6.7" />
-      <circle class="ring" cx="17" cy="13" r="9" />
-      <path
-        class="band"
-        d="M21.2 17.2L25.5 21.5M12.8 17.2L8.5 21.5M12.8 8.8L8.5 4.5M21.2 8.8L25.5 4.5"
-      />
-      <circle class="edge" cx="17" cy="13" r="12" />
-      <circle class="edge" cx="17" cy="13" r="6" />
-    </svg>
-  </button>
 </div>
 
 <style>
@@ -327,69 +315,6 @@
     gap: 0.5rem;
     padding: 0.25rem 0.35rem;
     flex-wrap: wrap;
-  }
-
-  .mob {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.1rem 0.25rem;
-    border: 2px solid #e53935;
-    border-radius: 0.35rem;
-    background: #fff;
-    cursor: pointer;
-  }
-
-  .buoy {
-    width: 1.9rem;
-    height: 1.9rem;
-  }
-
-  .buoy .ring {
-    fill: none;
-    stroke: #e53935;
-    stroke-width: 6;
-  }
-
-  .buoy .band {
-    fill: none;
-    stroke: #fff;
-    stroke-width: 4.2;
-  }
-
-  .buoy .edge {
-    fill: none;
-    stroke: #8e1b18;
-    stroke-width: 0.8;
-  }
-
-  .buoy .rope {
-    fill: none;
-    stroke: #6d4c41;
-    stroke-width: 1.3;
-    stroke-linecap: round;
-  }
-
-  .buoy .wave {
-    fill: none;
-    stroke: #1e88e5;
-    stroke-width: 1.4;
-    stroke-linecap: round;
-  }
-
-  .mob:hover,
-  .mob:focus-visible {
-    background: #ffebee;
-  }
-
-  .mob.on {
-    animation: mob-blink 1s steps(2, start) infinite;
-  }
-
-  @keyframes mob-blink {
-    to {
-      background: #e53935;
-    }
   }
 
   .group {

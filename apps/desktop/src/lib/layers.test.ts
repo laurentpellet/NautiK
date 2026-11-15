@@ -5,6 +5,7 @@ import {
   MAX_HIDDEN_CHARTS,
   hiddenChartNames,
   hiddenLayers,
+  layerLabel,
   loadHiddenCharts,
   loadLayers,
   saveHiddenCharts,
@@ -81,6 +82,26 @@ describe('calques', () => {
     expect(vectorLabel({ enc: true, cm93: true }, false)).toEqual(['ENC']);
     expect(vectorLabel({ enc: false, cm93: true }, true)).toEqual(['CM93']);
     expect(vectorLabel({ enc: false, cm93: false }, true)).toEqual([]);
+  });
+
+  it('utilise le nom choisi pour la CM93', () => {
+    expect(layerLabel('cm93')).toBe('Cartes CM93');
+    expect(layerLabel('cm93', 'C-Map 2008')).toBe('C-Map 2008');
+    expect(layerLabel('enc', 'C-Map 2008')).toBe('Cartes ENC (S-57)');
+    expect(vectorLabel({ enc: true, cm93: true }, true, 'C-Map')).toEqual(['ENC', 'C-Map']);
+    expect(vectorLabel({ enc: false, cm93: true }, false, 'C-Map')).toEqual([]);
+    const layers = { ...DEFAULT_LAYERS, cm93: false };
+    expect(hiddenLayers(layers, true, 'C-Map')).toEqual(['C-Map']);
+    expect(hiddenLayers(layers, false, 'C-Map')).toEqual([]);
+  });
+
+  it("ne propose pas les ENC s'il n'y a aucune cellule", () => {
+    expect(vectorKeys(true, false)).toEqual(['cm93']);
+    expect(vectorKeys(false, false)).toEqual([]);
+    expect(vectorLabel({ enc: true, cm93: true }, true, null, false)).toEqual(['CM93']);
+    const layers = { ...DEFAULT_LAYERS, enc: false };
+    expect(hiddenLayers(layers, true, null, false)).toEqual([]);
+    expect(hiddenLayers(layers, true, null, true)).toEqual(['Cartes ENC (S-57)']);
   });
 });
 

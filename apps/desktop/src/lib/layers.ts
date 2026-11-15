@@ -59,16 +59,32 @@ export const OBJECT_KEYS = [
   'laylines',
 ] as const;
 
-/** Cartes vectorielles proposées : ENC toujours, CM93 si une base est trouvée. */
-export function vectorKeys(cm93Available: boolean): (keyof VectorCharts)[] {
-  return cm93Available ? [...VECTOR_KEYS] : ['enc'];
+/**
+ * Cartes vectorielles proposées : ENC si le dossier contient des cellules
+ * S-57, CM93 si une base est trouvée.
+ */
+export function vectorKeys(cm93Available: boolean, encAvailable = true): (keyof VectorCharts)[] {
+  return VECTOR_KEYS.filter((k) => (k === 'enc' ? encAvailable : cm93Available));
 }
 
-/** Libellé court des cartes vectorielles affichées (« ENC, CM93 »). */
-export function vectorLabel(charts: VectorCharts, cm93Available: boolean): string[] {
+/** Libellé du calque : nom choisi pour la CM93, sinon libellé par défaut. */
+export function layerLabel(key: keyof MapLayers, cm93Name: string | null = null): string {
+  return key === 'cm93' && cm93Name ? cm93Name : LAYER_LABELS[key];
+}
+
+/**
+ * Libellé court des cartes vectorielles affichées (« ENC, CM93 »), avec le
+ * nom choisi pour la CM93.
+ */
+export function vectorLabel(
+  charts: VectorCharts,
+  cm93Available: boolean,
+  cm93Name: string | null = null,
+  encAvailable = true,
+): string[] {
   const names: string[] = [];
-  if (charts.enc) names.push('ENC');
-  if (cm93Available && charts.cm93) names.push('CM93');
+  if (encAvailable && charts.enc) names.push('ENC');
+  if (cm93Available && charts.cm93) names.push(cm93Name ?? 'CM93');
   return names;
 }
 
@@ -115,12 +131,17 @@ export function saveLayers(
 
 /**
  * Calques masqués, pour le rappel affiché sur la carte (CM93 seulement
- * si une base est trouvée).
+ * si une base est trouvée, ENC seulement s'il y a des cellules).
  */
-export function hiddenLayers(layers: MapLayers, cm93Available = false): string[] {
+export function hiddenLayers(
+  layers: MapLayers,
+  cm93Available = false,
+  cm93Name: string | null = null,
+  encAvailable = true,
+): string[] {
   return (Object.keys(LAYER_LABELS) as (keyof MapLayers)[])
-    .filter((k) => !layers[k] && (k !== 'cm93' || cm93Available))
-    .map((k) => LAYER_LABELS[k]);
+    .filter((k) => !layers[k] && (k !== 'cm93' || cm93Available) && (k !== 'enc' || encAvailable))
+    .map((k) => layerLabel(k, cm93Name));
 }
 
 /**

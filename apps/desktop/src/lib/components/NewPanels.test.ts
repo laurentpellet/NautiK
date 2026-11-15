@@ -13,6 +13,8 @@ import { MarksApi } from '../services/marks';
 import { ReplayController } from '../replay.svelte';
 import { LogbookController } from '../logbook.svelte';
 import { LogbookApi } from '../services/logbook';
+import type { AlarmEvent } from '../services/alarms';
+import { formatLocalDateTime } from '../format';
 
 const pos = { latitudeDeg: -17.5, longitudeDeg: -149.6 };
 const mark = {
@@ -89,7 +91,7 @@ describe('panneau de relecture', () => {
 });
 
 describe('recherche', () => {
-  it('affiche les résultats et transmet le choix', async () => {
+  it('affiche les résultats pendant la frappe et transmet le choix', async () => {
     const call = vi.fn(() =>
       Promise.resolve([{ kind: 'mark', name: 'Patate', detail: null, position: pos }]),
     );
@@ -98,11 +100,30 @@ describe('recherche', () => {
     await fireEvent.input(screen.getByLabelText('Rechercher un lieu'), {
       target: { value: 'pat' },
     });
-    await fireEvent.click(screen.getByRole('button', { name: 'Chercher' }));
+    // Sans Entrée : résultats après une courte pause de frappe.
     const option = await screen.findByRole('option');
+    expect(call).toHaveBeenCalledTimes(1);
     expect(option.textContent).toContain('Marque');
     await fireEvent.click(option);
     expect(onselect).toHaveBeenCalledWith(expect.objectContaining({ name: 'Patate' }));
+  });
+
+  it('ne cherche qu’une fois pour une frappe rapide, efface sur champ vide', async () => {
+    const call = vi.fn(() =>
+      Promise.resolve([{ kind: 'mark', name: 'Patate', detail: null, position: pos }]),
+    );
+    render(SearchBox, { onselect: vi.fn(), call });
+    const field = screen.getByLabelText('Rechercher un lieu');
+    for (const value of ['p', 'pa', 'pat']) {
+      await fireEvent.input(field, { target: { value } });
+    }
+    expect(await screen.findByRole('option')).toBeTruthy();
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(call).toHaveBeenCalledWith('search_places', { query: 'pat' });
+    await fireEvent.input(field, { target: { value: '' } });
+    expect(screen.queryByRole('option')).toBeNull();
+    expect(screen.queryByText('Aucun résultat.')).toBeNull();
+    expect(call).toHaveBeenCalledTimes(1);
   });
 
   it('signale l’absence de résultat et les erreurs', async () => {
@@ -141,10 +162,28 @@ describe('journal de bord', () => {
       if (command === 'get_logbook_settings') return Promise.resolve({ autoIntervalMin: 60 });
       return Promise.resolve({ ...entry, id: 'e2', kind: 'manual', text: 'Ris pris' });
     });
-    const logbook = new LogbookController(new LogbookApi(call));
+    const alarm: AlarmEvent = {
+      id: 'a1',
+      alarm: 'anchor',
+      kind: 'activated',
+      at: Date.parse('2026-11-14T09:00:00Z'),
+      message: 'Dérapage de 40 m',
+      distanceM: 40,
+      simulated: false,
+    };
+    const logbook = new LogbookController(new LogbookApi(call), () => Promise.resolve([alarm]));
     const status = createRawSnippet(() => ({ render: () => '<span></span>' }));
     render(LogbookView, { logbook, status });
     expect(await screen.findByText('obsolète')).toBeTruthy();
+    // Alarme intercalée (plus récente que l'entrée) ; heures locales.
+    const alarmRow = await screen.findByTestId('log-alarm');
+    expect(alarmRow.textContent).toContain('Mouillage');
+    expect(alarmRow.textContent).toContain('Dérapage de 40 m');
+    expect(alarmRow.textContent).toContain(formatLocalDateTime(alarm.at));
+    const rows = screen.getAllByRole('row').slice(1);
+    expect(rows[0]).toBe(alarmRow);
+    expect(rows[1]?.textContent).toContain(formatLocalDateTime(Date.parse(entry.at)));
+    expect(screen.getByRole('columnheader', { name: 'Heure (locale)' })).toBeTruthy();
     expect(screen.getByText('simulation')).toBeTruthy();
     expect(screen.getByText('1013.0 hPa')).toBeTruthy();
     await fireEvent.input(screen.getByLabelText("Texte de l'entrée"), {

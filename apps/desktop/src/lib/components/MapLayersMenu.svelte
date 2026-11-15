@@ -5,6 +5,7 @@
   // carte par l'application.
   import {
     LAYER_LABELS,
+    layerLabel,
     OBJECT_KEYS,
     toggleChart,
     vectorKeys,
@@ -12,6 +13,7 @@
     type VectorCharts,
   } from '../layers';
   import type { ChartInfo } from '../services/charts';
+  import { sortCharts, type ChartSort } from '../chartNames.svelte';
 
   interface Props {
     layers: MapLayers;
@@ -26,6 +28,12 @@
     onvectorchange?: (vector: VectorCharts) => void;
     /** Une base CM93 est trouvée : son choix est proposé. */
     cm93?: boolean;
+    /** Nom choisi pour la CM93 (Paramètres → Cartes), sinon libellé par défaut. */
+    cm93Name?: string | null;
+    /** Tri de la liste des cartes (Paramètres → Cartes). */
+    sort?: ChartSort;
+    /** Le dossier ENC contient des cellules S-57 : leur choix est proposé. */
+    enc?: boolean;
     /** Afficher aussi les objets (routes, traces, AIS). */
     objects?: boolean;
   }
@@ -39,11 +47,14 @@
     vector,
     onvectorchange,
     cm93 = false,
+    cm93Name = null,
+    sort = 'detail',
+    enc = true,
     objects = true,
   }: Props = $props();
 
-  // Plus détaillée en tête, comme dans le panneau Cartes.
-  const chartList = $derived([...charts].reverse());
+  // Ordre choisi dans Paramètres → Cartes (par défaut : plus détaillée en tête).
+  const chartList = $derived(sortCharts(charts, sort));
   const shownVector = $derived(vector ?? { enc: layers.enc, cm93: layers.cm93 });
 
   function setVector(key: keyof VectorCharts, checked: boolean): void {
@@ -70,14 +81,14 @@
       </label>
     {/each}
   {/if}
-  {#each vectorKeys(cm93) as key (key)}
+  {#each vectorKeys(cm93, enc) as key (key)}
     <label>
       <input
         type="checkbox"
         checked={shownVector[key]}
         onchange={(e) => setVector(key, e.currentTarget.checked)}
       />
-      {LAYER_LABELS[key]}
+      {layerLabel(key, cm93Name)}
     </label>
   {/each}
   {#if objects}

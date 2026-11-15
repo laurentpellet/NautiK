@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { AisSnapshot, AisTarget } from '../services/ais';
 import {
+  AIS_HEADING_ICON,
+  AIS_LABEL_LAYER,
   AIS_ROUND_ICON,
   AIS_SOURCE,
   AIS_SYMBOL_LAYER,
   AIS_VESSEL_ICON,
-  ICON_SIZE,
+  HEADING_ICON_SIZE,
   aisData,
   aisIcons,
   aisLayers,
+  aisThemeChanges,
   targetRotation,
 } from './ais';
 
@@ -62,6 +65,9 @@ describe('couche AIS', () => {
       state: 'active',
       directed: true,
       rotation: 90,
+      hasHeading: false,
+      heading: 0,
+      label: 'ARANUI 5',
     });
   });
 
@@ -90,6 +96,28 @@ describe('couche AIS', () => {
     expect(aisData(null).features).toEqual([]);
   });
 
+  it('trace la ligne de cap seulement si le cap est déclaré, et nomme la cible', () => {
+    const [withHeading] = aisData(
+      snapshot([target({ headingRad: Math.PI / 4, history: [], vectorEnd: null })]),
+    ).features;
+    expect(withHeading?.properties).toMatchObject({ hasHeading: true, label: 'ARANUI 5' });
+    expect(withHeading?.properties.heading).toBeCloseTo(45);
+    const [noName] = aisData(
+      snapshot([target({ name: null, history: [], vectorEnd: null })]),
+    ).features;
+    expect(noName?.properties).toMatchObject({ hasHeading: false, label: 'MMSI 227000001' });
+    // Ligne de cap : pleine vers le nord (au-delà de la proue), vide au sud.
+    const heading = aisIcons().find((i) => i.id === AIS_HEADING_ICON)?.image;
+    const h = HEADING_ICON_SIZE / 2;
+    const alpha = (x: number, y: number) => heading?.data[(y * HEADING_ICON_SIZE + x) * 4 + 3] ?? 0;
+    expect(alpha(h, 12)).toBeGreaterThan(150);
+    expect(alpha(h, HEADING_ICON_SIZE - 12)).toBe(0);
+    expect(alpha(h + 12, 12)).toBe(0);
+    // Étiquette au thème de la carte.
+    expect(aisThemeChanges('night')[0]?.[0]).toBe(AIS_LABEL_LAYER);
+    expect(JSON.stringify(aisThemeChanges('night')[0]?.[1])).toContain('night:ais:');
+  });
+
   it('oriente le symbole selon le cap, sinon la route fond', () => {
     expect(targetRotation(target({ headingRad: Math.PI }))).toBeCloseTo(180);
     expect(targetRotation(target())).toBeCloseTo(90);
@@ -99,16 +127,20 @@ describe('couche AIS', () => {
   it('déclare des couches sur la source AIS, symboles au-dessus', () => {
     const layers = aisLayers();
     expect(layers.every((l) => 'source' in l && l.source === AIS_SOURCE)).toBe(true);
-    expect(layers.at(-1)?.id).toBe(AIS_SYMBOL_LAYER);
+    const ids = layers.map((l) => l.id);
+    expect(ids.at(-1)).toBe(AIS_LABEL_LAYER);
+    expect(ids.indexOf(AIS_SYMBOL_LAYER)).toBe(ids.length - 2);
+    expect(ids.indexOf('nautik-ais-heading')).toBeLessThan(ids.indexOf(AIS_SYMBOL_LAYER));
   });
 
   it('génère des icônes SDF pleines au centre et vides aux bords', () => {
     const icons = aisIcons();
-    expect(icons.map((i) => i.id)).toEqual([AIS_VESSEL_ICON, AIS_ROUND_ICON]);
+    expect(icons.map((i) => i.id)).toEqual([AIS_VESSEL_ICON, AIS_ROUND_ICON, AIS_HEADING_ICON]);
     for (const { image } of icons) {
-      expect(image.data).toHaveLength(ICON_SIZE * ICON_SIZE * 4);
-      const alpha = (x: number, y: number) => image.data[(y * ICON_SIZE + x) * 4 + 3];
-      expect(alpha(ICON_SIZE / 2, ICON_SIZE / 2)).toBeGreaterThan(192);
+      const size = image.width;
+      expect(image.data).toHaveLength(size * size * 4);
+      const alpha = (x: number, y: number) => image.data[(y * size + x) * 4 + 3] ?? 0;
+      expect(alpha(size / 2, size / 2)).toBeGreaterThan(192);
       expect(alpha(0, 0)).toBe(0);
     }
   });

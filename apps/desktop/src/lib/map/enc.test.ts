@@ -105,6 +105,15 @@ describe('symbologie ENC', () => {
     expect(sounding?.minzoom).toBe(12);
   });
 
+  it('remplit terre et profondeurs sans lissage (pas de fil aux jointures CM93)', () => {
+    const fills = encLayers('day').filter((l) => l.type === 'fill');
+    const paint = (id: string) =>
+      fills.find((l) => l.id === id)?.paint as Record<string, unknown> | undefined;
+    for (const id of ['enc-depth', 'enc-unsurveyed', 'enc-land']) {
+      expect(paint(id)?.['fill-antialias'], id).toBe(false);
+    }
+  });
+
   it('change toutes les propriétés au changement de thème', () => {
     const night = encThemeChanges('night');
     const land = night.find(([id, , p]) => id === 'enc-land' && p === 'fill-color');

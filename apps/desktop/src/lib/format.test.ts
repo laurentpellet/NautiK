@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatLocalDateTime,
   ENGINE_SILENCE_MS,
   formatAge,
   formatBearing,
@@ -150,5 +151,19 @@ describe('état de connexion', () => {
     expect(denied.level).toBe('alert');
     expect(denied.label).toContain('jeton');
     expect(describeConnection({ state: 'stopped' }).level).toBe('alert');
+  });
+});
+
+describe('heure locale', () => {
+  it('affiche date, heure et fuseau locaux (jamais UTC imposé)', () => {
+    const t = Date.UTC(2026, 10, 14, 9, 5);
+    const text = formatLocalDateTime(t);
+    const local = new Date(t);
+    const hh = String(local.getHours()).padStart(2, '0');
+    const mm = String(local.getMinutes()).padStart(2, '0');
+    expect(text).toContain(`${hh}:${mm}`);
+    expect(text).toContain(String(local.getDate()).padStart(2, '0'));
+    // Le fuseau est indiqué.
+    expect(text).toMatch(/(UTC|GMT|[A-Z]{3,})/);
   });
 });

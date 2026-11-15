@@ -169,6 +169,15 @@ fn intersects(cell: &[f64; 4], view: &ViewBounds) -> bool {
     }
 }
 
+/// La cellule touche la vue, partie au-delà de l'antiméridien comprise
+/// (l'emprise publiée d'une cellule à cheval est bornée à 180°).
+fn cell_in_view(cell: &Cm93CellRef, view: &ViewBounds) -> bool {
+    let [west, south, east, north] = cell.bounds;
+    let true_east = west + f64::from(cell.scale.cell_span()) / 3.0;
+    intersects(&[west, south, east, north], view)
+        || (true_east > 180.0 && intersects(&[-180.0, south, true_east - 360.0, north], view))
+}
+
 /// Cellules d'une vue choisie.
 #[derive(Debug, Clone, Default)]
 pub struct Cm93Selection<'a> {
@@ -196,7 +205,7 @@ impl Cm93Index {
             let level: Vec<&Cm93CellRef> = self
                 .cells
                 .iter()
-                .filter(|c| c.scale == scale && intersects(&c.bounds, view))
+                .filter(|c| c.scale == scale && cell_in_view(c, view))
                 .collect();
             if full || selection.cells.len() + level.len() > max {
                 full = true;
@@ -319,6 +328,19 @@ mod tests {
         let s = index.select(&[179.0, 0.0, -179.5, 0.3], 16);
         let names: Vec<_> = s.cells.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, ["02700537", "02700540"]);
+
+        // Cellule Z de 160°E à 160°W (emprise publiée bornée à 180°) : vue
+        // entière de l'autre côté de l'antiméridien.
+        let wide = Cm93Index {
+            cells: vec![
+                cell("02700480", Cm93Scale::Z),
+                cell("02700600", Cm93Scale::Z),
+            ],
+            ..Cm93Index::default()
+        };
+        let s = wide.select(&[-175.0, 10.0, -165.0, 20.0], 16);
+        let names: Vec<_> = s.cells.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["02700480"]);
     }
 
     #[test]

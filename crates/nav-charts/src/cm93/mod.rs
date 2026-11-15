@@ -34,7 +34,7 @@ use thiserror::Error;
 
 use crate::s57::Position;
 
-pub use display::map_features;
+pub use display::{covered_by, map_features, Cm93Coverage};
 pub use library::{
     cell_bounds, scan_cm93_cells, Cm93CellRef, Cm93Index, Cm93Selection, ViewBounds,
 };
@@ -439,6 +439,8 @@ impl<'a> Cursor<'a> {
 struct Header {
     bounds: [f64; 4],
     easting_min: f64,
+    /// Décalage (multiple de 360°) ramenant le bord ouest entre -180 et 180.
+    lon_shift: f64,
     northing_min: f64,
     x_rate: f64,
     y_rate: f64,
@@ -446,6 +448,17 @@ struct Header {
     points3d: usize,
     points2d: usize,
     features: usize,
+}
+
+/// Décalage (multiple de 360°) qui ramène la longitude du bord ouest
+/// `easting_min` (mètres) entre -180 (compris) et 180.
+fn lon_shift(easting_min: f64) -> f64 {
+    let west = (easting_min / CM93_RADIUS_M).to_degrees();
+    let mut wrapped = west.rem_euclid(360.0);
+    if wrapped >= 180.0 {
+        wrapped -= 360.0;
+    }
+    wrapped - west
 }
 
 fn read_header(c: &mut Cursor<'_>) -> Result<Header, Cm93Error> {
@@ -482,6 +495,7 @@ fn read_header(c: &mut Cursor<'_>) -> Result<Header, Cm93Error> {
     Ok(Header {
         bounds: [lon_min, lat_min, lon_max, lat_max],
         easting_min: e_min,
+        lon_shift: lon_shift(e_min),
         northing_min: n_min,
         x_rate: dx / 65535.0,
         y_rate: dy / 65535.0,
@@ -496,17 +510,16 @@ fn read_header(c: &mut Cursor<'_>) -> Result<Header, Cm93Error> {
 type GridPoint = (u16, u16);
 
 impl Header {
-    /// Coordonnées WGS 84 d'un point de la grille (longitude ramenée
-    /// entre -180 et 180).
+    /// Coordonnées WGS 84 d'un point de la grille. Les longitudes d'une
+    /// cellule restent continues : le bord ouest est ramené entre -180 et
+    /// 180, et une cellule à cheval sur l'antiméridien dépasse 180 à l'est
+    /// (la carte la replie). Ramener chaque point entre -180 et 180
+    /// couperait ses surfaces et ses lignes d'un bord à l'autre du monde.
     fn position(&self, (x, y): GridPoint) -> Position {
         let easting = f64::from(x) * self.x_rate + self.easting_min;
         let northing = f64::from(y) * self.y_rate + self.northing_min;
         let lat = (2.0 * (northing / CM93_RADIUS_M).exp().atan() - FRAC_PI_2).to_degrees();
-        let mut lon = (easting / CM93_RADIUS_M).to_degrees();
-        lon = lon.rem_euclid(360.0);
-        if lon > 180.0 {
-            lon -= 360.0;
-        }
+        let lon = (easting / CM93_RADIUS_M).to_degrees() + self.lon_shift;
         [lon, lat]
     }
 }

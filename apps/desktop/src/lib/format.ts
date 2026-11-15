@@ -205,3 +205,17 @@ export function describeConnection(state: ConnectionState | null): {
       return { label: 'Liaison arrêtée', level: 'alert' };
   }
 }
+
+const LOCAL_DATE_TIME = new Intl.DateTimeFormat('fr-FR', {
+  day: '2-digit',
+  month: '2-digit',
+  year: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZoneName: 'short',
+});
+
+/** Date et heure locales avec le fuseau (« 15/11/26 10:23 UTC−10 »). */
+export function formatLocalDateTime(t: number): string {
+  return LOCAL_DATE_TIME.format(t);
+}

@@ -438,6 +438,28 @@ export class NavigationController {
     return true;
   }
 
+  /**
+   * Convertit une mesure en route enregistrée (« Mesure HH:MM UTC »), non
+   * activée. Refusé sous deux points ou pendant l'édition d'une route.
+   */
+  async createFromPoints(points: LatLon[], now: number = Date.now()): Promise<boolean> {
+    if (this.editor) {
+      this.error = 'Terminez d’abord la route en cours d’édition.';
+      return false;
+    }
+    if (points.length < 2) {
+      this.error = 'Il faut au moins deux points pour créer une route.';
+      return false;
+    }
+    const name = `Mesure ${formatUtcClock(now)} UTC`;
+    const route = await this.run(() => this.api.createRoute(name, points));
+    await this.refresh();
+    if (!route) return false;
+    this.selectedRouteId = route.id;
+    this.notice = `Route « ${route.name} » créée`;
+    return true;
+  }
+
   async deactivate(): Promise<void> {
     await this.run(() => this.api.deactivateRoute());
     this.status = null;

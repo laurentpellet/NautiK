@@ -21,10 +21,23 @@
     onfullscreen: () => void;
     /** Outils de la carte (onglet Carte), entre les onglets et l'état. */
     tools?: Snippet;
+    /** Juste à droite de l'icône d'état des données (bouton MOB). */
+    afterStatus?: Snippet;
   }
 
-  let { tabs, tab, onselect, pills, now, theme, ontheme, fullscreen, onfullscreen, tools }: Props =
-    $props();
+  let {
+    tabs,
+    tab,
+    onselect,
+    pills,
+    now,
+    theme,
+    ontheme,
+    fullscreen,
+    onfullscreen,
+    tools,
+    afterStatus,
+  }: Props = $props();
 
   const alerts = $derived(activeAlerts(pills));
   const clock = $derived(localClock(now));
@@ -104,6 +117,7 @@
         </ul>
       {/if}
     </div>
+    {@render afterStatus?.()}
 
     <div class="end">
       {#if alerts.length > 0}

@@ -773,6 +773,57 @@ Critères (TEST_PLAN.md §7) :
 - [x] Bouton Réduire de la barre Navigation en haut (sur le côté : seul sur
   la première ligne, comme la barre de route) ; bouton MOB en fin de barre
   de la carte, juste à gauche de l'état des données ; tests.
+- [x] Gestionnaire des routes, traces et marques dans Paramètres → Routes
+  (état de la navigation, listes, édition) ; panneau Routes et traces
+  retiré de la carte, remplacé par un panneau « Édition sur la carte »
+  affiché seulement pendant un tracé ou la pose d'une marque (le fermer
+  annule l'édition) ; zoomer, tracer, poser une marque ou relire une
+  trace depuis le gestionnaire affiche la carte ; tests.
+- [x] Barre d'outils : séparateur après la recherche, puis mouillage,
+  navigation, enregistrement de la trace, routes (gestionnaire), barre de
+  route, AIS, panneau, météo et journal ; tests.
+- [x] Option « Faire défiler la carte avec le bateau » (Paramètres →
+  Général, activée par défaut) : le bouton Centrer devient un
+  interrupteur, la carte suit chaque position ; un déplacement à la main
+  arrête le suivi ; tests.
+- [x] CM93 : avertissement « cartes non officielles » retiré de la carte
+  (rappel dans Paramètres → Cartes) ; entités d'une cellule entièrement
+  dans la zone couverte (`_m_sor`) par une cellule plus détaillée de la
+  vue retirées par le moteur (plus de terre grossière qui déborde de la
+  côte détaillée, cache des cellules décodées) ; remplissages sans
+  lissage (plus de fil aux jointures des surfaces découpées) ; tests Rust
+  et frontend.
+- [x] CM93 aux petits zooms : longitudes continues dans une cellule à
+  cheval sur l'antiméridien (plus de bandes d'un bord à l'autre du monde),
+  sélection sur l'emprise réelle de ces cellules, masquage par les
+  cellules plus détaillées de part et d'autre de l'antiméridien ; rendu
+  vérifié (Pacifique, Béring, Aléoutiennes) ; tests Rust et frontend.
+- [x] Recherche d'un lieu : résultats pendant la frappe (pause de
+  200 ms, Entrée immédiate, champ vidé : résultats effacés) ; tests.
+- [x] Paramètres → Cartes : liste des cartes MBTiles chargées (fichier,
+  zooms) et nom à utiliser dans l'application (calques, volet de droite,
+  panneau), mémorisé par carte, validé, retour au nom d'origine ; tests.
+- [x] README réécrit pour le grand public (fonctionnalités d'abord).
+- [x] Nom personnalisé de la base CM93 (Paramètres → Cartes), repris par
+  le menu Calques, le volet de droite et le rappel des calques masqués ;
+  index des cartes lu au démarrage même ENC et CM93 décochées (la case
+  CM93 n'apparaissait qu'après avoir coché les ENC) ; case ENC masquée
+  sans cellule S-57 ; tests.
+- [x] Tri des listes de cartes (Paramètres → Cartes, menu Calques) :
+  détail, nom, fichier ; mémorisé ; empilement inchangé ; tests.
+- [x] Cibles AIS : clic dans le panneau = sélection et cadrage sur la
+  dernière position connue ; symboles agrandis, nom (zoom ≥ 8) et ligne
+  de cap (cap déclaré seulement) ; tests.
+- [x] Barre d'outils : icône Barre de route seulement pendant la
+  navigation ; panneau latéral supprimé, remplacé par un bandeau
+  d'alertes de la carte non masquable (moteur, position, liaison,
+  données rejetées, cartes, routes, AIS) ; version du moteur dans
+  Paramètres → Général ; MOB à droite de l'état des données ; tests.
+- [x] Mesure : longueur de chaque segment sur la carte ; conversion en
+  route enregistrée non activée (« Mesure HH:MM UTC ») ; tests.
+- [x] Journal de bord : événements d'alarme intercalés (lecture seule),
+  dates en heure locale avec fuseau, comme l'historique des alarmes ;
+  tests.
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).

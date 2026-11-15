@@ -21,7 +21,14 @@
   import type { ChartCatalog } from '../services/charts';
   import type { PositionFix } from '../services/position';
   import type { GeoBounds, LatLon, Route } from '../services/routing';
-  import { AIS_SOURCE, AIS_SYMBOL_LAYER, aisData, aisIcons, aisLayers } from '../map/ais';
+  import {
+    AIS_SOURCE,
+    AIS_SYMBOL_LAYER,
+    aisData,
+    aisIcons,
+    aisLayers,
+    aisThemeChanges,
+  } from '../map/ais';
   import { WIND_SOURCE, viewBounds, windData, windIcon, windLayers } from '../map/wind';
   import type { Bounds, WindVector } from '../services/weather';
   import { ANCHOR_SOURCE, anchorData, anchorLayers } from '../map/anchor';
@@ -64,7 +71,7 @@
     type PoiFeatures,
   } from '../map/poi';
   import { POI_ATTRIBUTION } from '../services/poi';
-  import { MEASURE_SOURCE, measureData, measureLayers } from '../map/measure';
+  import { MEASURE_SOURCE, measureData, measureLayers, measureThemeChanges } from '../map/measure';
   import { AIDS_SOURCE, aidsLayers, type aidsData } from '../map/aids';
   import { MARKS_SOURCE, marksLayers, marksThemeChanges, type MarkFeatures } from '../map/marks';
   import { REPLAY_SOURCE, replayLayers, type ReplayFeatures } from '../map/replay';
@@ -117,6 +124,10 @@
     anchorAlerting?: boolean;
     /** Cartes MBTiles masquées (identifiants du catalogue). */
     hiddenCharts?: string[];
+    /** La carte défile avec le bateau (chaque nouvelle position est centrée). */
+    follow?: boolean;
+    /** Carte déplacée à la main pendant le suivi : le suivi s.arrête. */
+    onunfollow?: () => void;
     /** Vue imposée (carte partagée verrouillée) ; `null` : carte libre. */
     camera?: MapCamera | null;
     /** Vue après chaque mouvement ; `user` : mouvement fait par l'utilisateur. */
@@ -129,6 +140,8 @@
     activeRouteColor?: string;
     /** Points de l'outil de mesure. */
     measure?: LatLon[];
+    /** Longueurs formatées des segments de la mesure (moteur). */
+    measureLegs?: string[] | null;
     /**
      * Clic droit (ou appui long) sans glisser : position visée et point
      * écran relatif à la carte, pour un menu contextuel.
@@ -166,12 +179,15 @@
     anchor = null,
     anchorAlerting = false,
     hiddenCharts = [],
+    follow = false,
+    onunfollow,
     camera = null,
     oncamera,
     enc = emptyEncCollection(),
     pois = emptyPoiCollection(),
     activeRouteColor = DEFAULT_ACTIVE_ROUTE_COLOR,
     measure = [],
+    measureLegs = null,
     oncontextmenu,
     aids = emptyCollection() as ReturnType<typeof aidsData>,
     mob = null,
@@ -266,7 +282,10 @@
     m.jumpTo({ zoom: startZoom(m.getZoom()) });
     m.on('movestart', (event) => {
       userMoving = !applying && event.originalEvent !== undefined;
-      if (userMoving) userMoved = true;
+      if (userMoving) {
+        userMoved = true;
+        if (follow) onunfollow?.();
+      }
     });
     m.on('move', () => {
       if (!applying) oncamera?.(cameraOf(m), byUser());
@@ -343,12 +362,12 @@
         m.addImage(id, image, { sdf: true });
       }
       m.addSource(AIS_SOURCE, { type: 'geojson', data: emptyCollection() });
-      for (const layer of aisLayers()) {
+      for (const layer of aisLayers(untrack(() => theme))) {
         m.addLayer(layer);
       }
       // Mesure au-dessus de tout : c'est l'outil en cours d'utilisation.
       m.addSource(MEASURE_SOURCE, { type: 'geojson', data: measureData([]) });
-      for (const layer of measureLayers()) {
+      for (const layer of measureLayers(untrack(() => theme))) {
         m.addLayer(layer);
       }
       loaded = true;
@@ -495,6 +514,8 @@
     }
     for (const [layer, image] of [
       ...overlayThemeChanges(t),
+      ...aisThemeChanges(t),
+      ...measureThemeChanges(t),
       ...poiThemeChanges(t),
       ...marksThemeChanges(t),
     ]) {
@@ -608,7 +629,7 @@
   });
 
   $effect(() => {
-    const data = measureData(measure);
+    const data = measureData(measure, measureLegs);
     if (map && loaded) map.getSource<GeoJSONSource>(MEASURE_SOURCE)?.setData(data);
   });
 
@@ -652,6 +673,8 @@
       centeredOnBoat = true;
       if (!userMoved) m.jumpTo({ center: lngLat });
     }
+    // Suivi : la carte défile avec le bateau, zoom et orientation gardés.
+    if (follow && !userMoving) m.easeTo({ center: lngLat, duration: 300 });
     if (!marker || !markerElement) {
       markerElement = document.createElement('div');
       markerElement.className = 'boat-marker';

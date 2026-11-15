@@ -1,16 +1,19 @@
 <script lang="ts">
   // Onglet Journal : entrées manuelles, relevés automatiques du moteur
-  // (intervalle réglable) et export CSV. Une position obsolète au moment
+  // (intervalle réglable), événements d'alarme intercalés et export CSV.
+  // Heures locales, fuseau indiqué. Une position obsolète au moment
   // de l'entrée reste signalée ; une donnée absente s'affiche « — ».
   import type { Snippet } from 'svelte';
   import {
     formatBearing,
     formatDepth,
     formatLatitude,
+    formatLocalDateTime,
     formatLongitude,
     formatSpeed,
   } from '../format';
   import type { LogbookController } from '../logbook.svelte';
+  import { EVENT_LABELS, type AlarmEvent } from '../services/alarms';
   import { AUTO_INTERVALS_MIN } from '../services/logbook';
 
   interface Props {
@@ -29,11 +32,11 @@
     void logbook.refresh();
   });
 
-  const timeFormat = new Intl.DateTimeFormat('fr-FR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-    timeZone: 'UTC',
-  });
+  const ALARM_NAMES: Record<AlarmEvent['alarm'], string> = {
+    anchor: 'Mouillage',
+    manOverboard: 'Homme à la mer',
+    positionLost: 'Perte de position',
+  };
 
   const intervalLabel = (m: number) =>
     m === 0 ? 'Désactivés' : m < 60 ? `Toutes les ${m} min` : `Toutes les ${m / 60} h`;
@@ -87,14 +90,18 @@
     <p class="notice" role="status">{logbook.notice}</p>
   {/if}
 
-  {#if logbook.entries.length === 0}
+  {#if logbook.alarmsError}
+    <p class="error" role="alert">{logbook.alarmsError}</p>
+  {/if}
+
+  {#if logbook.rows.length === 0}
     <p class="muted">Journal vide.</p>
   {:else}
     <div class="table">
       <table>
         <thead>
           <tr>
-            <th>Heure (UTC)</th>
+            <th>Heure (locale)</th>
             <th>Position</th>
             <th>Fond</th>
             <th>Cap</th>
@@ -106,41 +113,54 @@
           </tr>
         </thead>
         <tbody>
-          {#each logbook.entries as e (e.id)}
-            <tr class:auto={e.kind === 'auto'}>
-              <td class="num">{timeFormat.format(e.at)}</td>
-              <td class="num" class:stale={e.positionStale}>
-                {#if e.position}
-                  {formatLatitude(e.position.latitudeDeg)}<br />{formatLongitude(
-                    e.position.longitudeDeg,
-                  )}
-                  {#if e.positionStale}<span class="tag">obsolète</span>{/if}
-                {:else}
-                  <span class="tag">aucune</span>
-                {/if}
-              </td>
-              <td class="num">{formatSpeed(e.sogMps)}<br />{formatBearing(e.cogRad)}</td>
-              <td class="num">{formatBearing(e.headingRad)}</td>
-              <td class="num">{formatSpeed(e.twsMps)}<br />{formatBearing(e.twdRad)}</td>
-              <td class="num"
-                >{e.pressurePa === null ? '—' : `${(e.pressurePa / 100).toFixed(1)} hPa`}</td
-              >
-              <td class="num">{formatDepth(e.depthM)}</td>
-              <td class="text">
-                {#if e.kind === 'auto'}<span class="tag">auto</span>{/if}
-                {#if e.simulated}<span class="tag sim">simulation</span>{/if}
-                {e.text ?? ''}
-              </td>
-              <td>
-                <button
-                  type="button"
-                  class="danger"
-                  aria-label="Supprimer l'entrée"
-                  disabled={logbook.busy}
-                  onclick={() => confirmDelete(e.id)}>✕</button
+          {#each logbook.rows as row (row.id)}
+            {#if row.type === 'alarm'}
+              {@const a = row.event}
+              <tr class="alarm {a.kind}" data-testid="log-alarm">
+                <td class="num">{formatLocalDateTime(a.at)}</td>
+                <td class="text" colspan="8">
+                  <span class="tag alarm">alarme</span>
+                  {#if a.simulated}<span class="tag sim">simulation</span>{/if}
+                  <strong>{ALARM_NAMES[a.alarm]}</strong> — {EVENT_LABELS[a.kind]} : {a.message}
+                </td>
+              </tr>
+            {:else}
+              {@const e = row.entry}
+              <tr class:auto={e.kind === 'auto'}>
+                <td class="num">{formatLocalDateTime(e.at)}</td>
+                <td class="num" class:stale={e.positionStale}>
+                  {#if e.position}
+                    {formatLatitude(e.position.latitudeDeg)}<br />{formatLongitude(
+                      e.position.longitudeDeg,
+                    )}
+                    {#if e.positionStale}<span class="tag">obsolète</span>{/if}
+                  {:else}
+                    <span class="tag">aucune</span>
+                  {/if}
+                </td>
+                <td class="num">{formatSpeed(e.sogMps)}<br />{formatBearing(e.cogRad)}</td>
+                <td class="num">{formatBearing(e.headingRad)}</td>
+                <td class="num">{formatSpeed(e.twsMps)}<br />{formatBearing(e.twdRad)}</td>
+                <td class="num"
+                  >{e.pressurePa === null ? '—' : `${(e.pressurePa / 100).toFixed(1)} hPa`}</td
                 >
-              </td>
-            </tr>
+                <td class="num">{formatDepth(e.depthM)}</td>
+                <td class="text">
+                  {#if e.kind === 'auto'}<span class="tag">auto</span>{/if}
+                  {#if e.simulated}<span class="tag sim">simulation</span>{/if}
+                  {e.text ?? ''}
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    class="danger"
+                    aria-label="Supprimer l'entrée"
+                    disabled={logbook.busy}
+                    onclick={() => confirmDelete(e.id)}>✕</button
+                  >
+                </td>
+              </tr>
+            {/if}
           {/each}
         </tbody>
       </table>
@@ -243,6 +263,11 @@
 
   .tag.sim {
     color: var(--warning, #ef6c00);
+  }
+
+  .tag.alarm,
+  tr.alarm.activated {
+    color: var(--alert-fg);
   }
 
   .sr {

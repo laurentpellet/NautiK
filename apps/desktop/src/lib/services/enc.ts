@@ -302,13 +302,18 @@ export function parseCm93CellData(value: unknown): Cm93CellData {
   };
 }
 
+/**
+ * Position `[lon, lat]`. Une entité qui franchit l'antiméridien garde des
+ * longitudes continues (au-delà de ±180, jusqu'à ±360) : la carte la
+ * replie elle-même, sans trait parasite d'un bord à l'autre.
+ */
 function parsePosition(value: unknown): [number, number] {
   if (!Array.isArray(value) || value.length !== 2) throw new Error('position ENC invalide');
   const [lon, lat] = value as unknown[];
   if (
     typeof lon !== 'number' ||
     typeof lat !== 'number' ||
-    !(Math.abs(lon) <= 180) ||
+    !(Math.abs(lon) <= 360) ||
     !(Math.abs(lat) <= 90)
   ) {
     throw new Error('position ENC hors limites');
@@ -420,7 +425,11 @@ export class EncApi {
   }
 
   /** Entités d'une cellule CM93 de la vue. */
-  async cm93Features(path: string): Promise<Cm93CellData> {
-    return parseCm93CellData(await this.invokeFn('get_cm93_cell_features', { path }));
+  /**
+   * Entités d'une cellule CM93 ; `finer` : cellules plus détaillées de la
+   * vue, dont la zone couverte masque la cellule (tri fait par le moteur).
+   */
+  async cm93Features(path: string, finer: string[] = []): Promise<Cm93CellData> {
+    return parseCm93CellData(await this.invokeFn('get_cm93_cell_features', { path, finer }));
   }
 }

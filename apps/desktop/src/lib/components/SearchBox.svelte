@@ -46,12 +46,35 @@
     }
   }
 
-  async function search(event: SubmitEvent) {
+  /** Pause de frappe avant de chercher (ms). */
+  const TYPING_DELAY_MS = 200;
+
+  // Résultats pendant la frappe, après une courte pause ; champ vidé :
+  // résultats effacés. Une réponse dépassée par une saisie est ignorée.
+  $effect(() => {
+    const text = query;
+    if (text.trim() === '') {
+      seq += 1;
+      results = [];
+      searched = false;
+      error = null;
+      return;
+    }
+    const timer = setTimeout(() => void run(text), TYPING_DELAY_MS);
+    return () => clearTimeout(timer);
+  });
+
+  /** Entrée : recherche immédiate. */
+  function search(event: SubmitEvent) {
     event.preventDefault();
+    void run(query);
+  }
+
+  async function run(text: string) {
     const mine = ++seq;
     error = null;
     try {
-      const found = await (call ? searchPlaces(query, call) : searchPlaces(query));
+      const found = await (call ? searchPlaces(text, call) : searchPlaces(text));
       if (mine !== seq) return;
       results = found;
       searched = true;

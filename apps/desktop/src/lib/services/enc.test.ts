@@ -237,7 +237,12 @@ describe('index et entités ENC pour la carte', () => {
     expect(bad(feature({ depth: 'profond' }))).toThrow();
     expect(bad(feature({ colour: 1.5 }))).toThrow();
     expect(bad({ ...feature(), type: 'Autre' })).toThrow();
-    expect(bad(feature({}, { type: 'Point', coordinates: [200, 0] }))).toThrow('hors limites');
+    expect(bad(feature({}, { type: 'Point', coordinates: [400, 0] }))).toThrow('hors limites');
+    expect(bad(feature({}, { type: 'Point', coordinates: [0, 95] }))).toThrow('hors limites');
+    // Au-delà de l’antiméridien (cellule à cheval) : longitude continue acceptée.
+    expect(parseEncFeatures([feature({}, { type: 'Point', coordinates: [195, 10] })])).toHaveLength(
+      1,
+    );
     expect(bad(feature({}, { type: 'Point', coordinates: [0, Number.NaN] }))).toThrow();
     expect(bad(feature({}, { type: 'Point', coordinates: [0] }))).toThrow();
     expect(bad(feature({}, { type: 'GeometryCollection', geometries: [] }))).toThrow();
@@ -343,9 +348,11 @@ describe('base CM93', () => {
     const view = await api.cm93View({ west: -150, south: -18, east: -149, north: -17 });
     expect(view.cells).toHaveLength(1);
     await api.cm93Features(cm93Cell.path);
+    await api.cm93Features(cm93Cell.path, ['02100600/G/X.G']);
     expect(calls).toEqual([
       ['get_cm93_view', { view: [-150, -18, -149, -17] }],
-      ['get_cm93_cell_features', { path: cm93Cell.path }],
+      ['get_cm93_cell_features', { path: cm93Cell.path, finer: [] }],
+      ['get_cm93_cell_features', { path: cm93Cell.path, finer: ['02100600/G/X.G'] }],
     ]);
   });
 });

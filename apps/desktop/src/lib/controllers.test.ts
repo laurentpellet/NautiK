@@ -3,8 +3,9 @@ import { MarksController, boundsAround, nextMarkName } from './marks.svelte';
 import { MarksApi, type Mark } from './services/marks';
 import { ReplayController, indexAt } from './replay.svelte';
 import type { TrackProfile } from './services/trackProfile';
-import { LogbookController } from './logbook.svelte';
-import { LOG_PAGE, LogbookApi } from './services/logbook';
+import { LOG_ALARM_EVENTS, LogbookController, logRows } from './logbook.svelte';
+import { LOG_PAGE, LogbookApi, parseLogEntry } from './services/logbook';
+import type { AlarmEvent } from './services/alarms';
 import { marksData } from './map/marks';
 import { replayData } from './map/replay';
 
@@ -236,5 +237,46 @@ describe('contrôleur du journal', () => {
     expect(c.entries[0]?.id).toBe('e0');
     await c.exportCsv();
     expect(c.notice).toBe('Journal exporté');
+  });
+
+  it('intercale les alarmes par date, sans devancer les pages non chargées', () => {
+    const entry = (id: string, iso: string) => parseLogEntry(rawEntry(id, iso));
+    const alarm = (id: string, iso: string): AlarmEvent => ({
+      id,
+      alarm: 'anchor',
+      kind: 'activated',
+      at: Date.parse(iso),
+      message: 'Dérapage',
+      distanceM: 40,
+      simulated: false,
+    });
+    const entries = [entry('e1', '2026-11-14T10:00:00Z'), entry('e2', '2026-11-14T08:00:00Z')];
+    const alarms = [alarm('a1', '2026-11-14T09:00:00Z'), alarm('a0', '2026-11-13T09:00:00Z')];
+    expect(logRows(entries, alarms, false).map((r) => r.id)).toEqual([
+      'e1',
+      'alarm-a1',
+      'e2',
+      'alarm-a0',
+    ]);
+    // Entrées plus anciennes à charger : l'alarme antérieure attend sa page.
+    expect(logRows(entries, alarms, true).map((r) => r.id)).toEqual(['e1', 'alarm-a1', 'e2']);
+    expect(logRows([], alarms, false)).toHaveLength(2);
+  });
+
+  it('charge l’historique des alarmes et signale son échec sans bloquer le journal', async () => {
+    const call = vi.fn((command: string) => {
+      if (command === 'list_log_entries') {
+        return Promise.resolve([rawEntry('e1', '2026-11-14T10:00:00Z')]);
+      }
+      if (command === 'get_logbook_settings') return Promise.resolve({ autoIntervalMin: 0 });
+      return Promise.resolve(true);
+    });
+    const events = vi.fn(() => Promise.reject(new Error('base verrouillée')));
+    const c = new LogbookController(new LogbookApi(call), events);
+    await c.refresh();
+    expect(events).toHaveBeenCalledWith(LOG_ALARM_EVENTS);
+    expect(c.entries).toHaveLength(1);
+    expect(c.alarmsError).toBe('Alarmes illisibles : base verrouillée');
+    expect(c.rows.map((r) => r.id)).toEqual(['e1']);
   });
 });

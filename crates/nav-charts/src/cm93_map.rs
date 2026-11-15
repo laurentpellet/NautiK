@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use serde::Serialize;
 
 use crate::cm93::{
-    decode_cell_file_blocking, map_features, scan_cm93_cells, Cm93Dictionary, Cm93Index, Cm93Scale,
-    ViewBounds,
+    covered_by, decode_cell_file_blocking, map_features, scan_cm93_cells, Cm93Coverage,
+    Cm93Dictionary, Cm93Index, Cm93Scale, ViewBounds,
 };
 use crate::enc::find_cm93_root;
 use crate::enc_map::EncMapCell;
@@ -58,17 +58,25 @@ pub struct Cm93View {
 #[serde(rename_all = "camelCase")]
 pub struct Cm93CellFeatures<'a> {
     /// Entités GeoJSON.
-    pub features: &'a [MapFeature],
+    pub features: Vec<&'a MapFeature>,
     /// Date de la donnée la plus récente (`AAAAMMJJ`).
     pub data_date: Option<&'a str>,
     /// Décalage WGS 84 déclaré par la cellule, non appliqué (mètres).
     pub declared_offset_m: f64,
 }
 
+/// Cellule décodée gardée en mémoire.
+struct CellEntry {
+    features: Vec<MapFeature>,
+    coverage: Cm93Coverage,
+    data_date: Option<String>,
+    declared_offset_m: f64,
+}
+
 #[derive(Default)]
 struct Inner {
     base: Option<Arc<Base>>,
-    features: HashMap<String, (Arc<String>, u64)>,
+    cells: HashMap<String, (Arc<CellEntry>, u64)>,
     clock: u64,
 }
 
@@ -131,7 +139,7 @@ impl Cm93Library {
         .await
         .map_err(unusable)?;
         let mut inner = self.lock();
-        inner.features.clear();
+        inner.cells.clear();
         match loaded {
             Ok(Some(base)) => {
                 let label = relative_label(&base.enc_root, &base.root);
@@ -205,18 +213,8 @@ impl Cm93Library {
         })
     }
 
-    /// Entités d'une cellule de l'index (objet JSON sérialisé, voir
-    /// [`Cm93CellFeatures`]).
-    ///
-    /// # Errors
-    ///
-    /// [`ChartError::InvalidCellPath`] si la cellule n'est pas dans
-    /// l'index ; [`ChartError::EncUnusable`] si elle est illisible.
-    pub async fn features(&self, enc_root: &Path, path: &str) -> Result<Arc<String>, ChartError> {
-        let base = self
-            .base(enc_root)
-            .await?
-            .ok_or_else(|| ChartError::InvalidCellPath("aucune base CM93".into()))?;
+    /// Cellule décodée (depuis le cache, sinon lue sur le disque).
+    async fn cell(&self, base: &Base, path: &str) -> Result<Arc<CellEntry>, ChartError> {
         if !base.paths.contains(path) {
             return Err(ChartError::InvalidCellPath(format!(
                 "{path} absente de la base CM93"
@@ -226,9 +224,9 @@ impl Cm93Library {
             let mut inner = self.lock();
             inner.clock += 1;
             let now = inner.clock;
-            if let Some((json, used)) = inner.features.get_mut(path) {
+            if let Some((entry, used)) = inner.cells.get_mut(path) {
                 *used = now;
-                return Ok(Arc::clone(json));
+                return Ok(Arc::clone(entry));
             }
         }
         let file = base.root.join(path);
@@ -240,37 +238,90 @@ impl Cm93Library {
             .and_then(|e| e.chars().next())
             .and_then(Cm93Scale::from_letter)
             .map_or(1, Cm93Scale::rank);
-        let json = tokio::task::spawn_blocking(move || -> Result<String, ChartError> {
+        let entry = tokio::task::spawn_blocking(move || -> Result<CellEntry, ChartError> {
             let cell = decode_cell_file_blocking(&file, &dict).map_err(unusable)?;
-            let features = map_features(&cell, &name, rank);
-            serde_json::to_string(&Cm93CellFeatures {
-                features: &features,
-                data_date: cell.data_date.as_deref(),
+            Ok(CellEntry {
+                features: map_features(&cell, &name, rank),
+                coverage: Cm93Coverage::of(&cell),
+                data_date: cell.data_date,
                 declared_offset_m: cell.declared_offset_m,
             })
-            .map_err(unusable)
         })
         .await
         .map_err(unusable)?
         .inspect_err(|error| tracing::warn!(cell = %path, %error, "cellule CM93 illisible"))?;
-        let json = Arc::new(json);
+        let entry = Arc::new(entry);
         let mut inner = self.lock();
         inner.clock += 1;
         let now = inner.clock;
-        if inner.features.len() >= MAX_CACHED_CM93_CELLS && !inner.features.contains_key(path) {
+        if inner.cells.len() >= MAX_CACHED_CM93_CELLS && !inner.cells.contains_key(path) {
             let oldest = inner
-                .features
+                .cells
                 .iter()
                 .min_by_key(|(_, (_, used))| *used)
                 .map(|(key, _)| key.clone());
             if let Some(key) = oldest {
-                inner.features.remove(&key);
+                inner.cells.remove(&key);
             }
         }
         inner
+            .cells
+            .insert(path.to_owned(), (Arc::clone(&entry), now));
+        Ok(entry)
+    }
+
+    /// Entités d'une cellule de l'index (objet JSON sérialisé, voir
+    /// [`Cm93CellFeatures`]).
+    ///
+    /// `finer` : cellules plus détaillées de la même vue. Les entités de
+    /// la cellule entièrement dans la zone qu'elles couvrent ne sont pas
+    /// renvoyées (sinon la carte grossière déborde de la carte détaillée).
+    /// Une cellule plus détaillée illisible ne masque rien.
+    ///
+    /// # Errors
+    ///
+    /// [`ChartError::InvalidCellPath`] si une cellule n'est pas dans
+    /// l'index ou si `finer` en compte trop ; [`ChartError::EncUnusable`]
+    /// si la cellule est illisible.
+    pub async fn features(
+        &self,
+        enc_root: &Path,
+        path: &str,
+        finer: &[String],
+    ) -> Result<String, ChartError> {
+        let base = self
+            .base(enc_root)
+            .await?
+            .ok_or_else(|| ChartError::InvalidCellPath("aucune base CM93".into()))?;
+        if finer.len() > MAX_CM93_VIEW_CELLS {
+            return Err(ChartError::InvalidCellPath(
+                "trop de cellules plus détaillées".into(),
+            ));
+        }
+        if let Some(unknown) = finer.iter().find(|p| !base.paths.contains(p.as_str())) {
+            return Err(ChartError::InvalidCellPath(format!(
+                "{unknown} absente de la base CM93"
+            )));
+        }
+        let entry = self.cell(&base, path).await?;
+        let mut covers = Vec::new();
+        for other in finer.iter().filter(|p| p.as_str() != path) {
+            if let Ok(cell) = self.cell(&base, other).await {
+                covers.push(cell);
+            }
+        }
+        let coverage: Vec<&Cm93Coverage> = covers.iter().map(|c| &c.coverage).collect();
+        let features: Vec<&MapFeature> = entry
             .features
-            .insert(path.to_owned(), (Arc::clone(&json), now));
-        Ok(json)
+            .iter()
+            .filter(|f| !covered_by(f, &coverage))
+            .collect();
+        serde_json::to_string(&Cm93CellFeatures {
+            features,
+            data_date: entry.data_date.as_deref(),
+            declared_offset_m: entry.declared_offset_m,
+        })
+        .map_err(unusable)
     }
 }
 
@@ -305,13 +356,13 @@ mod tests {
         assert_eq!(cell.path, "02100600/F/02170631.F");
         assert_eq!((cell.usage, cell.scale), (7, 20_000));
 
-        let json = library.features(dir.path(), &cell.path).await.unwrap();
+        let json = library.features(dir.path(), &cell.path, &[]).await.unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(value["features"].as_array().unwrap().len(), 6);
         assert_eq!(value["dataDate"], "20140612");
         assert_eq!(value["declaredOffsetM"], 40.0);
-        let again = library.features(dir.path(), &cell.path).await.unwrap();
-        assert!(Arc::ptr_eq(&json, &again), "servi depuis le cache");
+        let again = library.features(dir.path(), &cell.path, &[]).await.unwrap();
+        assert_eq!(json, again, "servi depuis le cache");
 
         // Ailleurs : aucune cellule.
         let far = library
@@ -322,15 +373,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn finer_cells_hide_what_they_cover() {
+        use crate::cm93::testdata::feature;
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("CM93");
+        std::fs::create_dir_all(base.join("02100600").join("E")).unwrap();
+        std::fs::create_dir_all(base.join("02100600").join("F")).unwrap();
+        std::fs::write(base.join("CM93OBJ.DIC"), OBJECTS).unwrap();
+        std::fs::write(base.join("CM93ATTR.DIC"), ATTRIBUTES).unwrap();
+        let bounds = CellBuilder::sample().bounds;
+        let square = |a: u16, b: u16| vec![(a, a), (b, a), (b, b), (a, b), (a, a)];
+        // Détaillée : ne couvre que le quart sud-ouest (source `_m_sor`).
+        let fine = CellBuilder {
+            bounds,
+            vectors: vec![square(0, 30000)],
+            points3d: Vec::new(),
+            points2d: Vec::new(),
+            features: vec![feature(217, 0x04, &[1, 0], &[])],
+        };
+        // Grossière : une bouée dans la zone couverte, une autre hors zone.
+        let coarse = CellBuilder {
+            bounds,
+            vectors: Vec::new(),
+            points3d: Vec::new(),
+            points2d: vec![(10000, 10000), (50000, 50000)],
+            features: vec![feature(18, 0x01, &[0], &[]), feature(18, 0x01, &[1], &[])],
+        };
+        let fine_path = "02100600/F/02170631.F";
+        let coarse_path = "02100600/E/02170631.E";
+        std::fs::write(base.join(fine_path), fine.build()).unwrap();
+        std::fs::write(base.join(coarse_path), coarse.build()).unwrap();
+        // Cellule détaillée illisible : ne masque rien.
+        std::fs::write(base.join("02100600/F/02170632.F"), b"corrompue").unwrap();
+
+        let library = Cm93Library::new();
+        let count = |json: String| {
+            serde_json::from_str::<serde_json::Value>(&json).unwrap()["features"]
+                .as_array()
+                .unwrap()
+                .len()
+        };
+        let alone = library
+            .features(dir.path(), coarse_path, &[])
+            .await
+            .unwrap();
+        assert_eq!(count(alone), 2);
+        let masked = library
+            .features(dir.path(), coarse_path, &[fine_path.to_owned()])
+            .await
+            .unwrap();
+        assert_eq!(count(masked), 1, "bouée couverte par la cellule détaillée");
+        let broken = library
+            .features(
+                dir.path(),
+                coarse_path,
+                &["02100600/F/02170632.F".to_owned()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(count(broken), 2);
+        // Cellule plus détaillée hors index, ou trop nombreuses : refus.
+        for finer in [vec!["../x.F".to_owned()], vec![fine_path.to_owned(); 17]] {
+            let error = library
+                .features(dir.path(), coarse_path, &finer)
+                .await
+                .unwrap_err();
+            assert!(matches!(error, ChartError::InvalidCellPath(_)));
+        }
+    }
+    #[tokio::test]
     async fn refuses_paths_outside_the_index_and_broken_cells() {
         let dir = folder();
         let library = Cm93Library::new();
         for path in ["../x.F", "02100600/F/ABSENT.F", "CM93OBJ.DIC", ""] {
-            let error = library.features(dir.path(), path).await.unwrap_err();
+            let error = library.features(dir.path(), path, &[]).await.unwrap_err();
             assert!(matches!(error, ChartError::InvalidCellPath(_)), "{path}");
         }
         let error = library
-            .features(dir.path(), "02100600/F/02170632.F")
+            .features(dir.path(), "02100600/F/02170632.F", &[])
             .await
             .unwrap_err();
         assert!(matches!(error, ChartError::EncUnusable(_)));
@@ -352,7 +472,7 @@ mod tests {
             library.view(dir.path(), PAPEETE).await.unwrap(),
             Cm93View::default()
         );
-        assert!(library.features(dir.path(), "x").await.is_err());
+        assert!(library.features(dir.path(), "x", &[]).await.is_err());
         // Dictionnaires présents mais vides : base illisible, signalée.
         std::fs::write(dir.path().join("CM93OBJ.DIC"), "").unwrap();
         std::fs::write(dir.path().join("CM93ATTR.DIC"), "").unwrap();

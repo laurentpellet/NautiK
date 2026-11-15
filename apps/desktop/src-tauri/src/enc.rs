@@ -240,22 +240,24 @@ pub async fn get_cm93_view(
         .map_err(|e| e.to_string())
 }
 
-/// Entités d'une cellule CM93 de l'index (chemin vérifié côté moteur) :
-/// objet JSON `{ features, dataDate, declaredOffsetM }`.
+/// Entités d'une cellule CM93 de l'index (chemins vérifiés côté moteur) :
+/// objet JSON `{ features, dataDate, declaredOffsetM }`. `finer` : cellules
+/// plus détaillées de la vue ; ce qu'elles couvrent entièrement est retiré.
 #[tauri::command]
 pub async fn get_cm93_cell_features(
     service: State<'_, AppState>,
     cm93: State<'_, Cm93Library>,
     path: String,
+    finer: Option<Vec<String>>,
 ) -> CommandResult<Response> {
     let dir = stored_dir(&service)
         .await?
         .ok_or_else(|| "aucun dossier ENC choisi".to_owned())?;
     let json = cm93
-        .features(Path::new(&dir), &path)
+        .features(Path::new(&dir), &path, finer.as_deref().unwrap_or_default())
         .await
         .map_err(|e| e.to_string())?;
-    Ok(Response::new(json.as_str().to_owned()))
+    Ok(Response::new(json))
 }
 
 /// Entités GeoJSON d'une cellule (chemin relatif de l'index, vérifié

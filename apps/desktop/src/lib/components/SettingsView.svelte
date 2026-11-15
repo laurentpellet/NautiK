@@ -3,6 +3,7 @@
   export const SETTINGS_SECTIONS = [
     { id: 'general', label: 'Général', hint: 'Unités, carte, simulateur' },
     { id: 'instruments', label: 'Instruments', hint: 'Barre Navigation' },
+    { id: 'routes', label: 'Routes', hint: 'Routes, traces et marques' },
     { id: 'sources', label: 'Source', hint: 'Données du bord' },
     { id: 'alarms', label: 'Alarmes', hint: 'Surveillance, historique' },
     { id: 'charts', label: 'Cartes', hint: 'MBTiles, ENC, îles et amers' },
@@ -44,6 +45,7 @@
   import type { SimulatorApi } from '../services/simulator';
   import { DEFAULT_ACTIVE_ROUTE_COLOR } from '../map/overlays';
   import { routeStyle, setActiveRouteColor } from '../routeColor.svelte';
+  import { followBoat, setFollowBoat } from '../followBoat.svelte';
   import {
     moveNavField,
     navBar,
@@ -74,6 +76,8 @@
     alarms?: Snippet;
     /** Dossiers des cartes, ENC, îles et amers. */
     charts?: Snippet;
+    /** Gestionnaire des routes, traces et marques. */
+    routesView?: Snippet;
     /** Fichiers météo (GRIB). */
     weatherView?: Snippet;
     /** Journal de bord. */
@@ -88,6 +92,7 @@
     sources,
     alarms,
     charts,
+    routesView,
     weatherView,
     logbookView,
     section = $bindable(loadSection()),
@@ -99,6 +104,7 @@
       const snippets: Partial<Record<SettingsSection, Snippet | undefined>> = {
         alarms,
         charts,
+        routes: routesView,
         weather: weatherView,
         logbook: logbookView,
       };
@@ -261,6 +267,19 @@
           <p class="note">
             Bordée d'un liseré sombre et toujours affichée ; les autres routes restent violettes.
           </p>
+          <label class="inline follow">
+            <input
+              type="checkbox"
+              checked={followBoat.enabled}
+              onchange={(e) => setFollowBoat(e.currentTarget.checked)}
+            />
+            <span>Faire défiler la carte avec le bateau</span>
+          </label>
+          <p class="note">
+            Le bouton Centrer de la barre devient un interrupteur : actif, la carte suit chaque
+            nouvelle position ; la déplacer à la main arrête le suivi. Désactivée : le bouton centre
+            une seule fois.
+          </p>
         </section>
 
         <section class="card" aria-labelledby="sim-title">
@@ -339,6 +358,19 @@
           >
         </section>
       </div>
+
+      {#if routesView}
+        <div
+          role="tabpanel"
+          id="settings-panel-routes"
+          aria-labelledby="settings-tab-routes"
+          hidden={section !== 'routes'}
+        >
+          <section class="card" aria-label="Routes, traces et marques">
+            {@render routesView()}
+          </section>
+        </div>
+      {/if}
 
       <div
         role="tabpanel"
@@ -639,5 +671,9 @@
     [role='tab'] .hint {
       display: none;
     }
+  }
+
+  label.follow {
+    margin-top: 0.75rem;
   }
 </style>

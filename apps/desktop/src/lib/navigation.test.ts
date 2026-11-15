@@ -56,6 +56,22 @@ function fakeEngine() {
         state.routes = [...state.routes.filter((r) => r.id !== id), route];
         return Promise.resolve(route);
       }
+      case 'create_route': {
+        const positions = args?.positions as { latitudeDeg: number; longitudeDeg: number }[];
+        if (positions.length < 2) return Promise.reject(new Error('au moins deux points'));
+        const route = {
+          ...rawRoute('m'),
+          name: String(args?.name),
+          waypoints: positions.map((position, i) => ({
+            id: `m-${i}`,
+            name: `WP00${i + 1}`,
+            position,
+            description: null,
+          })),
+        };
+        state.routes = [...state.routes, route];
+        return Promise.resolve(route);
+      }
       case 'plan_route': {
         const positions = args?.positions as unknown[];
         const speed = Number(args?.speedMps);
@@ -311,6 +327,29 @@ describe('NavigationController', () => {
     expect(c.activeRouteId).toBe('b');
     expect(c.selectedRouteId).toBe('b');
     expect(c.notice).toBe('Route « Direct 09:05 UTC » active');
+  });
+
+  it('convertit une mesure en route enregistrée, non activée', async () => {
+    const { call, state } = fakeEngine();
+    const c = new NavigationController(new RoutingApi(call));
+    await c.refresh();
+    const now = Date.UTC(2026, 10, 15, 14, 30);
+    const points = [p(-17.5, -149.6), p(-17.55, -149.65), p(-17.6, -149.7)];
+    expect(await c.createFromPoints(points, now)).toBe(true);
+    expect(call).toHaveBeenCalledWith('create_route', {
+      name: 'Mesure 14:30 UTC',
+      positions: points,
+    });
+    expect(c.selectedRouteId).toBe('m');
+    expect(c.routes.some((r) => r.id === 'm')).toBe(true);
+    expect(state.activeRouteId).not.toBe('m');
+    expect(c.notice).toBe('Route « Mesure 14:30 UTC » créée');
+    // Moins de deux points, ou route en cours d'édition : refusé.
+    expect(await c.createFromPoints([p(0, 0)])).toBe(false);
+    expect(c.error).toMatch(/deux points/);
+    c.startDrawing();
+    expect(await c.createFromPoints(points)).toBe(false);
+    expect(c.error).toMatch(/route en cours d’édition/);
   });
 
   it('refuse de naviguer sans position fraîche ou pendant un tracé', async () => {

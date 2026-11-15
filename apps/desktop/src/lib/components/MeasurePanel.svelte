@@ -8,9 +8,11 @@
 
   interface Props {
     tools: MapToolsController;
+    /** Convertit la mesure en route enregistrée (à partir de deux points). */
+    onconvert?: () => void;
   }
 
-  let { tools }: Props = $props();
+  let { tools, onconvert }: Props = $props();
 
   const plan = $derived(tools.plan);
   const last = $derived(plan?.legs.at(-1) ?? null);
@@ -58,6 +60,13 @@
     <div class="actions">
       <button type="button" onclick={() => tools.undoPoint()}>Annuler le point</button>
       <button type="button" onclick={() => tools.clearMeasure()}>Effacer</button>
+      {#if onconvert && tools.points.length >= 2}
+        <button
+          type="button"
+          title="Enregistrer ces points comme une route (non activée)"
+          onclick={onconvert}>Convertir en route</button
+        >
+      {/if}
     </div>
   {/if}
 </section>

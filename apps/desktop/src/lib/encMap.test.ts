@@ -163,7 +163,7 @@ describe('avertissements CM93', () => {
     expect(cm93Warnings(index([]), cm93State())).toEqual([]);
   });
 
-  it('signale une carte non officielle, ancienne et décalée', () => {
+  it('signale un décalage déclaré, sans avertissement de carte non officielle', () => {
     const shown = [cm93Cell('A.F'), cm93Cell('B.F')];
     const warnings = cm93Warnings(
       index([], { cm93: '.' }),
@@ -175,17 +175,14 @@ describe('avertissements CM93', () => {
         ],
       }),
     );
-    expect(warnings).toEqual([
-      'Cartes CM93 non officielles (données de 01/01/1999) : ne pas naviguer avec elles seules',
-      "CM93 : décalage WGS 84 déclaré jusqu'à 42 m, non corrigé",
-    ]);
-    // Sans date ni décalage : l'avertissement de carte non officielle reste.
+    expect(warnings).toEqual(["CM93 : décalage WGS 84 déclaré jusqu'à 42 m, non corrigé"]);
+    // Décalage déclaré inférieur à 1 m : aucun avertissement.
     expect(
       cm93Warnings(
         index([]),
         cm93State({ displayed: shown, info: [{ dataDate: null, declaredOffsetM: 0.4 }] }),
       ),
-    ).toEqual(['Cartes CM93 non officielles : ne pas naviguer avec elles seules']);
+    ).toEqual([]);
   });
 
   it('signale base illisible, vue impossible, cellules illisibles ou omises', () => {
@@ -211,6 +208,7 @@ describe('contrôleur CM93', () => {
   /** Moteur simulé avec une base CM93 et une ENC officielle. */
   function cm93Api(cm93Cells: EncMapCell[], broken: string[] = []) {
     const calls: string[] = [];
+    const finers = new Map<string, string[]>();
     const api = new EncApi((command, args) => {
       if (command === 'get_enc_map_index') {
         return Promise.resolve({
@@ -232,6 +230,7 @@ describe('contrôleur CM93', () => {
       if (command === 'get_cm93_cell_features') {
         const path = String(args?.path);
         calls.push(path);
+        finers.set(path, (args?.finer as string[] | undefined) ?? []);
         if (broken.includes(path)) return Promise.reject(new Error('cellule CM93 tronquée'));
         return Promise.resolve({
           features: [sounding(path), sounding(path)],
@@ -241,8 +240,29 @@ describe('contrôleur CM93', () => {
       }
       return Promise.reject(new Error(`commande inattendue ${command}`));
     });
-    return { api, calls };
+    return { api, calls, finers };
   }
+
+  it('demande chaque cellule avec les plus détaillées de la vue (masque du moteur)', async () => {
+    const coarse = cm93Cell('C.E', 6);
+    const fine = cm93Cell('F.F', 7);
+    const { api, calls, finers } = cm93Api([coarse, fine]);
+    const enc = new EncMapController(api);
+    await enc.show(view);
+    expect(finers.get(coarse.path)).toEqual([fine.path]);
+    expect(finers.get(fine.path)).toEqual([]);
+    expect(enc.cm93Data.features).toHaveLength(4);
+    // Même vue : rien n'est redemandé.
+    await enc.show(view);
+    expect(calls.filter((c) => c === coarse.path)).toHaveLength(1);
+
+    // La cellule détaillée sort de la vue : la grossière est redemandée
+    // sans masque.
+    const alone = cm93Api([coarse]);
+    const again = new EncMapController(alone.api);
+    await again.show(view);
+    expect(alone.finers.get(coarse.path)).toEqual([]);
+  });
 
   it('dessine la CM93 sous les ENC et la charge une seule fois', async () => {
     const { api, calls } = cm93Api([cm93Cell('A.F')]);
@@ -251,9 +271,7 @@ describe('contrôleur CM93', () => {
     const cells = enc.layer({ enc: true, cm93: true }).features.map((f) => f.properties.cell);
     expect(cells).toEqual(['02100600/F/A.F', '02100600/F/A.F', 'S57']);
     expect(enc.displayed.map((c) => c.name)).toEqual(['S57']);
-    expect(enc.warnings).toEqual([
-      'Cartes CM93 non officielles (données de 02/06/2014) : ne pas naviguer avec elles seules',
-    ]);
+    expect(enc.warnings).toEqual([]);
     await enc.show(view);
     expect(calls.filter((c) => c === '02100600/F/A.F')).toHaveLength(1);
     expect(calls.filter((c) => c === 'vue')).toHaveLength(2);
@@ -300,7 +318,6 @@ describe('contrôleur CM93', () => {
     expect(only93.calls).toEqual(['vue', '02100600/F/A.F']);
     expect(enc93.s57Data.features).toEqual([]);
     expect(enc93.displayed).toEqual([]);
-    expect(enc93.warnings).toHaveLength(1);
-    expect(enc93.warnings[0]).toContain('CM93 non officielles');
+    expect(enc93.warnings).toEqual([]);
   });
 });

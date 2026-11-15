@@ -1,9 +1,36 @@
 /**
  * État d'interface du journal de bord : entrées chargées par pages,
  * ajout manuel, intervalle des relevés automatiques et export CSV.
+ * Les événements d'alarme (historique du moteur) sont intercalés par
+ * date, en lecture seule.
  * Orchestration seulement : les entrées sont écrites par le moteur.
  */
+import type { AlarmEvent } from './services/alarms';
 import { LOG_PAGE, type LogbookApi, type LogEntry } from './services/logbook';
+
+/** Nombre d'événements d'alarme chargés avec le journal. */
+export const LOG_ALARM_EVENTS = 200;
+
+/** Ligne du journal : entrée (manuelle, automatique) ou événement d'alarme. */
+export type LogRow =
+  | { type: 'entry'; id: string; at: number; entry: LogEntry }
+  | { type: 'alarm'; id: string; at: number; event: AlarmEvent };
+
+/**
+ * Lignes du journal, de la plus récente à la plus ancienne. Tant que des
+ * entrées plus anciennes restent à charger (`more`), les alarmes
+ * antérieures à la plus ancienne entrée chargée attendent leur page.
+ */
+export function logRows(entries: LogEntry[], alarms: AlarmEvent[], more: boolean): LogRow[] {
+  const oldest = entries.at(-1)?.at ?? -Infinity;
+  const rows: LogRow[] = [
+    ...entries.map((entry) => ({ type: 'entry' as const, id: entry.id, at: entry.at, entry })),
+    ...alarms
+      .filter((event) => !more || event.at >= oldest)
+      .map((event) => ({ type: 'alarm' as const, id: `alarm-${event.id}`, at: event.at, event })),
+  ];
+  return rows.sort((a, b) => b.at - a.at);
+}
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -15,8 +42,28 @@ export class LogbookController {
   error = $state<string | null>(null);
   notice = $state<string | null>(null);
   busy = $state(false);
+  /** Événements d'alarme récents (moteur). */
+  alarms = $state.raw<AlarmEvent[]>([]);
+  /** Historique des alarmes illisible : signalé, le journal reste utilisable. */
+  alarmsError = $state<string | null>(null);
+  /** Entrées et alarmes intercalées, de la plus récente à la plus ancienne. */
+  readonly rows: LogRow[] = $derived(logRows(this.entries, this.alarms, this.more));
 
-  constructor(private readonly api: LogbookApi) {}
+  constructor(
+    private readonly api: LogbookApi,
+    /** Historique des alarmes ; absent : journal seul. */
+    private readonly alarmEvents?: (limit: number) => Promise<AlarmEvent[]>,
+  ) {}
+
+  private async refreshAlarms(): Promise<void> {
+    if (!this.alarmEvents) return;
+    try {
+      this.alarms = await this.alarmEvents(LOG_ALARM_EVENTS);
+      this.alarmsError = null;
+    } catch (e) {
+      this.alarmsError = `Alarmes illisibles : ${message(e)}`;
+    }
+  }
 
   private async run<T>(action: () => Promise<T>): Promise<T | undefined> {
     this.busy = true;
@@ -39,6 +86,7 @@ export class LogbookController {
       this.more = entries.length === LOG_PAGE;
       this.autoIntervalMin = settings.autoIntervalMin;
     });
+    await this.refreshAlarms();
   }
 
   async loadMore(): Promise<void> {

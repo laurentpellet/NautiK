@@ -51,9 +51,9 @@ L'écran se compose :
   les onglets en icônes (carte, cadran pour Instruments, curseurs pour
   Paramètres ; nom en infobulle) ; sur l'onglet Carte, SOG et force du vent
   réel (« — » si absent, valeur signalée si obsolète)
-  suivis des outils de la carte, terminés par le bouton **Homme à la mer**
-  (bouée rouge) ; puis l'icône **État des données**
-  (tracé de pouls), de la couleur de l'état le plus grave : verte si tout
+  suivis des outils de la carte ; puis l'icône **État des données**
+  (tracé de pouls), suivie du bouton **Homme à la mer** (bouée rouge,
+  dans tous les onglets), de la couleur de l'état le plus grave : verte si tout
   va bien, orange en simulation ou en attente, rouge sur fond rouge en
   alerte (résumé en infobulle). Un clic ouvre ou ferme le panneau d'état
   (choix mémorisé) : Position (viseur), Liaison (antenne), AIS (triangle),
@@ -96,6 +96,17 @@ Un dossier choisi qui a disparu (clé USB retirée) est signalé, jamais
 remplacé en silence. Un fichier illisible ou corrompu est signalé sans
 empêcher le chargement des autres.
 
+**Cartes chargées.** Le même panneau liste les cartes MBTiles chargées
+(fichier, niveaux de zoom). Chacune peut recevoir un **nom à utiliser
+dans l'application** (menu Calques, volet de droite) :
+saisissez-le puis Entrée ; champ vide ou **↺** : retour au nom d'origine
+(celui des métadonnées du fichier, rappelé sous le champ). Le nom est
+mémorisé sur cet ordinateur et suit le fichier, même après une relecture.
+**Trier par** ordonne cette liste et celle du menu Calques : **Détail**
+(la plus détaillée en tête, par défaut), **Nom** (nom choisi, sinon
+d'origine) ou **Fichier**. L'empilement sur la carte ne change pas : la
+carte la plus détaillée reste au-dessus.
+
 **Cartes ENC (S-57)**. **Paramètres → Cartes → Cartes
 ENC → Choisir le dossier ENC…** indique où se trouve votre jeu d'échange
 ENC (en général le dossier `ENC_ROOT`, avec `CATALOG.031` et les
@@ -135,15 +146,25 @@ dossier** redessine la carte.
 **Base CM93 (C-MAP).** Une base CM93 v2 (dossier contenant
 `CM93OBJ.DIC` et `CM93ATTR.DIC`) placée dans le dossier ENC, ou dans un
 de ses sous-dossiers sur deux niveaux, est reconnue : le panneau
-**Paramètres → Cartes** indique « Base CM93 trouvée ». Ses cartes sont
+**Paramètres → Cartes** indique « Base CM93 trouvée ». Le champ
+**Nom dans l'application** qui suit renomme la CM93 dans le menu Calques
+et le volet de droite (vide ou **↺** : « Cartes CM93 »). La case CM93
+du menu Calques est proposée dès le démarrage, même ENC décochées ; la
+case **Cartes ENC (S-57)** n'apparaît que si le dossier contient des
+cellules S-57. Ses cartes sont
 dessinées **sous** les ENC officielles, avec la même symbologie, de la
-moins à la plus détaillée selon le zoom (16 cellules au plus). Le
+moins à la plus détaillée selon le zoom (16 cellules au plus). Une
+cellule détaillée ne couvre souvent qu'une partie de sa zone (ports,
+baies) : ce qu'elle couvre entièrement est retiré des cellules moins
+détaillées, qui ne débordent plus de la côte détaillée ; ailleurs, la
+cellule moins détaillée reste affichée. Les cellules à cheval sur l'antiméridien
+(Béring, Aléoutiennes, Fidji) sont dessinées d'un seul tenant. Le
 calque **Cartes CM93** du menu **Calques** les masque, indépendamment
 des ENC : on peut ainsi afficher les ENC seules, la CM93 seule ou les
 deux. Ce ne
-sont pas des cartes officielles et elles sont souvent anciennes : la
-note de la carte le rappelle toujours, avec la date des données. Elle
-signale aussi le décalage WGS 84 déclaré par certaines cellules (il
+sont pas des cartes officielles et elles sont souvent anciennes
+(rappelé dans **Paramètres → Cartes**). La note de la carte signale le
+décalage WGS 84 déclaré par certaines cellules (il
 n'est pas corrigé, comme dans OpenCPN : vérifiez la position par
 rapport à la côte), les cellules illisibles et celles qui ne sont pas
 dessinées (« zoomez »). Certaines copies de bases CM93 contiennent un
@@ -176,7 +197,12 @@ Sur la carte :
 avec infobulles ; ils ne se déplacent pas et ne se masquent pas) :
 
 - flèche **Nord en haut** (rotation libre quand elle est relâchée) et
-  viseur **Centrer sur le bateau** (inactif sans position) ;
+  viseur **Centrer sur le bateau** (inactif sans position). Avec l'option
+  **Faire défiler la carte avec le bateau** (Paramètres → Général → Carte,
+  activée par défaut), le viseur est un interrupteur : actif, la carte
+  suit chaque nouvelle position (zoom et orientation gardés) ; un nouveau
+  clic ou un déplacement de la carte à la main arrête le suivi. Option
+  désactivée : le viseur centre une seule fois ;
 - menu **Calques ▾** (icône des calques) : groupe **Cartes** (cartes
   MBTiles quand plusieurs sont chargées, la plus détaillée en tête, puis
   **Cartes ENC (S-57)** et, si une base est trouvée, **Cartes CM93**),
@@ -195,7 +221,12 @@ avec infobulles ; ils ne se déplacent pas et ne se masquent pas) :
 - règle **Mesurer** : cliquez des points sur la carte ; un panneau en
   haut à gauche donne la distance totale, le dernier segment, son
   relèvement vrai et la durée à la vitesse prévue du plan de route
-  (valeurs calculées par le moteur). **Annuler le point**, **Effacer** ;
+  (valeurs calculées par le moteur) ; la longueur de chaque segment
+  s'affiche au milieu du segment. **Annuler le point**, **Effacer** ;
+  **Convertir en route** (dès deux points) enregistre les points comme
+  une route « Mesure HH:MM UTC », non activée, à retrouver dans
+  Paramètres → Routes (une trace, elle, n'est que l'enregistrement du
+  passage réel du bateau) ;
   Échap, **✕** ou un nouveau clic sur la règle ferme la mesure. Indisponible
   pendant le tracé d'une route ;
 - **clic droit** sur la carte (sans glisser ; le glisser droit tourne la
@@ -217,10 +248,21 @@ avec infobulles ; ils ne se déplacent pas et ne se masquent pas) :
   dans les deux volets ; le volet que vous déplacez entraîne l'autre.
   Cadenas ouvert : chaque volet est libre. Au verrouillage, le volet de
   droite rejoint celui de gauche ;
-- icônes **Panneau**, **Mouillage** (ancre), **Navigation** (cadran),
-  **Cibles AIS** (triangle), **Route** (tracé) et **Barre de route** :
-  affichent ou masquent chaque panneau (estompée = masqué). Le panneau
-  **Cibles AIS** est fermé par défaut.
+- après la recherche et un séparateur : **Mouillage** (ancre),
+  **Navigation** (cadran), **Enregistrer la trace** (lecture / arrêt),
+  **Routes, traces et marques** (tracé : ouvre le gestionnaire des
+  Paramètres), **Barre de route** (seulement pendant la navigation d'une
+  route), **Cibles AIS** (triangle), **Météo** et **Journal de bord**.
+  Les icônes de panneau affichent ou masquent chaque panneau (estompée =
+  masqué) ; le panneau **Cibles AIS** est fermé par défaut.
+
+**Alertes de la carte.** En haut à gauche de la carte, un bandeau
+n'affiche que ce qui ne va pas, sans pouvoir être masqué : moteur
+indisponible ou muet, aucune position ou position obsolète, position
+simulée ou rejouée, liaison en défaut, données rejetées, catalogue de
+cartes illisible ou carte ignorée, erreur des routes ou des cibles AIS
+(panneau fermé), ainsi que les confirmations (route créée…). La version
+du moteur est indiquée dans Paramètres → Général.
 
 **Barre Navigation.** Le panneau **Navigation** est une barre fixe à côté
 de la carte, comme la barre du haut (la carte se réduit d'autant : rien
@@ -300,10 +342,15 @@ depuis le lancement. Les unités se règlent dans **Paramètres → Général �
 
 ## 6. Routes, navigation et traces
 
-Routes et traces partagent le panneau **Routes et traces** (à droite de
-la carte, sous Mouillage et Navigation ; la colonne défile si la fenêtre
-est basse), avec trois onglets **Routes**, **Traces** et **Marques** (le dernier
-onglet choisi est mémorisé).
+Routes, traces et marques se gèrent dans **Paramètres → Routes**
+(icône **Routes, traces et marques** de la barre, ou bouton du même nom
+de la barre de route), avec trois onglets **Routes**, **Traces** et
+**Marques** (le dernier onglet choisi est mémorisé) ; l'état de la
+navigation en cours y est rappelé. Ce qui se fait sur la carte y
+bascule aussitôt : **Zoomer**, **Nouvelle route**, **Modifier**, une
+nouvelle marque, la relecture d'une trace. Pendant un tracé de route ou
+la pose d'une marque, un petit panneau **Édition sur la carte** reste
+affiché le temps de l'édition ; le fermer (**×**) annule l'édition.
 
 - **Nouvelle route** : cliquez les points de passage sur la carte. Le
   premier point s'appelle « Départ » (vert), le dernier est marqué en
@@ -367,8 +414,8 @@ onglet choisi est mémorisé).
   Les temps et heures sont estimés à la vitesse fond courante ; vitesse
   nulle ou inconnue : « — ». Si la position est obsolète ou absente, ou
   si le moteur ne répond plus, toutes les valeurs sont estompées et
-  marquées ⚠ (l'infobulle donne l'âge du calcul). Ses boutons affichent
-  ou masquent le panneau Route et arrêtent la navigation. L'icône
+  marquées ⚠ (l'infobulle donne l'âge du calcul). Ses boutons ouvrent
+  le gestionnaire (Paramètres → Routes) et arrêtent la navigation. L'icône
   **Barre de route** de la barre d'outils la masque ou la réaffiche.
 
 - Une route peut être inversée ou supprimée.
@@ -391,7 +438,7 @@ onglet choisi est mémorisé).
 
 ### Marques
 
-L'onglet **Marques** du panneau Routes et traces regroupe vos points
+L'onglet **Marques** du gestionnaire (Paramètres → Routes) regroupe vos points
 personnels (repère, mouillage, danger, plongée, pêche, carburant,
 information), avec une note libre :
 
@@ -411,7 +458,9 @@ La loupe de la barre d'outils cherche, sans Internet, dans vos marques,
 waypoints, points de routes et îles et amers téléchargés (sans tenir
 compte des majuscules ni des accents). Elle accepte aussi des
 coordonnées : `-17.5 -149.6`, `17°32,1'S 149°34,2'W`,
-`S 17 32.1 O 149 34.2`… Choisir un résultat cadre la carte dessus.
+`S 17 32.1 O 149 34.2`… Les résultats s'affichent pendant la frappe
+(Entrée relance la recherche aussitôt) ; vider le champ les efface.
+Choisir un résultat cadre la carte dessus.
 
 ### Aides à la navigation
 
@@ -430,7 +479,9 @@ coordonnées : `-17.5 -149.6`, `17°32,1'S 149°34,2'W`,
 
 La section **Journal** des **Paramètres** (icône **Journal de bord** de la
 barre d'outils) liste les entrées, de la plus récente à la plus
-ancienne :
+ancienne, avec la date et l'heure **locales** (fuseau indiqué) ; les
+événements d'alarme (déclenchement, acquittement, retour à la normale,
+activation) y sont intercalés, marqués **alarme**, en lecture seule :
 
 - **Ajouter** : entrée libre (ris pris, moteur, mouillage…), complétée
   automatiquement par l'heure UTC, la position et les valeurs du bord ;
@@ -446,15 +497,19 @@ ancienne :
 
 Les navires AIS reçus apparaissent sur la carte : triangle orienté
 (classe A plein, classe B différencié), vecteur de déplacement à 6 min,
-historique en pointillés. Une cible obsolète est estompée, une cible
+historique en pointillés, nom (ou MMSI) à droite de la cible à partir du
+zoom 8 et **ligne de cap** quand le navire déclare son cap (jamais
+déduite). Une cible obsolète est estompée, une cible
 perdue grisée, puis retirée après 30 min de silence. Cliquez une cible
 pour afficher son nom, sa vitesse, sa route et son état.
 
 L'icône **Cibles AIS** (triangle) de la barre d'outils ouvre le panneau
 des cibles : nom ou MMSI, vitesse, route, état (obsolète, perdue) et âge
 de chaque cible, les actives en premier. Un clic sur une ligne la
-sélectionne sur la carte. Une erreur de réception AIS est signalée dans
-ce panneau, ou dans le panneau latéral quand il est fermé.
+sélectionne et centre la carte sur sa dernière position connue (une
+cible sans position valide est seulement sélectionnée). Une erreur de
+réception AIS est signalée dans ce panneau, ou dans les alertes de la
+carte quand il est fermé.
 
 NautiK suit jusqu'à 2 000 cibles. Le calcul du point de rapprochement
 (CPA/TCPA) n'est pas encore disponible.
@@ -463,7 +518,7 @@ NautiK suit jusqu'à 2 000 cibles. Le calcul du point de rapprochement
 
 Trois alarmes sont évaluées par le moteur, même sans interface :
 
-- **Homme à la mer (MOB)** : bouton bouée rouge en fin de barre de la carte (juste à gauche de l'état
+- **Homme à la mer (MOB)** : bouton bouée rouge de la barre du haut (juste à droite de l'état
   des données) ou
   **Ctrl+M**. Le point est posé à la dernière position reçue ; si elle
   est ancienne, il est marqué **approximatif** ; sans aucune position, le
@@ -484,7 +539,7 @@ Une alarme déclenchée affiche un bandeau rouge et sonne jusqu'à
 l'**acquittement** ; acquittée, elle reste affichée tant que la situation
 n'est pas rétablie. Désactiver une alarme (**Paramètres → Alarmes**)
 demande confirmation et reste visible. L'historique des alarmes y est
-consultable.
+consultable (heures locales) ; il est aussi repris dans le journal de bord.
 
 Le son est produit par l'ordinateur : vérifiez le volume, et que la mise
 en veille ne coupe pas l'application.

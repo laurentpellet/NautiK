@@ -7,7 +7,6 @@
  * silence : cellule pas à jour, annulée, illisible ou non affichée faute
  * de place est signalée.
  */
-import { formatIssueDate } from './services/enc';
 import type { Cm93View, EncApi, EncMapCell, EncMapIndex } from './services/enc';
 import { EncCellCache, type Cm93CellInfo } from './encCells';
 import type { Bounds } from './services/weather';
@@ -74,9 +73,9 @@ export interface Cm93ViewState {
 }
 
 /**
- * Avertissements sur la base CM93 : carte non officielle et ancienne,
- * décalage WGS 84 déclaré non corrigé, cellules non affichées ou
- * illisibles. Rien n'est passé sous silence.
+ * Avertissements sur la base CM93 : décalage WGS 84 déclaré non corrigé,
+ * cellules non affichées ou illisibles. Le caractère non officiel de la
+ * CM93 est rappelé dans Paramètres → Cartes, pas sur la carte.
  */
 export function cm93Warnings(index: EncMapIndex | null, state: Cm93ViewState): string[] {
   if (!index) return [];
@@ -84,9 +83,6 @@ export function cm93Warnings(index: EncMapIndex | null, state: Cm93ViewState): s
   if (index.cm93Error) warnings.push(`Base CM93 illisible : ${index.cm93Error}`);
   if (state.error) warnings.push(`Base CM93 indisponible : ${state.error}`);
   if (state.displayed.length > 0) {
-    const dates = state.info.flatMap((i) => (i.dataDate ? [i.dataDate] : [])).sort();
-    const age = dates.length > 0 ? ` (données de ${formatIssueDate(dates[0] ?? '')})` : '';
-    warnings.push(`Cartes CM93 non officielles${age} : ne pas naviguer avec elles seules`);
     const offset = Math.max(0, ...state.info.map((i) => i.declaredOffsetM));
     if (offset >= 1) {
       warnings.push(`CM93 : décalage WGS 84 déclaré jusqu'à ${Math.round(offset)} m, non corrigé`);
@@ -193,11 +189,15 @@ export class EncMapController {
     }
     if (generation !== this.generation) return null;
     const keyed: EncMapCell[] = [];
-    for (const cell of state.view?.cells ?? []) {
-      const key = CM93_KEY_PREFIX + cell.path;
+    const cells = state.view?.cells ?? [];
+    for (const cell of cells) {
+      // Cellules plus détaillées de la vue : ce qu'elles couvrent est
+      // retiré de celle-ci par le moteur (clé de cache propre à ce jeu).
+      const finer = cells.filter((c) => c.usage > cell.usage).map((c) => c.path);
+      const key = CM93_KEY_PREFIX + cell.path + (finer.length > 0 ? `|${finer.join(',')}` : '');
       if (!this.cache.known(key)) {
         try {
-          const data = await this.api.cm93Features(cell.path);
+          const data = await this.api.cm93Features(cell.path, finer);
           this.cache.features.set(key, data.features);
           this.cache.cm93Info.set(key, {
             dataDate: data.dataDate,

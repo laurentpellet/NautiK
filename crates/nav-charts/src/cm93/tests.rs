@@ -111,6 +111,29 @@ fn corner_positions_match_the_bounds() {
 }
 
 #[test]
+fn cells_across_the_antimeridian_keep_continuous_longitudes() {
+    // Cellule de 160°E à 160°W : les points à l'est de 180° dépassent 180
+    // au lieu de sauter à -180 (sinon ses surfaces barrent le monde).
+    let mut builder = CellBuilder::sample();
+    builder.bounds = [160.0, 0.0, 200.0, 40.0];
+    builder.points2d = vec![(0, 0), (65535, 65535)];
+    let cell = decode_cell(&builder.build(), &dictionary()).unwrap();
+    let Cm93Geometry::Point([west, _]) = cell.features[0].geometry else {
+        panic!("point attendu");
+    };
+    let Cm93Geometry::Point([east, _]) = cell.features[4].geometry else {
+        panic!("point attendu");
+    };
+    assert!((west - 160.0).abs() < 1e-6, "{west}");
+    assert!((east - 200.0).abs() < 1e-6, "{east}");
+    // Bord ouest toujours ramené entre -180 (compris) et 180.
+    let metres = |deg: f64| CM93_RADIUS_M * deg.to_radians();
+    assert!((lon_shift(metres(160.0))).abs() < 1e-9);
+    assert!((lon_shift(metres(210.0)) + 360.0).abs() < 1e-9);
+    assert!((lon_shift(metres(-200.0)) - 360.0).abs() < 1e-9);
+    assert!((lon_shift(metres(180.0)) + 360.0).abs() < 1e-9);
+}
+#[test]
 fn rejects_inconsistent_cells() {
     let dict = dictionary();
     let plain = CellBuilder::sample().plain();

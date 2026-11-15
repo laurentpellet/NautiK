@@ -7,7 +7,7 @@
     type AlarmsApi,
     type AlarmsSnapshot,
   } from '../services/alarms';
-  import { formatUtc } from '../services/weather';
+  import { formatLocalDateTime } from '../format';
 
   interface Props {
     api: AlarmsApi;
@@ -90,7 +90,7 @@
     <ul data-testid="alarm-events">
       {#each events as e (e.id)}
         <li class={e.kind}>
-          <span class="time">{formatUtc(e.at)}</span>
+          <span class="time">{formatLocalDateTime(e.at)}</span>
           <span class="kind"
             >{e.alarm === 'anchor'
               ? 'Mouillage'

@@ -13,11 +13,10 @@
     now: number;
     /** La position qui sert au calcul est obsolète (ou moteur muet). */
     stale: boolean;
-    /** Panneau Route affiché. */
-    routePanel: boolean;
+    /** Ouvre le gestionnaire des routes, traces et marques. */
+    onroutes: () => void;
     /** Barre réduite à une colonne étroite. */
     collapsed?: boolean;
-    ontoggleroute: () => void;
     ondeactivate: () => void;
     oncollapse?: (collapsed: boolean) => void;
     /** Côté de la carte (sens des flèches de réduction). */
@@ -28,9 +27,8 @@
     status,
     now,
     stale,
-    routePanel,
     collapsed = false,
-    ontoggleroute,
+    onroutes,
     ondeactivate,
     oncollapse,
     side = 'left',
@@ -60,10 +58,9 @@
     {/if}
     <button
       type="button"
-      aria-label="Panneau Route"
-      aria-pressed={routePanel}
-      title={routePanel ? 'Masquer le panneau Route' : 'Afficher le panneau Route'}
-      onclick={ontoggleroute}
+      aria-label="Routes, traces et marques"
+      title="Routes, traces et marques (Paramètres)"
+      onclick={onroutes}
     >
       <Icon name="route" />
     </button>
@@ -258,16 +255,6 @@
   button:focus-visible {
     border-color: var(--border);
     background: var(--button-bg);
-  }
-
-  button[aria-pressed='true'] {
-    border-color: var(--border);
-    background: var(--button-bg);
-  }
-
-  button[aria-pressed='false'] {
-    color: var(--muted);
-    opacity: 0.6;
   }
 
   .fold {

@@ -49,7 +49,8 @@ describe('disposition des panneaux', () => {
       store(
         JSON.stringify({
           side: { visible: false, x: 10.4, y: 20 },
-          bar: { visible: 'non', x: 5, y: null },
+          bar: { visible: false, x: 10.4, y: 20 },
+          ais: { visible: 'non', x: 5, y: null },
           layers: { visible: false },
           anchor: { visible: true, x: Infinity, y: 3 },
           live: { visible: true, x: 1e9, y: 1 },
@@ -57,13 +58,14 @@ describe('disposition des panneaux', () => {
         }),
       ),
     );
-    expect(layout.side).toEqual({ visible: false, x: 10, y: 20 });
+    expect(layout.bar).toEqual({ visible: false, x: 10, y: 20 });
+    expect(layout.ais).toEqual({ visible: false, x: null, y: null });
     expect(layout.anchor).toEqual({ visible: true, x: null, y: null });
     expect(layout.live).toEqual({ visible: true, x: null, y: null });
-    expect(layout.bar).toEqual({ visible: true, x: null, y: null });
-    // Ancien panneau Calques (devenu un menu de la barre) : ignoré.
+    // Anciens panneaux Calques (devenu un menu) et latéral (supprimé) : ignorés.
     expect('layers' in layout).toBe(false);
-    expect(hiddenPanels(layout)).toEqual(['Panneau']);
+    expect('side' in layout).toBe(false);
+    expect(hiddenPanels(layout)).toEqual(['Barre']);
     expect(isCustomized(layout)).toBe(true);
   });
 
@@ -73,7 +75,7 @@ describe('disposition des panneaux', () => {
     expect(PANEL_IDS).toContain('routeBar');
     expect(d.route).toEqual({ visible: true, x: null, y: null });
     expect(d.routeBar).toEqual({ visible: true, x: null, y: null });
-    expect(PANEL_LABELS.route).toBe('Routes et traces');
+    expect(PANEL_LABELS.route).toBe('Édition sur la carte');
     expect(PANEL_LABELS.routeBar).toBe('Barre de route');
     // Disposition mémorisée avant leur ajout : ils sont affichés à leur place.
     const old = loadLayout(store(JSON.stringify({ side: { visible: false, x: null, y: null } })));
