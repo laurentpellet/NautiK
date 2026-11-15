@@ -100,10 +100,14 @@ describe('formatage navigation', () => {
     expect(formatCrossTrack(null)).toBe('—');
   });
 
-  it('formate une ETA en UTC avec la durée restante', () => {
+  it('formate une ETA en heure locale avec la durée restante', () => {
     const now = Date.parse('2026-11-12T10:00:00Z');
-    expect(formatEta(Date.parse('2026-11-12T10:25:00Z'), now)).toBe('10:25 UTC (dans 25 min)');
-    expect(formatEta(Date.parse('2026-11-12T11:05:00Z'), now)).toBe('11:05 UTC (dans 1 h 05)');
+    expect(formatEta(Date.parse('2026-11-12T10:25:00Z'), now, 'Pacific/Tahiti')).toBe(
+      '00:25 UTC−10 (dans 25 min)',
+    );
+    expect(formatEta(Date.parse('2026-11-12T11:05:00Z'), now, 'UTC')).toBe(
+      '11:05 UTC (dans 1 h 05)',
+    );
     expect(formatEta(null, now)).toBe('—');
   });
 

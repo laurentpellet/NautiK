@@ -27,6 +27,7 @@ describe('onglet Paramètres', () => {
     setup();
     expect(screen.getAllByRole('tab').map((t) => t.querySelector('.label')?.textContent)).toEqual([
       'Général',
+      'Instruments',
       'Source',
       'Alarmes',
       'Cartes',
@@ -58,7 +59,7 @@ describe('onglet Paramètres', () => {
 
   it('omet les sections facultatives absentes', () => {
     setup(false);
-    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(screen.getAllByRole('tab')).toHaveLength(3);
   });
 
   it('relit la section mémorisée ; valeur inconnue : Général', () => {

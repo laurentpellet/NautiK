@@ -96,6 +96,8 @@
           {@render metric(tile('cog'), 'white', 'l')}
           {@render metric(tile('heading'), 'white', 'l')}
         </div>
+        <hr />
+        {@render metric(tile('rudder'), 'white', 'l')}
       </article>
     </div>
 

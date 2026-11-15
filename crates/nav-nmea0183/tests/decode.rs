@@ -407,3 +407,25 @@ fn sentence_time_is_extracted_for_pacing() {
     assert!(sentence_time(&line("IIHDT,1,T")).is_none());
     assert!(sentence_time("$GPRMC,183000,A*7F").is_none());
 }
+
+#[test]
+fn rudder_angle() {
+    let s = samples("AGRSA,12.5,A,,V");
+    assert!(close(
+        measurement(&s, Quantity::RudderAngle).value,
+        12.5_f64.to_radians()
+    ));
+    let s = samples("AGRSA,-8.0,A,,");
+    assert!(close(
+        measurement(&s, Quantity::RudderAngle).value,
+        (-8.0_f64).to_radians()
+    ));
+    assert!(samples("AGRSA,12.5,V,,").is_empty(), "capteur invalide");
+    assert!(samples("AGRSA,,A,,").is_empty(), "angle absent");
+    for body in ["AGRSA,95.0,A,,", "AGRSA,-120,A,,", "AGRSA,barre,A,,"] {
+        assert!(
+            matches!(error(body), DecodeError::Field { .. }),
+            "{body} doit être rejetée"
+        );
+    }
+}

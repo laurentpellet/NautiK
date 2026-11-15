@@ -140,6 +140,18 @@ export function activeAlerts(pills: StatusPill[]): string[] {
   return pills.filter((p) => p.level === 'alert').map((p) => `${p.label} : ${p.title}`);
 }
 
+/**
+ * Gravité la plus haute des pastilles (icône du panneau d'état) : une
+ * alerte l'emporte, puis un avertissement ; `off` seulement si aucune
+ * information n'est connue.
+ */
+export function worstLevel(pills: StatusPill[]): PillLevel {
+  for (const level of ['alert', 'warn', 'ok'] as const) {
+    if (pills.some((p) => p.level === level)) return level;
+  }
+  return 'off';
+}
+
 /** Date et heure UTC de l'en-tête. */
 export function utcClock(now: number): { date: string; time: string } {
   const d = new Date(now);

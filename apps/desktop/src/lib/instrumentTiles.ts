@@ -13,7 +13,8 @@ import {
   formatDuration,
   formatLatitude,
   formatLongitude,
-  formatUtcClock,
+  formatLocalClock,
+  localZoneLabel,
   speedParts,
 } from './format';
 import { DEPTH_UNITS, DISTANCE_UNITS, SPEED_UNITS, units } from './units.svelte';
@@ -121,6 +122,19 @@ export function instrumentTiles(snapshot: InstrumentsSnapshot | null, silent: bo
         const d = Math.round((Math.abs(v) * 180) / Math.PI);
         const side = d === 0 || d === 180 ? '°' : v > 0 ? '° Td' : '° Bd';
         return { value: String(d).padStart(3, '0'), unit: side };
+      },
+      '°',
+    ),
+    // Angle de barre : bord indiqué (Td à tribord, Bd à bâbord), barre
+    // droite sans bord.
+    readingTile(
+      'rudder',
+      'BARRE',
+      get('rudderAngle'),
+      silent,
+      (v) => {
+        const d = Math.round((Math.abs(v) * 180) / Math.PI);
+        return { value: String(d), unit: d === 0 ? '°' : v > 0 ? '° Td' : '° Bd' };
       },
       '°',
     ),
@@ -283,7 +297,12 @@ export function positionTile(snapshot: InstrumentsSnapshot | null, silent: boole
  * Tuiles de navigation (route active). `positionStale` : la position
  * qui sert au calcul est obsolète, les valeurs le sont aussi.
  */
-export function navigationTiles(status: NavigationStatus | null, positionStale: boolean): Tile[] {
+export function navigationTiles(
+  status: NavigationStatus | null,
+  positionStale: boolean,
+  /** Fuseau d'affichage des heures (par défaut : celui de l'appareil). */
+  timeZone?: string,
+): Tile[] {
   if (!status) return [];
   const tile = (id: string, label: string, value: string, unit: string, detail: string | null) => ({
     id,
@@ -297,11 +316,9 @@ export function navigationTiles(status: NavigationStatus | null, positionStale: 
   const xte = status.crossTrackM;
   const dist = DISTANCE_UNITS[units.distance].label;
   const xteUnit = xte === null || xte === 0 ? dist : xte > 0 ? `${dist} D` : `${dist} G`;
-  let eta = MISSING;
-  if (status.etaTarget !== null) {
-    const d = new Date(status.etaTarget);
-    eta = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
-  }
+  // Heure d'arrivée affichée en heure locale (l'instant reste en UTC).
+  const eta = status.etaTarget === null ? MISSING : formatLocalClock(status.etaTarget, timeZone);
+  const etaZone = status.etaTarget === null ? 'local' : localZoneLabel(status.etaTarget, timeZone);
   const target = `vers ${status.targetName}`;
   return [
     tile('dtw', 'DISTANCE WP', distance(status.distanceToTargetM), dist, target),
@@ -313,7 +330,7 @@ export function navigationTiles(status: NavigationStatus | null, positionStale: 
       target,
     ),
     tile('xte', 'ÉCART ROUTE', xte === null ? MISSING : distance(Math.abs(xte)), xteUnit, null),
-    tile('eta', 'ETA WP', eta, 'UTC', status.finished ? 'route terminée' : target),
+    tile('eta', 'ETA WP', eta, etaZone, status.finished ? 'route terminée' : target),
   ];
 }
 
@@ -327,6 +344,8 @@ export function routeBarTiles(
   status: NavigationStatus | null,
   now: number,
   positionStale: boolean,
+  /** Fuseau d'affichage des heures (par défaut : celui de l'appareil). */
+  timeZone?: string,
 ): Tile[] {
   if (!status) return [];
   const tile = (
@@ -347,7 +366,10 @@ export function routeBarTiles(
   const dist = DISTANCE_UNITS[units.distance].label;
   const xte = status.crossTrackM;
   const xteUnit = xte === null || xte === 0 ? dist : xte > 0 ? `${dist} D` : `${dist} G`;
-  const clock = (time: number | null) => (time === null ? MISSING : formatUtcClock(time));
+  // Heures d'arrivée en heure locale ; l'unité donne le décalage (UTC−10).
+  const clock = (time: number | null) =>
+    time === null ? MISSING : formatLocalClock(time, timeZone);
+  const zone = (time: number | null) => (time === null ? 'local' : localZoneLabel(time, timeZone));
   const togo = (time: number | null) => (time === null ? MISSING : formatDuration(time - now));
   const noSpeed = 'vitesse fond nulle ou inconnue';
   return [
@@ -373,7 +395,13 @@ export function routeBarTiles(
       '',
       status.etaTarget === null ? noSpeed : 'Temps restant jusqu’au waypoint',
     ),
-    tile('eta', 'ETA WP', clock(status.etaTarget), 'UTC', 'Heure d’arrivée au waypoint'),
+    tile(
+      'eta',
+      'ETA WP',
+      clock(status.etaTarget),
+      zone(status.etaTarget),
+      'Heure d’arrivée au waypoint',
+    ),
     tile(
       'remaining',
       'RESTE',
@@ -388,6 +416,12 @@ export function routeBarTiles(
       '',
       status.etaEnd === null ? noSpeed : 'Durée restante jusqu’à la fin de la route',
     ),
-    tile('etaEnd', 'ETA FIN', clock(status.etaEnd), 'UTC', 'Heure d’arrivée en fin de route'),
+    tile(
+      'etaEnd',
+      'ETA FIN',
+      clock(status.etaEnd),
+      zone(status.etaEnd),
+      'Heure d’arrivée en fin de route',
+    ),
   ];
 }

@@ -48,6 +48,7 @@ export const QUANTITIES = [
   'windAngleApparent',
   'windSpeedTrue',
   'windDirectionTrue',
+  'rudderAngle',
   'waterTemperature',
   'airTemperature',
   'atmosphericPressure',

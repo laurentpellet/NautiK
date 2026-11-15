@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import App from './App.svelte';
+import { resetNavFields } from './lib/navFields.svelte';
 
 // MapLibre requiert WebGL, absent de jsdom.
 vi.mock('./lib/components/ChartView.svelte', async () => ({
@@ -92,6 +93,17 @@ function fakeListen() {
   const emit = (payload: unknown, event = 'instruments') =>
     (handlers.get(event) ?? []).forEach((h) => h({ payload }));
   return { listen, emit };
+}
+
+// Panneau d'état fermé au début de chaque test (préférence mémorisée).
+afterEach(() => localStorage.removeItem('nautik.statusPanel.open'));
+
+/** Pastille d'état, en ouvrant au besoin le panneau d'état de l'en-tête. */
+async function statusPill(id: string): Promise<HTMLElement> {
+  if (!screen.queryByTestId('status-panel')) {
+    await fireEvent.click(screen.getByTestId('status-toggle'));
+  }
+  return screen.getByTestId(`pill-${id}`);
 }
 
 /** Ouvre l'onglet Paramètres sur une section (la section mémorisée est ignorée). */
@@ -245,15 +257,21 @@ describe('App', () => {
     expect(sog?.textContent).toMatch(/8\.0\s*kn/);
     expect(sog?.classList.contains('stale')).toBe(true);
     expect(within(instruments).getByLabelText('donnée obsolète')).toBeTruthy();
-    // Barre de la carte : mêmes valeurs, obsolescence signalée.
+    // Barre de la carte : SOG, COG et vent réel seulement, obsolescence signalée.
     const bar = screen.getByTestId('map-bar');
+    expect(
+      [...bar.querySelectorAll('[data-metric]')].map((e) => e.getAttribute('data-metric')),
+    ).toEqual(['sog', 'tws']);
     const barSog = bar.querySelector('[data-metric="sog"]');
     expect(barSog?.textContent).toMatch(/8\.0\s*kn/);
     expect(barSog?.classList.contains('stale')).toBe(true);
-    expect(bar.querySelector('[data-metric="depth"]')?.textContent).toMatch(/12\.5\s*m/);
-    expect(bar.querySelector('[data-metric="position"]')?.classList.contains('stale')).toBe(true);
-    // En-tête : la position obsolète est une alerte active.
-    expect(screen.getByTestId('pill-position').textContent).toContain('Obsolète');
+    expect(bar.querySelector('[data-metric="tws"] .name')?.textContent).toBe('VENT');
+    // En-tête : la position obsolète est une alerte active, visible panneau
+    // d'état fermé (icône rouge et compteur d'alertes).
+    expect(screen.queryByTestId('status-panel')).toBeNull();
+    expect(screen.getByTestId('status-toggle').classList.contains('alert')).toBe(true);
+    expect(screen.getByTestId('status-toggle').title).toContain('Position : Obsolète');
+    expect((await statusPill('position')).textContent).toContain('Obsolète');
     expect(screen.getByTestId('header-alerts').textContent).toMatch(/alerte/);
   });
 
@@ -732,7 +750,7 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('checkbox', { name: /Cartes ENC/ }));
     await vi.waitFor(() => expect(screen.queryByTestId('enc-warnings')).toBeNull());
     expect(screen.getByTestId('enc-stub').textContent).toBe('0 entités ENC');
-    expect(screen.getByTestId('hidden-layers').textContent).toContain('Cartes ENC (S-57)');
+    expect(screen.getByRole('button', { name: 'Calques' }).title).toContain('Cartes ENC (S-57)');
     localStorage.removeItem('nautik.layers');
   });
 
@@ -810,7 +828,7 @@ describe('App', () => {
       const layersMenu = screen.getByTestId('layers-menu');
       await fireEvent.click(within(layersMenu).getByRole('checkbox', { name: 'Cartes CM93' }));
       await vi.waitFor(() => expect(counts()).toEqual(['1 entités ENC', '0 entités ENC']));
-      expect(screen.getByTestId('hidden-layers').textContent).toContain('Cartes CM93');
+      expect(screen.getByRole('button', { name: 'Calques' }).title).toContain('Cartes CM93');
       // Plus de CM93 nulle part : ses avertissements disparaissent.
       await vi.waitFor(() =>
         expect(screen.queryByTestId('enc-warnings')?.textContent ?? '').not.toContain('CM93'),
@@ -928,12 +946,12 @@ describe('App', () => {
 
     await fireEvent.click(screen.getByRole('checkbox', { name: /Tahiti/ }));
     expect(screen.getByTestId('hidden-charts-stub').textContent).toBe('tahiti');
-    expect(screen.getByTestId('hidden-layers').textContent).toContain('Tahiti');
+    expect(screen.getByRole('button', { name: 'Calques' }).title).toContain('Tahiti');
     const menuButton = screen.getByRole('button', { name: 'Calques' });
     expect(menuButton.classList.contains('marked')).toBe(true);
     await fireEvent.click(screen.getByRole('checkbox', { name: /Tahiti/ }));
     expect(screen.getByTestId('hidden-charts-stub').textContent).toBe('');
-    expect(screen.queryByTestId('hidden-layers')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Calques' }).title).toBe('Calques');
     expect(menuButton.classList.contains('marked')).toBe(false);
 
     // Fermeture : Échap, puis clic en dehors du menu.
@@ -983,7 +1001,7 @@ describe('App', () => {
       );
       // Carte seule toujours affichée, même masquée auparavant.
       expect(screen.getByTestId('hidden-charts-stub').textContent).toBe('');
-      expect(screen.queryByTestId('hidden-layers')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Calques' }).title).toBe('Calques');
     } finally {
       localStorage.removeItem('nautik.hiddenCharts');
     }
@@ -1144,6 +1162,34 @@ describe('App', () => {
     expect(screen.queryByTestId('route-bar')).toBeNull();
     await fireEvent.click(within(mapBar).getByRole('button', { name: 'Barre de route' }));
     const again = await screen.findByTestId('route-bar');
+    // Barre latérale à gauche de la carte, réductible (choix mémorisé).
+    expect(again.closest('aside')?.getAttribute('aria-label')).toBe('Barre de route');
+    await fireEvent.click(within(again).getByRole('button', { name: 'Réduire la barre de route' }));
+    expect(again.classList.contains('collapsed')).toBe(true);
+    expect(again.querySelector('[data-metric="dtw"]')).toBeTruthy();
+    expect(again.querySelector('[data-metric="remaining"]')).toBeNull();
+    expect(localStorage.getItem('nautik.routeBar.collapsed')).toBe('true');
+    await fireEvent.click(within(again).getByRole('button', { name: 'Déplier la barre de route' }));
+    expect(again.querySelector('[data-metric="remaining"]')).toBeTruthy();
+    localStorage.removeItem('nautik.routeBar.collapsed');
+
+    // Clic droit : barre de route à droite de la carte (choix mémorisé),
+    // flèches de réduction inversées.
+    const aside = again.closest('aside') as HTMLElement;
+    await fireEvent.contextMenu(aside);
+    const menu = screen.getByRole('menu', { name: 'Côté de la barre de route' });
+    await fireEvent.click(within(menu).getByRole('menuitemradio', { name: /À droite/ }));
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(aside.classList.contains('right')).toBe(true);
+    expect(aside.closest('.stage')?.classList.contains('route-right')).toBe(true);
+    expect(localStorage.getItem('nautik.routeBar.side')).toBe('right');
+    expect(
+      within(again).getByRole('button', { name: 'Réduire la barre de route' }).textContent,
+    ).toBe('»');
+    await fireEvent.contextMenu(aside);
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /À gauche/ }));
+    expect(aside.classList.contains('right')).toBe(false);
+    localStorage.removeItem('nautik.routeBar.side');
 
     await fireEvent.click(within(again).getByRole('button', { name: 'Arrêter la navigation' }));
     await vi.waitFor(() => expect(calls).toEqual(['deactivate_route']));
@@ -1197,6 +1243,18 @@ describe('App', () => {
       }),
       listen: events.listen,
     });
+    // Cibles AIS : panneau masqué par défaut, ouvert par l'icône AIS de la
+    // barre, placée entre Navigation et Routes et traces.
+    const mapBar = await screen.findByTestId('map-bar');
+    expect(screen.queryByLabelText('Panneau Cibles AIS')).toBeNull();
+    const panelButtons = within(
+      within(mapBar).getByRole('toolbar', { name: 'Panneaux' }),
+    ).getAllByRole('button');
+    const names = panelButtons.map((b) => b.getAttribute('aria-label'));
+    expect(names.indexOf('Cibles AIS')).toBe(names.indexOf('Navigation') + 1);
+    expect(names.indexOf('Routes et traces')).toBe(names.indexOf('Cibles AIS') + 1);
+    await fireEvent.click(within(mapBar).getByRole('button', { name: 'Cibles AIS' }));
+    expect(screen.getByLabelText('Panneau Cibles AIS')).toBeTruthy();
     expect(await screen.findByText('Aucune cible AIS reçue.')).toBeTruthy();
     const now = new Date().toISOString();
     const target = {
@@ -1324,9 +1382,10 @@ describe('App', () => {
     // Calques : un calque masqué reste signalé.
     await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Cibles AIS' }));
-    expect(screen.getByTestId('hidden-layers').textContent).toContain('Cibles AIS');
+    expect(screen.getByRole('button', { name: 'Calques' }).title).toContain('Cibles AIS');
+    expect(screen.queryByText(/^Masqué :/), 'aucun texte sur la carte').toBeNull();
     await fireEvent.click(screen.getByRole('checkbox', { name: 'Cibles AIS' }));
-    expect(screen.queryByTestId('hidden-layers')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Calques' }).title).toBe('Calques');
   });
 
   it('règle les unités et la vitesse simulée dans Paramètres', async () => {
@@ -1382,8 +1441,8 @@ describe('App', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Plein écran' }));
     const exit = await screen.findByRole('button', { name: 'Quitter le plein écran' });
     // En-tête conservé : état des données (connecteurs) et heure.
-    expect(screen.getByTestId('pill-position').textContent).toContain('Aucune');
-    expect(screen.getByTestId('pill-link')).toBeTruthy();
+    expect((await statusPill('position')).textContent).toContain('Aucune');
+    expect(await statusPill('link')).toBeTruthy();
     expect(screen.getByTestId('clock')).toBeTruthy();
     expect(screen.getByTestId('map-bar')).toBeTruthy();
     await fireEvent.click(exit);
@@ -1476,7 +1535,57 @@ describe('App', () => {
     }
   });
 
-  it('masque, réaffiche et remet en place les panneaux de la carte', async () => {
+  it('choisit les valeurs de la barre Navigation et leur ordre dans les Paramètres', async () => {
+    localStorage.removeItem('nautik.navBar.fields');
+    resetNavFields(undefined);
+    try {
+      render(App, {
+        invoke: fakeIpc({
+          get_engine_info: () => Promise.resolve(engine),
+          get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        }),
+        listen: fakeListen().listen,
+      });
+      const tiles = () =>
+        [...screen.getByTestId('instruments').querySelectorAll('[data-tile]')].map((e) =>
+          e.getAttribute('data-tile'),
+        );
+      await screen.findByTestId('map-bar');
+      expect(tiles()).toEqual(['sog', 'heading', 'cog', 'aws', 'depth', 'stw', 'awa', 'rudder']);
+
+      await fireEvent.click(screen.getByRole('tab', { name: 'Paramètres' }));
+      await fireEvent.click(screen.getByRole('tab', { name: /Barre Navigation/ }));
+      const list = screen.getByRole('list', { name: 'Valeurs de la barre Navigation' });
+      await fireEvent.click(within(list).getByRole('checkbox', { name: 'Fond' }));
+      await fireEvent.click(within(list).getByRole('button', { name: 'Monter Angle de barre' }));
+      expect(JSON.parse(localStorage.getItem('nautik.navBar.fields') ?? '[]')[6].id).toBe('rudder');
+
+      await fireEvent.click(screen.getByRole('tab', { name: 'Carte' }));
+      expect(tiles()).toEqual(['sog', 'heading', 'cog', 'aws', 'stw', 'rudder', 'awa']);
+    } finally {
+      localStorage.removeItem('nautik.navBar.fields');
+      resetNavFields(undefined);
+    }
+  });
+
+  it('affiche toujours le bandeau Navigation au lancement', async () => {
+    localStorage.setItem('nautik.panels', JSON.stringify({ live: { visible: false } }));
+    try {
+      render(App, {
+        invoke: fakeIpc({
+          get_engine_info: () => Promise.resolve(engine),
+          get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        }),
+        listen: fakeListen().listen,
+      });
+      await screen.findByTestId('map-bar');
+      expect(screen.getByTestId('instruments').classList.contains('docked')).toBe(true);
+    } finally {
+      localStorage.removeItem('nautik.panels');
+    }
+  });
+
+  it('masque, réaffiche et déplace les panneaux de la carte', async () => {
     localStorage.removeItem('nautik.panels');
     try {
       render(App, {
@@ -1487,11 +1596,9 @@ describe('App', () => {
         listen: fakeListen().listen,
       });
       const bar = await screen.findByTestId('map-bar');
-      // Sans position : rien à centrer, et l'absence est affichée.
+      // Sans position : rien à centrer ; l'absence est affichée dans l'en-tête.
       expect(within(bar).getByRole('button', { name: /Centrer/ })).toHaveProperty('disabled', true);
-      expect(bar.querySelector('[data-metric="position"]')?.textContent).toContain(
-        'Aucune position',
-      );
+      expect((await statusPill('position')).textContent).toContain('Aucune');
       // Nord en haut / rotation libre, depuis la barre.
       const north = within(bar).getByRole('button', { name: /Nord en haut/ });
       await fireEvent.click(north);
@@ -1512,22 +1619,134 @@ describe('App', () => {
         screen.getByRole('complementary', { hidden: true }).closest('[hidden]'),
       ).not.toBeNull();
 
-      // Déplacement au clavier, puis remise en place générale.
-      const handle = screen.getByRole('button', { name: 'Déplacer Navigation' });
+      // Déplacement au clavier d'un panneau flottant ; plus de remise en
+      // place générale dans la barre.
+      const handle = screen.getByRole('button', { name: 'Déplacer Mouillage' });
       await fireEvent.keyDown(handle, { key: 'ArrowDown' });
-      expect(JSON.parse(localStorage.getItem('nautik.panels') ?? '{}').live.y).not.toBeNull();
-      await fireEvent.click(within(bar).getByRole('button', { name: /Disposition/ }));
-      expect(screen.getByRole('complementary').closest('[hidden]')).toBeNull();
-      expect(JSON.parse(localStorage.getItem('nautik.panels') ?? '{}').live.y).toBeNull();
+      expect(JSON.parse(localStorage.getItem('nautik.panels') ?? '{}').anchor.y).not.toBeNull();
+      expect(within(bar).queryByRole('button', { name: /Disposition/ })).toBeNull();
 
-      // La barre elle-même : masquée, un bouton permet toujours de la rappeler.
-      await fireEvent.click(screen.getByRole('button', { name: 'Masquer Barre' }));
-      expect(screen.queryByTestId('map-bar')).toBeNull();
-      await fireEvent.click(screen.getByRole('button', { name: /Barre/ }));
-      expect(screen.getByTestId('map-bar')).toBeTruthy();
+      // Navigation : bandeau fixe en bas (non déplaçable), masquable puis
+      // réaffiché par la barre.
+      const dock = screen.getByTestId('instruments');
+      expect(dock.classList.contains('docked')).toBe(true);
+      // Barre fixe sous la carte (hors de la zone de carte), sans VMG ni
+      // autre amure.
+      expect(dock.closest('.stage')).toBeNull();
+      expect(dock.parentElement?.classList.contains('workspace')).toBe(true);
+      expect(within(dock).queryByTestId('sailing-values')).toBeNull();
+      expect(dock.querySelector('[data-tile="rudder"]')).not.toBeNull();
+      expect(dock.querySelector('[data-tile="sog"]')).not.toBeNull();
+      expect(screen.queryByRole('button', { name: 'Déplacer Navigation' })).toBeNull();
+      // Clic droit : barre Navigation à gauche, puis à droite, puis en bas
+      // (choix mémorisé) ; Échap ferme le menu sans rien changer.
+      await fireEvent.contextMenu(dock);
+      expect(
+        screen.getByRole('menuitemradio', { name: 'En bas' }).getAttribute('aria-checked'),
+      ).toBe('true');
+      await fireEvent.click(screen.getByRole('menuitemradio', { name: 'À gauche' }));
+      expect(dock.classList.contains('left')).toBe(true);
+      expect(dock.parentElement?.classList.contains('nav-left')).toBe(true);
+      expect(localStorage.getItem('nautik.navDock')).toBe('left');
+      await fireEvent.contextMenu(dock);
+      await fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(dock.classList.contains('left')).toBe(true);
+      await fireEvent.contextMenu(dock);
+      await fireEvent.click(screen.getByRole('menuitemradio', { name: 'À droite' }));
+      expect(dock.parentElement?.classList.contains('nav-right')).toBe(true);
+      await fireEvent.contextMenu(dock);
+      await fireEvent.click(screen.getByRole('menuitemradio', { name: 'En bas' }));
+      expect(dock.classList.contains('bottom')).toBe(true);
+      localStorage.removeItem('nautik.navDock');
+
+      // Pas de croix : la barre se réduit (mêmes valeurs, compas masqué,
+      // tailles de la barre de route) puis se déplie.
+      expect(screen.queryByRole('button', { name: 'Masquer Navigation' })).toBeNull();
+      const fold = within(dock).getByRole('button', { name: 'Réduire la barre Navigation' });
+      expect(fold.textContent).toBe('«');
+      await fireEvent.click(fold);
+      expect(dock.classList.contains('folded')).toBe(true);
+      expect(dock.querySelector('[data-tile="sog"]')).not.toBeNull();
+      expect(dock.querySelector('[data-tile="heading"]')).not.toBeNull();
+      expect(dock.querySelector('[data-tile="depth"]')).not.toBeNull();
+      expect(dock.querySelector('[data-tile="rudder"]')).not.toBeNull();
+      expect(dock.querySelector('.compass')).toBeNull();
+      expect(localStorage.getItem('nautik.navBar.collapsed')).toBe('true');
+      await fireEvent.click(
+        within(dock).getByRole('button', { name: 'Déplier la barre Navigation' }),
+      );
+      expect(dock.querySelector('.compass')).not.toBeNull();
+      localStorage.removeItem('nautik.navBar.collapsed');
+
+      // L'icône Navigation de la barre d'outils masque puis réaffiche la barre.
+      await fireEvent.click(within(bar).getByRole('button', { name: 'Navigation' }));
+      expect(screen.queryByTestId('instruments')).toBeNull();
+      expect(JSON.parse(localStorage.getItem('nautik.panels') ?? '{}').live.visible).toBe(false);
+      await fireEvent.click(within(bar).getByRole('button', { name: 'Navigation' }));
+      expect(screen.getByTestId('instruments')).toBeTruthy();
+
+      // La barre est fixe en haut de la carte : elle ne se masque pas.
+      expect(screen.queryByRole('button', { name: 'Masquer Barre' })).toBeNull();
+      expect(within(screen.getByTestId('app-header')).getByTestId('map-bar')).toBe(bar);
+
+      // Météo et Journal : plus d'onglets en haut, ouverts depuis la barre dans les Paramètres.
+      expect(screen.queryByRole('tab', { name: 'Journal' })).toBeNull();
+      expect(screen.queryByRole('tab', { name: 'Météo' })).toBeNull();
+      await fireEvent.click(within(bar).getByRole('button', { name: 'Journal de bord' }));
+      expect(screen.getByRole('tab', { name: /^Journal/ }).getAttribute('aria-selected')).toBe(
+        'true',
+      );
+      expect(screen.getByRole('tab', { name: 'Paramètres' }).getAttribute('aria-selected')).toBe(
+        'true',
+      );
+      expect(
+        screen.queryByTestId('map-bar'),
+        'barre de la carte seulement sur la carte',
+      ).toBeNull();
     } finally {
       localStorage.removeItem('nautik.panels');
     }
+  });
+
+  it('démarre et arrête l’enregistrement de la trace depuis la barre', async () => {
+    const state = { activeRouteId: null, recordingTrackId: null as string | null };
+    const calls: string[] = [];
+    render(App, {
+      invoke: fakeIpc({
+        get_engine_info: () => Promise.resolve(engine),
+        get_chart_catalog: () => Promise.resolve(emptyCatalog),
+        get_navigation_state: () => Promise.resolve({ ...state }),
+        start_track_recording: () => {
+          calls.push('start');
+          state.recordingTrackId = 't1';
+          return Promise.resolve({
+            id: 't1',
+            name: 'Trace',
+            startedAt: '2026-11-14T10:00:00Z',
+            endedAt: null,
+            isRecording: true,
+            pointCount: 0,
+          });
+        },
+        stop_track_recording: () => {
+          calls.push('stop');
+          state.recordingTrackId = null;
+          return Promise.resolve(null);
+        },
+        get_track: () => Promise.reject(new Error('trace absente')),
+      }),
+      listen: fakeListen().listen,
+    });
+    const bar = await screen.findByTestId('map-bar');
+    await fireEvent.click(within(bar).getByRole('button', { name: 'Enregistrer la trace' }));
+    const stop = await within(bar).findByRole('button', {
+      name: "Arrêter l'enregistrement de la trace",
+    });
+    expect(stop.classList.contains('on')).toBe(true);
+    await fireEvent.click(stop);
+    await within(bar).findByRole('button', { name: 'Enregistrer la trace' });
+    expect(calls).toEqual(['start', 'stop']);
   });
 
   it('affiche un fichier GRIB sur la carte depuis l’onglet Météo', async () => {
@@ -1561,7 +1780,10 @@ describe('App', () => {
     };
     render(App, { invoke, listen: fakeListen().listen });
 
-    await fireEvent.click(await screen.findByRole('tab', { name: 'Météo' }));
+    await fireEvent.click(
+      within(await screen.findByTestId('map-bar')).getByRole('button', { name: 'Météo' }),
+    );
+    expect(screen.getByRole('tab', { name: /^Météo/ }).getAttribute('aria-selected')).toBe('true');
     await vi.waitFor(() =>
       expect(screen.getByTestId('download-area').textContent).toContain('18°S–14°S'),
     );
@@ -1600,7 +1822,10 @@ describe('App', () => {
       }),
       listen: fakeListen().listen,
     });
-    await fireEvent.click(await screen.findByRole('tab', { name: 'Météo' }));
+    await fireEvent.click(
+      within(await screen.findByTestId('map-bar')).getByRole('button', { name: 'Météo' }),
+    );
+    expect(screen.getByRole('tab', { name: /^Météo/ }).getAttribute('aria-selected')).toBe('true');
     await fireEvent.click(await screen.findByRole('button', { name: 'Afficher sur la carte' }));
     expect(await screen.findByText('Vent indisponible : fichier corrompu')).toBeTruthy();
     expect(screen.getByTestId('wind-stub').textContent).toBe('sans vent');
@@ -1659,7 +1884,7 @@ describe('App', () => {
     expect(banner.textContent).toContain('MOUILLAGE');
     expect(banner.textContent).toContain('72 m');
     expect(banner.textContent).toContain('SIMULATION');
-    expect(screen.getByTestId('pill-alarm').className).toContain('alert');
+    expect((await statusPill('alarm')).className).toContain('alert');
 
     // Visible aussi dans un autre onglet.
     await fireEvent.click(screen.getByRole('tab', { name: 'Instruments' }));
@@ -1770,6 +1995,11 @@ describe('App', () => {
         sourceId: 'simulator',
       }),
     );
+    // MOB en fin de barre de la carte, juste à gauche de l'état des données.
+    const mobButton = screen.getByRole('button', { name: 'Homme à la mer' });
+    const mapBar = mobButton.closest('[data-testid="map-bar"]');
+    expect(mapBar).not.toBeNull();
+    expect(mapBar?.lastElementChild?.contains(mobButton)).toBe(true);
     await fireEvent.click(screen.getByRole('button', { name: 'Homme à la mer' }));
     expect(calls).toContainEqual(['mark_mob', undefined]);
     const panel = await screen.findByTestId('mob-panel');
@@ -1882,6 +2112,6 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Confirmer la désactivation' }));
     expect(calls).toContainEqual(['set_alarm_enabled', { kind: 'positionLost', enabled: false }]);
     expect(await screen.findByText('DÉSACTIVÉE')).toBeTruthy();
-    expect(screen.getByTestId('pill-alarm').textContent).toContain('Réduites');
+    expect((await statusPill('alarm')).textContent).toContain('Réduites');
   });
 });

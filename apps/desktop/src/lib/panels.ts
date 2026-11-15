@@ -5,7 +5,7 @@
  * toujours visibles.
  */
 
-export type PanelId = 'side' | 'anchor' | 'live' | 'bar' | 'route' | 'routeBar';
+export type PanelId = 'side' | 'anchor' | 'live' | 'ais' | 'bar' | 'route' | 'routeBar';
 
 export interface PanelState {
   visible: boolean;
@@ -16,12 +16,13 @@ export interface PanelState {
 
 export type PanelLayout = Record<PanelId, PanelState>;
 
-export const PANEL_IDS: PanelId[] = ['side', 'anchor', 'live', 'bar', 'route', 'routeBar'];
+export const PANEL_IDS: PanelId[] = ['side', 'anchor', 'live', 'ais', 'bar', 'route', 'routeBar'];
 
 export const PANEL_LABELS: Record<PanelId, string> = {
   side: 'Panneau',
   anchor: 'Mouillage',
   live: 'Navigation',
+  ais: 'Cibles AIS',
   bar: 'Barre',
   route: 'Routes et traces',
   routeBar: 'Barre de route',
@@ -29,8 +30,15 @@ export const PANEL_LABELS: Record<PanelId, string> = {
 
 const DEFAULT_STATE: PanelState = { visible: true, x: null, y: null };
 
+/** Panneaux masqués par défaut : ouverts depuis la barre d'outils. */
+const HIDDEN_BY_DEFAULT: readonly PanelId[] = ['ais'];
+
+const visibleByDefault = (id: PanelId) => !HIDDEN_BY_DEFAULT.includes(id);
+
 export function defaultLayout(): PanelLayout {
-  return Object.fromEntries(PANEL_IDS.map((id) => [id, { ...DEFAULT_STATE }])) as PanelLayout;
+  return Object.fromEntries(
+    PANEL_IDS.map((id) => [id, { ...DEFAULT_STATE, visible: visibleByDefault(id) }]),
+  ) as PanelLayout;
 }
 
 const STORAGE_KEY = 'nautik.panels';
@@ -60,7 +68,7 @@ export function loadLayout(
       const x = coordinate(e.x);
       const y = coordinate(e.y);
       layout[id] = {
-        visible: typeof e.visible === 'boolean' ? e.visible : true,
+        visible: typeof e.visible === 'boolean' ? e.visible : visibleByDefault(id),
         // Une position n'a de sens que complète.
         x: x !== null && y !== null ? x : null,
         y: x !== null && y !== null ? y : null,
@@ -113,12 +121,150 @@ export function clampPosition(
   };
 }
 
-/** Panneaux masqués, pour le rappel affiché. */
+/** Panneaux masqués (hors ceux masqués par défaut), pour le rappel affiché. */
 export function hiddenPanels(layout: PanelLayout): string[] {
-  return PANEL_IDS.filter((id) => !layout[id].visible).map((id) => PANEL_LABELS[id]);
+  return PANEL_IDS.filter((id) => !layout[id].visible && visibleByDefault(id)).map(
+    (id) => PANEL_LABELS[id],
+  );
 }
 
-/** Au moins un panneau a été déplacé ou masqué. */
+/** Au moins un panneau a été déplacé, ou affiché / masqué autrement que par défaut. */
 export function isCustomized(layout: PanelLayout): boolean {
-  return PANEL_IDS.some((id) => layout[id].x !== null || !layout[id].visible);
+  return PANEL_IDS.some(
+    (id) => layout[id].x !== null || layout[id].visible !== visibleByDefault(id),
+  );
+}
+
+const ROUTE_BAR_COLLAPSED_KEY = 'nautik.routeBar.collapsed';
+
+/** Barre de route réduite (préférence d'interface mémorisée). */
+export function loadRouteBarCollapsed(
+  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
+): boolean {
+  try {
+    return storage?.getItem(ROUTE_BAR_COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function saveRouteBarCollapsed(
+  collapsed: boolean,
+  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
+): void {
+  try {
+    storage?.setItem(ROUTE_BAR_COLLAPSED_KEY, String(collapsed));
+  } catch {
+    // Préférence non mémorisée : sans conséquence.
+  }
+}
+
+const STATUS_PANEL_OPEN_KEY = 'nautik.statusPanel.open';
+
+/** Panneau d'état des données ouvert (préférence d'interface mémorisée). */
+export function loadStatusPanelOpen(
+  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
+): boolean {
+  try {
+    return storage?.getItem(STATUS_PANEL_OPEN_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function saveStatusPanelOpen(
+  open: boolean,
+  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
+): void {
+  try {
+    storage?.setItem(STATUS_PANEL_OPEN_KEY, String(open));
+  } catch {
+    // Préférence non mémorisée : sans conséquence.
+  }
+}
+
+/**
+ * Disposition de lancement : le panneau Navigation (bandeau du bas) est
+ * toujours affiché au démarrage, même masqué lors de la session
+ * précédente.
+ */
+export function withNavigationShown(layout: PanelLayout): PanelLayout {
+  return { ...layout, live: { ...layout.live, visible: true } };
+}
+
+/** Position de la barre Navigation : à gauche, en bas ou à droite de la carte. */
+export type NavDock = 'left' | 'bottom' | 'right';
+/** Côté de la carte où se place la barre de route. */
+export type RouteBarSide = 'left' | 'right';
+
+export const NAV_DOCKS: readonly NavDock[] = ['left', 'bottom', 'right'];
+export const ROUTE_BAR_SIDES: readonly RouteBarSide[] = ['left', 'right'];
+
+const NAV_DOCK_KEY = 'nautik.navDock';
+const ROUTE_BAR_SIDE_KEY = 'nautik.routeBar.side';
+
+function loadChoice<T extends string>(
+  key: string,
+  allowed: readonly T[],
+  fallback: T,
+  storage: Pick<Storage, 'getItem'> | undefined,
+): T {
+  try {
+    const value = storage?.getItem(key);
+    return allowed.find((a) => a === value) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveChoice(key: string, value: string, storage: Pick<Storage, 'setItem'> | undefined) {
+  try {
+    storage?.setItem(key, value);
+  } catch {
+    // Préférence non mémorisée : sans conséquence.
+  }
+}
+
+/** Position mémorisée de la barre Navigation (en bas par défaut). */
+export function loadNavDock(
+  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
+): NavDock {
+  return loadChoice(NAV_DOCK_KEY, NAV_DOCKS, 'bottom', storage);
+}
+
+export function saveNavDock(
+  dock: NavDock,
+  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
+): void {
+  saveChoice(NAV_DOCK_KEY, dock, storage);
+}
+
+/** Côté mémorisé de la barre de route (à gauche par défaut). */
+export function loadRouteBarSide(
+  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
+): RouteBarSide {
+  return loadChoice(ROUTE_BAR_SIDE_KEY, ROUTE_BAR_SIDES, 'left', storage);
+}
+
+export function saveRouteBarSide(
+  side: RouteBarSide,
+  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
+): void {
+  saveChoice(ROUTE_BAR_SIDE_KEY, side, storage);
+}
+
+const NAV_COLLAPSED_KEY = 'nautik.navBar.collapsed';
+
+/** Barre Navigation réduite (préférence mémorisée, dépliée par défaut). */
+export function loadNavCollapsed(
+  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
+): boolean {
+  return loadChoice(NAV_COLLAPSED_KEY, ['true', 'false'] as const, 'false', storage) === 'true';
+}
+
+export function saveNavCollapsed(
+  collapsed: boolean,
+  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
+): void {
+  saveChoice(NAV_COLLAPSED_KEY, String(collapsed), storage);
 }

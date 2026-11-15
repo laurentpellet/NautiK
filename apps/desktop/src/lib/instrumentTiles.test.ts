@@ -100,8 +100,23 @@ describe('tuiles des instruments', () => {
 
   it("n'invente aucune valeur absente", () => {
     const tiles = instrumentTiles(null, false);
-    expect(tiles).toHaveLength(7);
+    expect(tiles).toHaveLength(8);
     expect(tiles.every((t) => t.missing && t.value === '—')).toBe(true);
+  });
+
+  it('affiche l’angle de barre avec son bord', () => {
+    const rudder = (deg: number) =>
+      byId(
+        instrumentTiles(snapshot([reading('rudderAngle', (deg * Math.PI) / 180)]), false),
+        'rudder',
+      );
+    expect(rudder(12.4)).toMatchObject({ label: 'BARRE', value: '12', unit: '° Td' });
+    expect(rudder(-35)).toMatchObject({ value: '35', unit: '° Bd' });
+    expect(rudder(0.2)).toMatchObject({ value: '0', unit: '°' });
+    expect(byId(instrumentTiles(null, false), 'rudder')).toMatchObject({
+      value: '—',
+      missing: true,
+    });
   });
 
   it('signale les valeurs obsolètes et le silence du moteur', () => {
@@ -166,11 +181,14 @@ const status: NavigationStatus = {
 
 describe('tuiles de navigation', () => {
   it('distance, relèvement, écart et ETA', () => {
-    const tiles = navigationTiles(status, false);
+    const tiles = navigationTiles(status, false, 'Pacific/Tahiti');
     expect(byId(tiles, 'dtw')).toMatchObject({ value: '1.5', unit: 'NM', detail: 'vers WP001' });
     expect(byId(tiles, 'btw')).toMatchObject({ value: '180', unit: '°' });
     expect(byId(tiles, 'xte')).toMatchObject({ value: '0.05', unit: 'NM G' });
-    expect(byId(tiles, 'eta')).toMatchObject({ value: '14:05', unit: 'UTC' });
+    expect(byId(tiles, 'eta'), 'heure locale de Tahiti').toMatchObject({
+      value: '04:05',
+      unit: 'UTC−10',
+    });
   });
 
   it('valeurs inconnues et position obsolète', () => {
@@ -193,6 +211,7 @@ describe('barre de route', () => {
       { ...status, etaEnd: Date.UTC(2026, 10, 12, 16, 45), computedAt: now },
       now,
       false,
+      'Pacific/Tahiti',
     );
     expect(tiles.map((t) => t.id)).toEqual([
       'dtw',
@@ -208,10 +227,14 @@ describe('barre de route', () => {
     expect(byId(tiles, 'btw')).toMatchObject({ value: '180', unit: '°' });
     expect(byId(tiles, 'xte')).toMatchObject({ value: '0.05', unit: 'NM G' });
     expect(byId(tiles, 'ttg')).toMatchObject({ value: '25 min', unit: '' });
-    expect(byId(tiles, 'eta')).toMatchObject({ value: '14:05', unit: 'UTC' });
+    expect(byId(tiles, 'eta')).toMatchObject({ value: '04:05', unit: 'UTC−10' });
     expect(byId(tiles, 'remaining')).toMatchObject({ value: '2.7', unit: 'NM' });
     expect(byId(tiles, 'ttgEnd')).toMatchObject({ value: '3 h 05' });
-    expect(byId(tiles, 'etaEnd')).toMatchObject({ value: '16:45', unit: 'UTC' });
+    expect(byId(tiles, 'etaEnd')).toMatchObject({ value: '06:45', unit: 'UTC−10' });
+    expect(
+      byId(routeBarTiles(status, now, false, 'Europe/Paris'), 'eta'),
+      'heure locale de Paris',
+    ).toMatchObject({ value: '15:05', unit: 'UTC+1' });
     expect(byId(routeBarTiles({ ...status, crossTrackM: 50 }, now, false), 'xte')?.unit).toBe(
       'NM D',
     );

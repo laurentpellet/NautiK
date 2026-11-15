@@ -39,22 +39,42 @@ Au premier lancement, NautiK démarre en **mode simulateur** : un bateau
 fictif dans la passe de Tiputa (Rangiroa). Tout ce qui vient du
 simulateur est marqué **SIMULATION** ou **POSITION SIMULÉE**. Les traces
 enregistrées en simulation sont préfixées « SIMULATION — ».
+Le bateau simulé reste immobile (SOG 0, COG « — ») tant qu'aucune route
+n'est active ; il suit la route active à la vitesse du simulateur. Sa
+vitesse surface est la vitesse fond à ±4 % près (pas de courant simulé).
+Son angle de barre suit la giration (barre en butée à 35° dans un virage
+franc, droite à l'arrêt).
 
 L'écran se compose :
 
-- d'une **barre d'en-tête** : onglets, pastilles d'état (Position,
-  Liaison, AIS, Moteur, Alarmes), heure locale avec son décalage (l'heure
-  UTC s'affiche en infobulle), thème jour / nuit et plein écran (bouton,
-  F11 ; Échap pour sortir). L'en-tête reste affiché en plein écran ;
-- de quatre onglets : **Carte**, **Instruments**, **Météo**,
-  **Paramètres**.
+- d'une **barre unique en haut**, en trois groupes séparés par un trait :
+  les onglets en icônes (carte, cadran pour Instruments, curseurs pour
+  Paramètres ; nom en infobulle) ; sur l'onglet Carte, SOG et force du vent
+  réel (« — » si absent, valeur signalée si obsolète)
+  suivis des outils de la carte, terminés par le bouton **Homme à la mer**
+  (bouée rouge) ; puis l'icône **État des données**
+  (tracé de pouls), de la couleur de l'état le plus grave : verte si tout
+  va bien, orange en simulation ou en attente, rouge sur fond rouge en
+  alerte (résumé en infobulle). Un clic ouvre ou ferme le panneau d'état
+  (choix mémorisé) : Position (viseur), Liaison (antenne), AIS (triangle),
+  Alarmes (cloche) et Moteur (puce), chacun avec son icône colorée, son
+  état et le détail en infobulle. Panneau fermé, une alerte reste visible
+  par l'icône rouge et le compteur **⚠ N alertes actives** ; puis, tout à
+  droite, l'heure
+  locale avec son décalage (l'heure UTC s'affiche en infobulle) et les
+  icônes thème jour / nuit et plein écran (F11 ; Échap pour sortir). Sur
+  un écran pas assez large, le dernier groupe passe sur une seconde ligne.
+  La barre reste affichée en plein écran. Au lancement, la fenêtre
+  s'ouvre maximisée ;
+- de trois onglets : **Carte**, **Instruments** et **Paramètres**.
 
-L'onglet **Paramètres** est découpé en quatre sections, choisies dans la
+L'onglet **Paramètres** est découpé en sept sections, choisies dans la
 colonne de gauche (ou les onglets du haut sur un écran étroit, flèches du
 clavier possibles) : **Général** (unités, couleur de la route active,
-vitesse du simulateur), **Source** (données du bord), **Alarmes**
-(surveillance et historique) et **Cartes** (MBTiles, ENC, îles et
-amers). La dernière section ouverte est retrouvée au prochain passage.
+vitesse du simulateur), **Instruments** (valeurs de la barre Navigation
+et leur ordre), **Source** (données du bord), **Alarmes**
+(surveillance et historique), **Cartes** (MBTiles, ENC, îles et
+amers), **Météo** et **Journal**. La dernière section ouverte est retrouvée au prochain passage.
 
 Les alertes de position, de liaison et d'alarme restent visibles dans
 tous les onglets et en plein écran.
@@ -152,7 +172,8 @@ Sur la carte :
 
 - molette ou pincement : zoom ; clic droit glissé : rotation.
 
-**Barre d'outils de la carte** (en bas, icônes avec infobulles) :
+**Outils de la carte** (dans la barre du haut, après les onglets ; icônes
+avec infobulles ; ils ne se déplacent pas et ne se masquent pas) :
 
 - flèche **Nord en haut** (rotation libre quand elle est relâchée) et
   viseur **Centrer sur le bateau** (inactif sans position) ;
@@ -161,8 +182,8 @@ Sur la carte :
   **Cartes ENC (S-57)** et, si une base est trouvée, **Cartes CM93**),
   puis, après un séparateur, routes, traces, cibles AIS et îles et
   amers. Le menu se ferme par Échap ou un clic ailleurs. Une carte ou
-  un calque masqués sont rappelés en haut à droite de la carte (« Masqué :
-  … ») et par une pastille sur le bouton ; une carte seule est toujours
+  un calque masqués sont signalés par une pastille sur le bouton, dont
+  l'infobulle en donne la liste (« Calques — masqué : … ») ; une carte seule est toujours
   affichée ;
 - bateau **Positionner le bateau ici** : avec la source **Simulateur**
   seulement, le clic suivant sur la carte y place le bateau simulé (Échap
@@ -196,22 +217,36 @@ Sur la carte :
   dans les deux volets ; le volet que vous déplacez entraîne l'autre.
   Cadenas ouvert : chaque volet est libre. Au verrouillage, le volet de
   droite rejoint celui de gauche ;
-- métriques de base : SOG, COG, CAP, FOND et position. Une valeur
-  obsolète est estompée et marquée ⚠ ; sans position, « Aucune position »
-  est affiché ;
-- icônes **Panneau**, **Mouillage** (ancre), **Navigation**
-  (cadran), **Route** (tracé) et **Barre de route** : affichent ou
-  masquent chaque panneau (estompée = masqué) ;
-- **↺ Disposition par défaut** : remet tous les panneaux en place et les
-  réaffiche.
+- icônes **Panneau**, **Mouillage** (ancre), **Navigation** (cadran),
+  **Cibles AIS** (triangle), **Route** (tracé) et **Barre de route** :
+  affichent ou masquent chaque panneau (estompée = masqué). Le panneau
+  **Cibles AIS** est fermé par défaut.
 
-**Panneaux déplaçables.** Chaque panneau (y compris la barre) se déplace
-par sa poignée ⠿ (souris, doigt ou flèches du clavier) et se masque par
-son **×**. Double-clic sur la poignée : retour à sa place. Une barre
-masquée se rappelle par le bouton **▴ Barre**, en bas à gauche. La
+**Barre Navigation.** Le panneau **Navigation** est une barre fixe à côté
+de la carte, comme la barre du haut (la carte se réduit d'autant : rien
+n'est recouvert). **Clic droit** (ou appui long) sur la barre : **À
+gauche** (colonne à gauche de la carte et de la barre de route), **En
+bas** (par défaut, sur toute la largeur) ou **À droite** ; Échap ferme le
+menu sans rien changer ; choix mémorisé. Elle affiche le compas, puis, par défaut, SOG,
+cap, COG, vent apparent, fond, vitesse surface, angle du vent et angle de
+barre (**BARRE**, bord Td / Bd), tous en très grands caractères. Dans
+**Paramètres → Instruments**, cochez les valeurs à afficher et changez
+leur ordre avec les flèches ↑ ↓ (au moins une reste affichée ; **Tout
+afficher** revient au choix par défaut ; choix mémorisé) (VMG et autre amure ne sont plus affichés en
+valeurs ; les laylines restent sur la carte). Elle est toujours affichée
+au lancement ; l'icône **Navigation** de la barre d'outils la masque
+jusqu'au prochain lancement. Son bouton **«** (**»** à droite), en haut à gauche comme sur la barre
+de route et le même
+que celui de la barre de route, la **réduit** : le compas disparaît, les mêmes
+valeurs restent, présentées comme la barre de route réduite (nom en haut, valeur, unité dessous) ; l'autre flèche la déplie (choix mémorisé). Une valeur obsolète est estompée et marquée ⚠ ; une
+donnée absente reste « — ».
+
+**Panneaux déplaçables.** Les autres panneaux se déplacent par leur poignée ⠿
+(souris, doigt ou flèches du clavier) et se masquent par leur **×**.
+Double-clic sur la poignée : retour à sa place. La
 disposition est conservée d'un lancement à l'autre ; un panneau ne peut
 pas sortir de la fenêtre. Masquer un panneau ne masque jamais une alarme :
-le bandeau d'alarme, les pastilles d'en-tête et les alertes de position
+le bandeau d'alarme, l'icône État des données, le compteur d'alertes et les alertes de position
 et de liaison restent toujours visibles, et la surveillance du mouillage
 continue même si son panneau est masqué.
 
@@ -253,6 +288,8 @@ dernière cause est affichée.
 ## 5. Instruments
 
 L'onglet **Instruments** regroupe vitesse fond et surface, route, cap,
+angle de barre (phrase NMEA 0183 RSA ou chemin Signal K
+`steering.rudderAngle` ; au-delà de 90° d'un bord, la valeur est rejetée),
 profondeur, vent apparent (cadran bâbord / tribord et tendance sur 1 h),
 navigation active, position, ainsi que moteur, énergie, réservoirs et
 environnement lorsque ces données sont reçues. Une donnée obsolète est
@@ -311,29 +348,35 @@ onglet choisi est mémorisé).
   cours de tracé) ; pour la route active, la longueur de chaque segment
   (calculée par le moteur, dans l'unité choisie) s'affiche en italique au
   milieu du segment.
-- **Barre de route** : pendant la navigation, une barre s'affiche en bas
-  de la carte, au-dessus de la barre d'outils. Elle rappelle la route,
+- **Barre de route** : pendant la navigation, une barre latérale s'affiche
+  collée à gauche de la carte (la carte se décale d'autant). **Clic
+  droit** (ou appui long) sur la barre : **À gauche de la carte** ou **À
+  droite de la carte** (choix mémorisé). Son bouton **«** (**»** à
+  droite) la réduit à une colonne étroite qui garde le rang du waypoint,
+  DTW et BTW ; l'autre flèche la déplie (choix mémorisé). Elle rappelle la route,
   le waypoint visé (rang / nombre de points) et la mention SIMULATION le
   cas échéant, puis :
   - **DTW** : distance au waypoint ; **BTW** : son relèvement vrai ;
   - **XTE** : écart de route (D : à droite, G : à gauche) ;
-  - **TEMPS WP** et **ETA WP** : temps restant et heure UTC d'arrivée au
-    waypoint ;
+  - **TEMPS WP** et **ETA WP** : temps restant et heure locale d'arrivée au
+    waypoint (l'unité donne le décalage, par exemple UTC−10) ;
   - **RESTE** : distance jusqu'à la fin de la route ;
-  - **DURÉE** et **ETA FIN** : temps restant et heure UTC d'arrivée en fin
-    de route.
+  - **DURÉE** et **ETA FIN** : temps restant et heure locale d'arrivée en
+    fin de route.
 
   Les temps et heures sont estimés à la vitesse fond courante ; vitesse
   nulle ou inconnue : « — ». Si la position est obsolète ou absente, ou
   si le moteur ne répond plus, toutes les valeurs sont estompées et
   marquées ⚠ (l'infobulle donne l'âge du calcul). Ses boutons affichent
-  ou masquent le panneau Route et arrêtent la navigation. Comme les
-  autres panneaux, elle se déplace par sa poignée et se masque par **×**
-  (icône **Barre de route** de la barre d'outils pour la réafficher).
+  ou masquent le panneau Route et arrêtent la navigation. L'icône
+  **Barre de route** de la barre d'outils la masque ou la réaffiche.
+
 - Une route peut être inversée ou supprimée.
 - **Traces** (onglet **Traces**) : **Enregistrer** démarre
   l'enregistrement (un point toutes les 5 s au plus, et seulement après
-  10 m parcourus). Une trace interrompue par un arrêt brutal est clôturée
+  10 m parcourus). Le bouton **lecture / arrêt** de la barre d'outils
+  fait de même sans ouvrir le panneau : triangle pour démarrer, carré
+  rouge pendant l'enregistrement pour l'arrêter. Une trace interrompue par un arrêt brutal est clôturée
   au redémarrage, à l'heure de son dernier point. Pour une trace
   affichée : longueur, durée (du premier au dernier point), **Zoomer** et
   **Renommer**.
@@ -374,8 +417,7 @@ coordonnées : `-17.5 -149.6`, `17°32,1'S 149°34,2'W`,
 
 - **Vecteur et ligne de cap** (calque) : la route fond prévue à 6 min et
   le cap du bateau, tracés à partir de données récentes seulement.
-- **VMG et laylines** : avec le vent réel, la carte Navigation affiche la
-  VMG face au vent et vers le waypoint, et la route sur l'autre amure ; le
+- **Laylines** : avec le vent réel, le
   calque **Laylines** trace les laylines du waypoint visé (45° au près,
   150° au portant). Ce sont des repères géométriques : ils ne tiennent
   compte ni des polaires ni du courant.
@@ -386,7 +428,8 @@ coordonnées : `-17.5 -149.6`, `17°32,1'S 149°34,2'W`,
 
 ### Journal de bord
 
-L'onglet **Journal** liste les entrées, de la plus récente à la plus
+La section **Journal** des **Paramètres** (icône **Journal de bord** de la
+barre d'outils) liste les entrées, de la plus récente à la plus
 ancienne :
 
 - **Ajouter** : entrée libre (ris pris, moteur, mouillage…), complétée
@@ -407,6 +450,12 @@ historique en pointillés. Une cible obsolète est estompée, une cible
 perdue grisée, puis retirée après 30 min de silence. Cliquez une cible
 pour afficher son nom, sa vitesse, sa route et son état.
 
+L'icône **Cibles AIS** (triangle) de la barre d'outils ouvre le panneau
+des cibles : nom ou MMSI, vitesse, route, état (obsolète, perdue) et âge
+de chaque cible, les actives en premier. Un clic sur une ligne la
+sélectionne sur la carte. Une erreur de réception AIS est signalée dans
+ce panneau, ou dans le panneau latéral quand il est fermé.
+
 NautiK suit jusqu'à 2 000 cibles. Le calcul du point de rapprochement
 (CPA/TCPA) n'est pas encore disponible.
 
@@ -414,7 +463,8 @@ NautiK suit jusqu'à 2 000 cibles. Le calcul du point de rapprochement
 
 Trois alarmes sont évaluées par le moteur, même sans interface :
 
-- **Homme à la mer (MOB)** : bouton rouge **MOB** de la barre d'outils ou
+- **Homme à la mer (MOB)** : bouton bouée rouge en fin de barre de la carte (juste à gauche de l'état
+  des données) ou
   **Ctrl+M**. Le point est posé à la dernière position reçue ; si elle
   est ancienne, il est marqué **approximatif** ; sans aucune position, le
   MOB est refusé (notez l'heure et le cap). Un panneau affiche en grand,
@@ -441,7 +491,8 @@ en veille ne coupe pas l'application.
 
 ## 9. Météo (vent)
 
-L'onglet **Météo** affiche le vent prévu à 10 m à partir de fichiers
+La section **Météo** des **Paramètres** (icône **Météo** de la barre
+d'outils) affiche le vent prévu à 10 m à partir de fichiers
 GRIB2 :
 
 - **Importer un fichier GRIB…** : fichier obtenu par ailleurs (courriel,

@@ -23,7 +23,7 @@ pub const DEFAULT_SOURCE_ID: &str = "signalk";
 pub const POSITION_PATH: &str = "navigation.position";
 
 /// Chemins Signal K pris en charge et grandeurs associées.
-pub const SUBSCRIBED_PATHS: [(&str, Option<Quantity>); 9] = [
+pub const SUBSCRIBED_PATHS: [(&str, Option<Quantity>); 10] = [
     (POSITION_PATH, None),
     (
         "navigation.speedOverGround",
@@ -54,6 +54,7 @@ pub const SUBSCRIBED_PATHS: [(&str, Option<Quantity>); 9] = [
         "environment.wind.angleApparent",
         Some(Quantity::WindAngleApparent),
     ),
+    ("steering.rudderAngle", Some(Quantity::RudderAngle)),
 ];
 
 /// Message illisible.
@@ -414,6 +415,22 @@ mod tests {
     }
 
     #[test]
+    fn decodes_rudder_angle_and_rejects_out_of_range() {
+        let (samples, rejected) = delta(
+            r#"{"updates":[{"values":[
+                {"path":"steering.rudderAngle","value":-0.1},
+                {"path":"steering.rudderAngle","value":35}
+              ]}]}"#,
+        );
+        assert_eq!(rejected.len(), 1, "35 rad : degrés envoyés, rejeté");
+        let [Sample::Measurement(m)] = samples.as_slice() else {
+            panic!("une mesure attendue : {samples:?}")
+        };
+        assert_eq!(m.quantity, Quantity::RudderAngle);
+        assert_eq!(m.value, -0.1);
+    }
+
+    #[test]
     fn subscription_covers_priority_paths() {
         let msg: Value = serde_json::from_str(&subscription_message(1000)).expect("json");
         assert_eq!(msg["context"], "vessels.self");
@@ -423,7 +440,8 @@ mod tests {
             .iter()
             .filter_map(|s| s["path"].as_str())
             .collect();
-        assert_eq!(paths.len(), 9);
+        assert_eq!(paths.len(), 10);
         assert!(paths.contains(&"environment.wind.angleApparent"));
+        assert!(paths.contains(&"steering.rudderAngle"));
     }
 }

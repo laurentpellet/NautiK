@@ -17,13 +17,24 @@
   import { EncMapController } from './lib/encMap.svelte';
   import FloatingPanel from './lib/components/FloatingPanel.svelte';
   import MapBar from './lib/components/MapBar.svelte';
+  import PlacementMenu from './lib/components/PlacementMenu.svelte';
   import {
     PANEL_LABELS,
-    defaultLayout,
     loadLayout,
+    withNavigationShown,
     saveLayout,
     type PanelId,
     type PanelLayout,
+    loadRouteBarCollapsed,
+    saveRouteBarCollapsed,
+    loadNavDock,
+    saveNavDock,
+    loadNavCollapsed,
+    saveNavCollapsed,
+    loadRouteBarSide,
+    saveRouteBarSide,
+    type NavDock,
+    type RouteBarSide,
     type PanelState,
     type Rect,
   } from './lib/panels';
@@ -36,7 +47,11 @@
     type Pane,
     type SplitState,
   } from './lib/split';
-  import SettingsView from './lib/components/SettingsView.svelte';
+  import SettingsView, {
+    loadSection,
+    saveSection,
+    type SettingsSection,
+  } from './lib/components/SettingsView.svelte';
   import StatusStrip from './lib/components/StatusStrip.svelte';
   import { recordSnapshot, type History } from './lib/history';
   import {
@@ -152,7 +167,16 @@
   let aisError = $state<string | null>(null);
   let selectedTarget = $state<string | null>(null);
   /** Onglet affiché ; la carte reste montée sous les autres onglets. */
-  let tab = $state<'chart' | 'instruments' | 'weather' | 'logbook' | 'settings'>('chart');
+  let tab = $state<'chart' | 'instruments' | 'settings'>('chart');
+  /** Section des Paramètres affichée (Météo et Journal compris). */
+  let settingsSection = $state<SettingsSection>(loadSection());
+
+  /** Ouvre une section des Paramètres (Météo, Journal depuis la barre). */
+  function openSettings(section: SettingsSection): void {
+    settingsSection = section;
+    saveSection(section);
+    tab = 'settings';
+  }
   /** Emprise affichée sur la carte. */
   let mapView = $state.raw<Bounds | null>(null);
   /** Fichier météo affiché sur la carte et échéance choisie. */
@@ -166,11 +190,9 @@
   let fullscreen = $state(false);
   let fullscreenError = $state<string | null>(null);
   const TABS = [
-    { id: 'chart', label: 'Carte' },
-    { id: 'instruments', label: 'Instruments' },
-    { id: 'weather', label: 'Météo' },
-    { id: 'logbook', label: 'Journal' },
-    { id: 'settings', label: 'Paramètres' },
+    { id: 'chart', label: 'Carte', icon: 'map' },
+    { id: 'instruments', label: 'Instruments', icon: 'gauge' },
+    { id: 'settings', label: 'Paramètres', icon: 'settings' },
   ] as const;
   let now = $state(Date.now());
   let theme = $state<Theme>(loadTheme());
@@ -233,7 +255,8 @@
     });
   });
   /** Disposition des panneaux de l'onglet Carte (mémorisée). */
-  let layout = $state<PanelLayout>(loadLayout());
+  // Le panneau Navigation est toujours affiché au lancement.
+  let layout = $state<PanelLayout>(withNavigationShown(loadLayout()));
   let stageElement = $state<HTMLElement | null>(null);
   const mapArea = (): Rect | null => stageElement?.getBoundingClientRect() ?? null;
 
@@ -569,10 +592,52 @@
   );
   /** Navigation calculée sur une position obsolète ou absente : signalée. */
   const navStale = $derived(silent || position === null || position.stale);
-  /** Barre de route à sa place par défaut, en bas : colonnes raccourcies. */
-  const routeBarDocked = $derived(
-    nav.status !== null && layout.routeBar.visible && layout.routeBar.x === null,
-  );
+  /** Barre de route latérale, collée à gauche de la carte (route active). */
+  const routeSide = $derived(nav.status !== null && layout.routeBar.visible && tab === 'chart');
+  let routeBarCollapsed = $state(loadRouteBarCollapsed());
+
+  function collapseRouteBar(collapsed: boolean): void {
+    routeBarCollapsed = collapsed;
+    saveRouteBarCollapsed(collapsed);
+  }
+
+  // Positions des barres (clic droit) : Navigation à gauche, en bas ou à
+  // droite ; barre de route à gauche ou à droite de la carte. Mémorisées.
+  let navDock = $state<NavDock>(loadNavDock());
+  let routeBarSide = $state<RouteBarSide>(loadRouteBarSide());
+  let placementMenu = $state<{ kind: 'nav' | 'route'; x: number; y: number } | null>(null);
+
+  const NAV_DOCK_OPTIONS = [
+    { id: 'left', label: 'À gauche' },
+    { id: 'bottom', label: 'En bas' },
+    { id: 'right', label: 'À droite' },
+  ] as const satisfies readonly { id: NavDock; label: string }[];
+  const ROUTE_SIDE_OPTIONS = [
+    { id: 'left', label: 'À gauche de la carte' },
+    { id: 'right', label: 'À droite de la carte' },
+  ] as const satisfies readonly { id: RouteBarSide; label: string }[];
+
+  function openPlacementMenu(kind: 'nav' | 'route', event: MouseEvent): void {
+    event.preventDefault();
+    placementMenu = { kind, x: event.clientX, y: event.clientY };
+  }
+
+  let navCollapsed = $state(loadNavCollapsed());
+
+  function collapseNav(collapsed: boolean): void {
+    navCollapsed = collapsed;
+    saveNavCollapsed(collapsed);
+  }
+
+  function setNavDock(dock: NavDock): void {
+    navDock = dock;
+    saveNavDock(dock);
+  }
+
+  function setRouteBarSide(side: RouteBarSide): void {
+    routeBarSide = side;
+    saveRouteBarSide(side);
+  }
 
   const pills = $derived(statusPills({ position, silent, connection, ais, alarms }));
 
@@ -756,62 +821,103 @@
     ontheme={() => (theme = theme === 'day' ? 'night' : 'day')}
     {fullscreen}
     onfullscreen={() => setFullscreen(!fullscreen)}
+    tools={tab === 'chart' ? mapTools : undefined}
   />
-  <div class="stage" bind:this={stageElement}>
-    {#if catalog}
-      <!-- Nouveau dossier de cartes : la carte est reconstruite. -->
-      {#key catalog}
-        {#await import('./lib/components/ChartView.svelte') then { default: ChartView }}
-          <!-- Un volet, ou deux côte à côte ; le volet de droite a son propre
+
+  <!-- Outils de la carte, intégrés à la barre du haut (onglet Carte). -->
+  {#snippet mapTools()}
+    <MapBar
+      {snapshot}
+      {silent}
+      {northUp}
+      canCenter={fix !== null}
+      {layout}
+      hiddenLayers={hiddenOnMap}
+      onnorthup={() => (northUp = !northUp)}
+      oncenter={recenter}
+      split={split.enabled}
+      locked={split.locked}
+      onsplit={toggleSplit}
+      onlock={toggleLock}
+      tool={tools.tool}
+      {canPlaceBoat}
+      onplaceboat={() => tools.togglePlaceBoat()}
+      onmeasure={() => {
+        if (!nav.drawing) tools.toggleMeasure();
+      }}
+      onrangebearing={() => {
+        if (!nav.drawing) tools.toggleRangeBearing();
+      }}
+      mobActive={mob !== null}
+      onmob={() => {
+        if (!mob) void markMob();
+      }}
+      ontoggle={(id) => updatePanel(id, { visible: !layout[id].visible })}
+      recording={nav.recordingId !== null}
+      recordBusy={nav.busy}
+      onrecord={() => void (nav.recordingId ? nav.stopRecording() : nav.startRecording())}
+      onweather={() => openSettings('weather')}
+      onlogbook={() => openSettings('logbook')}
+    >
+      {#snippet searchMenu()}
+        <SearchBox onselect={(place) => zoomToPoint(place.position)} />
+      {/snippet}
+      {#snippet layersMenu()}
+        <MapLayersMenu
+          {layers}
+          onchange={setLayers}
+          charts={catalog?.charts ?? []}
+          hiddenCharts={shownHiddenCharts}
+          onchartschange={setHiddenCharts}
+          cm93={cm93Available}
+        />
+      {/snippet}
+    </MapBar>
+  {/snippet}
+  <!-- Carte et barre Navigation (à gauche, en bas ou à droite). -->
+  <div class="workspace nav-{navDock}">
+    <div
+      class="stage"
+      class:route-side={routeSide}
+      class:route-side-collapsed={routeSide && routeBarCollapsed}
+      class:route-right={routeBarSide === 'right'}
+      bind:this={stageElement}
+    >
+      <!-- Route active : barre latérale collée à gauche (ou à droite) de la
+         carte, qui se décale ; clic droit : choix du côté. -->
+      {#if routeSide && nav.status}
+        <aside
+          class="route-side-bar"
+          class:right={routeBarSide === 'right'}
+          aria-label="Barre de route"
+          title="Clic droit : côté de la barre de route"
+          oncontextmenu={(e) => openPlacementMenu('route', e)}
+        >
+          <RouteBar
+            status={nav.status}
+            {now}
+            stale={navStale}
+            routePanel={layout.route.visible}
+            collapsed={routeBarCollapsed}
+            ontoggleroute={() => updatePanel('route', { visible: !layout.route.visible })}
+            ondeactivate={() => nav.deactivate()}
+            oncollapse={collapseRouteBar}
+            side={routeBarSide}
+          />
+        </aside>
+      {/if}
+      {#if catalog}
+        <!-- Nouveau dossier de cartes : la carte est reconstruite. -->
+        {#key catalog}
+          {#await import('./lib/components/ChartView.svelte') then { default: ChartView }}
+            <!-- Un volet, ou deux côte à côte ; le volet de droite a son propre
                choix de cartes et les mêmes objets (bateau, routes, AIS…). -->
-          <div class="maps" class:split={split.enabled}>
-            <div class="pane">
-              <ChartView
-                bind:this={chartView}
-                {catalog}
-                hiddenCharts={shownHiddenCharts}
-                {fix}
-                {stale}
-                {theme}
-                {northUp}
-                routes={shownRoutes}
-                targetIndex={nav.status?.targetIndex ?? null}
-                activeLegs={nav.activeLegs}
-                draft={nav.draft}
-                editedRouteId={nav.editor?.routeId ?? null}
-                onpointmove={(i, p) => nav.movePoint(i, p)}
-                tracks={layers.tracks ? nav.displayedTracks : []}
-                drawing={nav.drawing || tools.picking}
-                onmapclick={onMapClick}
-                measure={tools.points}
-                oncontextmenu={(position, point) =>
-                  (contextMenu = { pane: 'left', position, ...point })}
-                ais={layers.ais ? ais : null}
-                onaisclick={(mmsi) => (selectedTarget = mmsi)}
-                wind={weatherShown ? (windField?.points ?? null) : null}
-                onviewchange={(b) => (mapView = b)}
-                enc={leftEnc}
-                pois={shownPois}
-                activeRouteColor={routeStyle.activeColor}
-                anchor={alarms?.anchor ?? null}
-                {anchorAlerting}
-                {aids}
-                mob={mobMarker}
-                marks={shownMarks}
-                replay={replayFeatures}
-                camera={followedCamera('left', split, leader, cameras)}
-                oncamera={(c, user) => onCamera('left', c, user)}
-              />
-              {#if contextMenu?.pane === 'left'}
-                {@render mapMenu(contextMenu)}
-              {/if}
-            </div>
-            {#if split.enabled}
-              <div class="pane" data-testid="split-pane">
+            <div class="maps" class:split={split.enabled}>
+              <div class="pane">
                 <ChartView
-                  bind:this={chartViewRight}
+                  bind:this={chartView}
                   {catalog}
-                  hiddenCharts={rightHiddenCharts}
+                  hiddenCharts={shownHiddenCharts}
                   {fix}
                   {stale}
                   {theme}
@@ -827,11 +933,12 @@
                   onmapclick={onMapClick}
                   measure={tools.points}
                   oncontextmenu={(position, point) =>
-                    (contextMenu = { pane: 'right', position, ...point })}
+                    (contextMenu = { pane: 'left', position, ...point })}
                   ais={layers.ais ? ais : null}
                   onaisclick={(mmsi) => (selectedTarget = mmsi)}
                   wind={weatherShown ? (windField?.points ?? null) : null}
-                  enc={rightEnc}
+                  onviewchange={(b) => (mapView = b)}
+                  enc={leftEnc}
                   pois={shownPois}
                   activeRouteColor={routeStyle.activeColor}
                   anchor={alarms?.anchor ?? null}
@@ -840,403 +947,418 @@
                   mob={mobMarker}
                   marks={shownMarks}
                   replay={replayFeatures}
-                  camera={followedCamera('right', split, leader, cameras)}
-                  oncamera={(c, user) => onCamera('right', c, user)}
+                  camera={followedCamera('left', split, leader, cameras)}
+                  oncamera={(c, user) => onCamera('left', c, user)}
                 />
-                {#if contextMenu?.pane === 'right'}
+                {#if contextMenu?.pane === 'left'}
                   {@render mapMenu(contextMenu)}
                 {/if}
-                {#if catalog.charts.length > 1 || encFolderSet}
-                  <div class="pane-charts">
-                    <Dropdown
-                      label="Cartes du volet droit"
-                      title="Choisir les cartes du volet droit"
-                      variant="chip"
-                      marked={rightHiddenCharts.length > 0 ||
-                        (encFolderSet && !rightVector.enc) ||
-                        (cm93Available && !rightVector.cm93)}
-                      testid="right-charts-menu"
-                    >
-                      {#snippet button()}
-                        <span class="pane-label">Droite : {rightChartsLabel}</span>
-                      {/snippet}
-                      <MapLayersMenu
-                        {layers}
-                        onchange={setLayers}
-                        charts={catalog.charts}
-                        hiddenCharts={rightHiddenCharts}
-                        onchartschange={(hidden) => setSplit({ ...split, hiddenCharts: hidden })}
-                        vector={rightVector}
-                        onvectorchange={(vector) => setSplit({ ...split, vector })}
-                        cm93={cm93Available}
-                        objects={false}
-                      />
-                    </Dropdown>
-                  </div>
-                {/if}
               </div>
-            {/if}
-          </div>
-        {/await}
-      {/key}
-    {/if}
-
-    {#snippet mapMenu(menu: ContextMenuState)}
-      <MapContextMenu
-        position={menu.position}
-        x={menu.x}
-        y={menu.y}
-        {canPlaceBoat}
-        onplaceboat={(at) => void tools.placeBoat(at)}
-        canMeasure={!nav.drawing}
-        onmeasure={(at) => void tools.measureFrom(at)}
-        onmark={newMark}
-        fromBoat={menuFromBoat}
-        ongoto={(at) => void goTo(at)}
-        goToBlocked={nav.drawing
-          ? 'Indisponible pendant le tracé d’une route'
-          : freshBoat
-            ? null
-            : 'Position du bateau inconnue ou obsolète'}
-        onclose={() => (contextMenu = null)}
-      />
-    {/snippet}
-
-    {#snippet statusStrip()}
-      <StatusStrip {position} {silent} {connection} />
-    {/snippet}
-
-    {#snippet chartsSection()}
-      <ChartsFolderPanel api={chartsApi} {catalog} onchange={(c) => (catalog = c)} />
-      <EncFolderPanel api={encApi} onchange={() => void reloadEnc()} />
-      <PoiPanel api={poiApi} onchange={() => void reloadPois()} />
-    {/snippet}
-
-    {#snippet alarmsSection()}
-      <AlarmsPanel api={alarmsApi} {alarms} onchange={(a) => (alarms = a)} />
-    {/snippet}
-
-    <!-- Alarmes : visibles dans tous les onglets, en plein écran compris. -->
-    <AlarmBanner
-      --banner-top="0.6rem"
-      alarms={alerting}
-      simulated={alarms?.simulated ?? false}
-      {soundUnavailable}
-      onacknowledge={acknowledge}
-      error={alarmsError}
-    />
-
-    <!-- Homme à la mer : grand affichage, dans tous les onglets. -->
-    {#if mob}
-      <div class="mob-slot">
-        <MobPanel
-          {mob}
-          alarmState={mobState}
-          {now}
-          stale={fix === null || stale}
-          onacknowledge={() => void acknowledge('manOverboard')}
-          onend={endMob}
-        />
-      </div>
-    {/if}
-    {#if mobError}
-      <p class="error floating mob-error" role="alert">{mobError}</p>
-    {/if}
-
-    {#if tab === 'chart'}
-      <!-- Outils de la carte : mesure, « bateau ici » et leurs messages. -->
-      {#if tools.picking || tools.error || tools.notice || replay.active}
-        <div class="tool-side">
-          {#if replay.active}
-            <TrackReplayPanel {replay} />
-          {/if}
-          {#if tools.measuring}
-            <MeasurePanel {tools} />
-          {:else if tools.tool === 'rangeBearing'}
-            <RangeBearingPanel {tools} boatKnown={fix !== null && !stale} />
-          {:else}
-            {#if tools.tool === 'placeBoat'}
-              <p class="tool-note" role="status">
-                Cliquez sur la carte pour placer le bateau simulé (Échap : annuler).
-              </p>
-            {/if}
-            {#if tools.error}
-              <p class="tool-note error" role="alert">{tools.error}</p>
-            {/if}
-          {/if}
-          {#if tools.notice}
-            <p class="tool-note" role="status">{tools.notice}</p>
-          {/if}
-        </div>
-      {/if}
-      <div class="map-side" class:short={routeBarDocked}>
-        <!-- Rappel des calques masqués : toujours visible, pas un panneau. -->
-        {#if hiddenOnMap.length > 0}
-          <p class="hidden-note" role="status" data-testid="hidden-layers">
-            Masqué : {hiddenOnMap.join(', ')}
-          </p>
-        {/if}
-        <!-- Cartes ENC : rien n'est omis en silence (pas à jour, annulée…). -->
-        {#if encMap.warnings.length > 0}
-          <p class="hidden-note enc-note" role="status" data-testid="enc-warnings">
-            {encMap.warnings.join(' · ')}
-          </p>
-        {/if}
-        {#if layout.anchor.visible}
-          <FloatingPanel {...panel('anchor')} bare>
-            <AnchorCard
-              {alarms}
-              canDrop={fix !== null && !stale}
-              ondrop={dropAnchor}
-              onraise={raiseAnchor}
-            />
-          </FloatingPanel>
-        {/if}
-        <!-- État de navigation rejeté : jamais masqué avec un panneau. -->
-        {#if navEventError}
-          <p class="hidden-note nav-error" role="alert">
-            État de navigation rejeté : {navEventError}
-          </p>
-        {/if}
-        {#if layout.live.visible}
-          <FloatingPanel {...panel('live')} bare>
-            <LiveNavCard {snapshot} {silent} {ownShip} />
-          </FloatingPanel>
-        {/if}
-        <!-- Panneau Route gardé monté (brouillon de route en cours). -->
-        <div class="route-slot" hidden={!layout.route.visible}>
-          <FloatingPanel {...panel('route')}>
-            <section class="panel" aria-label="Panneau Routes et traces">
-              {#if nav.status}
-                <NavigationPanel status={nav.status} {now} ondeactivate={() => nav.deactivate()} />
-              {/if}
-              {#if nav.error}
-                <p class="error" role="alert">{nav.error}</p>
-              {/if}
-              {#if nav.notice}
-                <p class="notice" role="status">{nav.notice}</p>
-              {/if}
-              <RoutesTracksPanel
-                {nav}
-                {marks}
-                boat={freshBoat}
-                onzoom={zoomToPoint}
-                onreplay={(id, name) => void replay.load(id, name)}
-              />
-            </section>
-          </FloatingPanel>
-        </div>
-      </div>
-      <!-- Barres du bas empilées (vent, route, outils) : une barre qui passe
-           sur plusieurs lignes repousse les autres, sans recouvrement. -->
-      <div class="bottom-bars">
-        {#if weatherShown}
-          <div class="wind-bar">
-            <WindTimeBar
-              file={weatherShown}
-              step={weatherStep}
-              field={windField}
-              error={windError}
-              {now}
-              onstep={(s) => (weatherStep = s)}
-              onclose={() => showWeather(null)}
-            />
-          </div>
-        {/if}
-        {#if nav.status && layout.routeBar.visible}
-          <div class="route-bar-slot">
-            <FloatingPanel {...panel('routeBar')} compact>
-              <RouteBar
-                status={nav.status}
-                {now}
-                stale={navStale}
-                routePanel={layout.route.visible}
-                ontoggleroute={() => updatePanel('route', { visible: !layout.route.visible })}
-                ondeactivate={() => nav.deactivate()}
-              />
-            </FloatingPanel>
-          </div>
-        {/if}
-        {#if layout.bar.visible}
-          <div class="bar-slot">
-            <FloatingPanel {...panel('bar')} compact>
-              <MapBar
-                {snapshot}
-                {silent}
-                {northUp}
-                canCenter={fix !== null}
-                {layout}
-                layersHidden={hiddenOnMap.length > 0}
-                onnorthup={() => (northUp = !northUp)}
-                oncenter={recenter}
-                split={split.enabled}
-                locked={split.locked}
-                onsplit={toggleSplit}
-                onlock={toggleLock}
-                tool={tools.tool}
-                {canPlaceBoat}
-                onplaceboat={() => tools.togglePlaceBoat()}
-                onmeasure={() => {
-                  if (!nav.drawing) tools.toggleMeasure();
-                }}
-                onrangebearing={() => {
-                  if (!nav.drawing) tools.toggleRangeBearing();
-                }}
-                mobActive={mob !== null}
-                onmob={() => {
-                  if (!mob) void markMob();
-                }}
-                ontoggle={(id) => updatePanel(id, { visible: !layout[id].visible })}
-                onresetlayout={() => setLayout(defaultLayout())}
-              >
-                {#snippet searchMenu()}
-                  <SearchBox onselect={(place) => zoomToPoint(place.position)} />
-                {/snippet}
-                {#snippet layersMenu()}
-                  <MapLayersMenu
-                    {layers}
-                    onchange={setLayers}
-                    charts={catalog?.charts ?? []}
-                    hiddenCharts={shownHiddenCharts}
-                    onchartschange={setHiddenCharts}
-                    cm93={cm93Available}
+              {#if split.enabled}
+                <div class="pane" data-testid="split-pane">
+                  <ChartView
+                    bind:this={chartViewRight}
+                    {catalog}
+                    hiddenCharts={rightHiddenCharts}
+                    {fix}
+                    {stale}
+                    {theme}
+                    {northUp}
+                    routes={shownRoutes}
+                    targetIndex={nav.status?.targetIndex ?? null}
+                    activeLegs={nav.activeLegs}
+                    draft={nav.draft}
+                    editedRouteId={nav.editor?.routeId ?? null}
+                    onpointmove={(i, p) => nav.movePoint(i, p)}
+                    tracks={layers.tracks ? nav.displayedTracks : []}
+                    drawing={nav.drawing || tools.picking}
+                    onmapclick={onMapClick}
+                    measure={tools.points}
+                    oncontextmenu={(position, point) =>
+                      (contextMenu = { pane: 'right', position, ...point })}
+                    ais={layers.ais ? ais : null}
+                    onaisclick={(mmsi) => (selectedTarget = mmsi)}
+                    wind={weatherShown ? (windField?.points ?? null) : null}
+                    enc={rightEnc}
+                    pois={shownPois}
+                    activeRouteColor={routeStyle.activeColor}
+                    anchor={alarms?.anchor ?? null}
+                    {anchorAlerting}
+                    {aids}
+                    mob={mobMarker}
+                    marks={shownMarks}
+                    replay={replayFeatures}
+                    camera={followedCamera('right', split, leader, cameras)}
+                    oncamera={(c, user) => onCamera('right', c, user)}
                   />
-                {/snippet}
-              </MapBar>
-            </FloatingPanel>
+                  {#if contextMenu?.pane === 'right'}
+                    {@render mapMenu(contextMenu)}
+                  {/if}
+                  {#if catalog.charts.length > 1 || encFolderSet}
+                    <div class="pane-charts">
+                      <Dropdown
+                        label="Cartes du volet droit"
+                        title="Choisir les cartes du volet droit"
+                        variant="chip"
+                        marked={rightHiddenCharts.length > 0 ||
+                          (encFolderSet && !rightVector.enc) ||
+                          (cm93Available && !rightVector.cm93)}
+                        testid="right-charts-menu"
+                      >
+                        {#snippet button()}
+                          <span class="pane-label">Droite : {rightChartsLabel}</span>
+                        {/snippet}
+                        <MapLayersMenu
+                          {layers}
+                          onchange={setLayers}
+                          charts={catalog.charts}
+                          hiddenCharts={rightHiddenCharts}
+                          onchartschange={(hidden) => setSplit({ ...split, hiddenCharts: hidden })}
+                          vector={rightVector}
+                          onvectorchange={(vector) => setSplit({ ...split, vector })}
+                          cm93={cm93Available}
+                          objects={false}
+                        />
+                      </Dropdown>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/await}
+        {/key}
+      {/if}
+
+      {#snippet mapMenu(menu: ContextMenuState)}
+        <MapContextMenu
+          position={menu.position}
+          x={menu.x}
+          y={menu.y}
+          {canPlaceBoat}
+          onplaceboat={(at) => void tools.placeBoat(at)}
+          canMeasure={!nav.drawing}
+          onmeasure={(at) => void tools.measureFrom(at)}
+          onmark={newMark}
+          fromBoat={menuFromBoat}
+          ongoto={(at) => void goTo(at)}
+          goToBlocked={nav.drawing
+            ? 'Indisponible pendant le tracé d’une route'
+            : freshBoat
+              ? null
+              : 'Position du bateau inconnue ou obsolète'}
+          onclose={() => (contextMenu = null)}
+        />
+      {/snippet}
+
+      {#snippet statusStrip()}
+        <StatusStrip {position} {silent} {connection} />
+      {/snippet}
+
+      {#snippet chartsSection()}
+        <ChartsFolderPanel api={chartsApi} {catalog} onchange={(c) => (catalog = c)} />
+        <EncFolderPanel api={encApi} onchange={() => void reloadEnc()} />
+        <PoiPanel api={poiApi} onchange={() => void reloadPois()} />
+      {/snippet}
+
+      {#snippet alarmsSection()}
+        <AlarmsPanel api={alarmsApi} {alarms} onchange={(a) => (alarms = a)} />
+      {/snippet}
+
+      <!-- Alarmes : visibles dans tous les onglets, en plein écran compris. -->
+      <AlarmBanner
+        --banner-top="0.6rem"
+        alarms={alerting}
+        simulated={alarms?.simulated ?? false}
+        {soundUnavailable}
+        onacknowledge={acknowledge}
+        error={alarmsError}
+      />
+
+      <!-- Homme à la mer : grand affichage, dans tous les onglets. -->
+      {#if mob}
+        <div class="mob-slot">
+          <MobPanel
+            {mob}
+            alarmState={mobState}
+            {now}
+            stale={fix === null || stale}
+            onacknowledge={() => void acknowledge('manOverboard')}
+            onend={endMob}
+          />
+        </div>
+      {/if}
+      {#if mobError}
+        <p class="error floating mob-error" role="alert">{mobError}</p>
+      {/if}
+
+      {#if tab === 'chart'}
+        <!-- Outils de la carte : mesure, « bateau ici » et leurs messages. -->
+        {#if tools.picking || tools.error || tools.notice || replay.active}
+          <div class="tool-side">
+            {#if replay.active}
+              <TrackReplayPanel {replay} />
+            {/if}
+            {#if tools.measuring}
+              <MeasurePanel {tools} />
+            {:else if tools.tool === 'rangeBearing'}
+              <RangeBearingPanel {tools} boatKnown={fix !== null && !stale} />
+            {:else}
+              {#if tools.tool === 'placeBoat'}
+                <p class="tool-note" role="status">
+                  Cliquez sur la carte pour placer le bateau simulé (Échap : annuler).
+                </p>
+              {/if}
+              {#if tools.error}
+                <p class="tool-note error" role="alert">{tools.error}</p>
+              {/if}
+            {/if}
+            {#if tools.notice}
+              <p class="tool-note" role="status">{tools.notice}</p>
+            {/if}
           </div>
         {/if}
-      </div>
-      {#if !layout.bar.visible}
-        <button
-          type="button"
-          class="show-bar"
-          title="Afficher la barre de la carte"
-          onclick={() => updatePanel('bar', { visible: true })}
-        >
-          ▴ Barre
-        </button>
+        <div class="map-side">
+          <!-- Cartes ENC : rien n'est omis en silence (pas à jour, annulée…). -->
+          {#if encMap.warnings.length > 0}
+            <p class="hidden-note enc-note" role="status" data-testid="enc-warnings">
+              {encMap.warnings.join(' · ')}
+            </p>
+          {/if}
+          {#if layout.anchor.visible}
+            <FloatingPanel {...panel('anchor')} bare>
+              <AnchorCard
+                {alarms}
+                canDrop={fix !== null && !stale}
+                ondrop={dropAnchor}
+                onraise={raiseAnchor}
+              />
+            </FloatingPanel>
+          {/if}
+          <!-- Cibles AIS : ouvert par l'icône AIS de la barre d'outils. -->
+          {#if layout.ais.visible}
+            <FloatingPanel {...panel('ais')}>
+              <section class="panel ais-panel" aria-label="Panneau Cibles AIS">
+                <AisPanel
+                  snapshot={ais}
+                  {silent}
+                  selected={selectedTarget}
+                  onselect={(mmsi) => (selectedTarget = mmsi)}
+                />
+                {#if aisError}
+                  <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
+                {/if}
+              </section>
+            </FloatingPanel>
+          {/if}
+          <!-- État de navigation rejeté : jamais masqué avec un panneau. -->
+          {#if navEventError}
+            <p class="hidden-note nav-error" role="alert">
+              État de navigation rejeté : {navEventError}
+            </p>
+          {/if}
+          <!-- Panneau Route gardé monté (brouillon de route en cours). -->
+          <div class="route-slot" hidden={!layout.route.visible}>
+            <FloatingPanel {...panel('route')}>
+              <section class="panel" aria-label="Panneau Routes et traces">
+                {#if nav.status}
+                  <NavigationPanel
+                    status={nav.status}
+                    {now}
+                    ondeactivate={() => nav.deactivate()}
+                  />
+                {/if}
+                {#if nav.error}
+                  <p class="error" role="alert">{nav.error}</p>
+                {/if}
+                {#if nav.notice}
+                  <p class="notice" role="status">{nav.notice}</p>
+                {/if}
+                <RoutesTracksPanel
+                  {nav}
+                  {marks}
+                  boat={freshBoat}
+                  onzoom={zoomToPoint}
+                  onreplay={(id, name) => void replay.load(id, name)}
+                />
+              </section>
+            </FloatingPanel>
+          </div>
+        </div>
+        <!-- Barres du bas empilées (vent, route, outils) : une barre qui passe
+           sur plusieurs lignes repousse les autres, sans recouvrement. -->
+        <div class="bottom-bars">
+          {#if weatherShown}
+            <div class="wind-bar">
+              <WindTimeBar
+                file={weatherShown}
+                step={weatherStep}
+                field={windField}
+                error={windError}
+                {now}
+                onstep={(s) => (weatherStep = s)}
+                onclose={() => showWeather(null)}
+              />
+            </div>
+          {/if}
+        </div>
       {/if}
-    {/if}
-    {#if fullscreenError}
-      <p class="error floating" role="alert">{fullscreenError}</p>
-    {/if}
+      {#if fullscreenError}
+        <p class="error floating" role="alert">{fullscreenError}</p>
+      {/if}
 
-    {#if tab === 'instruments'}
-      <InstrumentsView
+      {#if tab === 'instruments'}
+        <InstrumentsView
+          {snapshot}
+          {silent}
+          navigation={nav.status}
+          status={statusStrip}
+          {history}
+          {connection}
+          {now}
+        />
+      {:else if tab === 'settings'}
+        <SettingsView
+          {simulator}
+          status={statusStrip}
+          alarms={alarmsSection}
+          charts={chartsSection}
+          bind:section={settingsSection}
+        >
+          {#snippet weatherView()}
+            <WeatherView
+              api={weatherApi}
+              view={mapView}
+              active={weatherShown?.id ?? null}
+              onshow={showWeather}
+              {now}
+              listen={listenFn}
+              embedded
+            />
+          {/snippet}
+          {#snippet logbookView()}
+            <LogbookView {logbook} embedded />
+          {/snippet}
+          {#snippet sources()}
+            <SourcePanel api={sourcesApi} {connection} {rejections} />
+            {#if connectionError}
+              <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
+            {/if}
+          {/snippet}
+        </SettingsView>
+      {/if}
+
+      <!-- Panneau latéral toujours monté (brouillon de route, sélection). -->
+      <div class="side-slot" hidden={tab !== 'chart' || !layout.side.visible}>
+        <FloatingPanel {...panel('side')}>
+          <aside class="panel">
+            <header>
+              {#if engine}
+                <span class="version" data-testid="engine-status">
+                  Moteur {engine.version} — protocole v{engine.protocolVersion}
+                </span>
+              {/if}
+            </header>
+
+            {#if engineError}
+              <p class="error" role="alert">Moteur indisponible : {engineError}</p>
+            {/if}
+
+            <PositionPanel {position} {silent} error={snapshotError} />
+
+            {#if linkAlert}
+              <p class="error" role="alert" data-testid="link-alert">Liaison : {linkAlert}</p>
+            {/if}
+            {#if connectionError}
+              <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
+            {/if}
+
+            <!-- Cibles AIS : panneau ouvert par l'icône AIS de la barre d'outils.
+                 Une erreur reste signalée ici, panneau fermé. -->
+            {#if aisError && !layout.ais.visible}
+              <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
+            {/if}
+
+            <!-- Erreur des routes et traces : dans leur panneau, ici s'il est masqué. -->
+            {#if nav.error && !layout.route.visible}
+              <p class="error" role="alert">{nav.error}</p>
+            {/if}
+
+            <section class="charts" aria-label="Cartes">
+              <h2>Cartes</h2>
+              {#if catalogError}
+                <p class="error" role="alert">Catalogue indisponible : {catalogError}</p>
+              {:else if catalog}
+                {#if catalog.error}
+                  <p class="error" role="alert">Cartes indisponibles : {catalog.error}</p>
+                {:else if catalog.charts.length === 0}
+                  <p class="hint" data-testid="no-charts">
+                    Aucune carte. Déposez des fichiers <code>.mbtiles</code> dans :
+                    <code class="path">{catalog.chartsDir}</code>
+                    ou choisissez un autre dossier dans Paramètres → Cartes.
+                  </p>
+                {:else}
+                  <ul>
+                    {#each [...catalog.charts].reverse() as chart (chart.id)}
+                      <li title={chart.description ?? chart.fileName}>
+                        {chart.name} <span class="muted">z{chart.minZoom}–{chart.maxZoom}</span>
+                        {#if chart.warnings.length > 0}
+                          <span class="warn" title={chart.warnings.join('\n')}>⚠</span>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+                {#each catalog.failures as failure (failure.fileName)}
+                  <p class="error" role="alert">
+                    Carte ignorée {failure.fileName} : {failure.reason}
+                  </p>
+                {/each}
+              {:else}
+                <p class="muted">Chargement des cartes…</p>
+              {/if}
+            </section>
+          </aside>
+        </FloatingPanel>
+      </div>
+    </div>
+    <!-- Navigation : barre fixe à côté de la carte (en bas par défaut,
+         comme la barre du haut), en grands caractères ; affichée au
+         lancement, masquable par la barre d'outils ; clic droit : position.
+         La carte se réduit d'autant : rien n'est recouvert. -->
+    {#if tab === 'chart' && layout.live.visible}
+      <LiveNavCard
         {snapshot}
         {silent}
-        navigation={nav.status}
-        status={statusStrip}
-        {history}
-        {connection}
-        {now}
+        {ownShip}
+        docked
+        placement={navDock}
+        collapsed={navCollapsed}
+        oncollapse={collapseNav}
+        oncontextmenu={(e) => openPlacementMenu('nav', e)}
       />
-    {:else if tab === 'weather'}
-      <WeatherView
-        api={weatherApi}
-        view={mapView}
-        active={weatherShown?.id ?? null}
-        onshow={showWeather}
-        {now}
-        status={statusStrip}
-        listen={listenFn}
-      />
-    {:else if tab === 'logbook'}
-      <LogbookView {logbook} status={statusStrip} />
-    {:else if tab === 'settings'}
-      <SettingsView {simulator} status={statusStrip} alarms={alarmsSection} charts={chartsSection}>
-        {#snippet sources()}
-          <SourcePanel api={sourcesApi} {connection} {rejections} />
-          {#if connectionError}
-            <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
-          {/if}
-        {/snippet}
-      </SettingsView>
     {/if}
-
-    <!-- Panneau latéral toujours monté (brouillon de route, sélection). -->
-    <div
-      class="side-slot"
-      class:short={routeBarDocked}
-      hidden={tab !== 'chart' || !layout.side.visible}
-    >
-      <FloatingPanel {...panel('side')}>
-        <aside class="panel">
-          <header>
-            {#if engine}
-              <span class="version" data-testid="engine-status">
-                Moteur {engine.version} — protocole v{engine.protocolVersion}
-              </span>
-            {/if}
-          </header>
-
-          {#if engineError}
-            <p class="error" role="alert">Moteur indisponible : {engineError}</p>
-          {/if}
-
-          <PositionPanel {position} {silent} error={snapshotError} />
-
-          {#if linkAlert}
-            <p class="error" role="alert" data-testid="link-alert">Liaison : {linkAlert}</p>
-          {/if}
-          {#if connectionError}
-            <p class="error" role="alert">État de la source rejeté : {connectionError}</p>
-          {/if}
-
-          <AisPanel
-            snapshot={ais}
-            {silent}
-            selected={selectedTarget}
-            onselect={(mmsi) => (selectedTarget = mmsi)}
-          />
-          {#if aisError}
-            <p class="error" role="alert">Cibles AIS rejetées : {aisError}</p>
-          {/if}
-
-          <!-- Erreur des routes et traces : dans leur panneau, ici s'il est masqué. -->
-          {#if nav.error && !layout.route.visible}
-            <p class="error" role="alert">{nav.error}</p>
-          {/if}
-
-          <section class="charts" aria-label="Cartes">
-            <h2>Cartes</h2>
-            {#if catalogError}
-              <p class="error" role="alert">Catalogue indisponible : {catalogError}</p>
-            {:else if catalog}
-              {#if catalog.error}
-                <p class="error" role="alert">Cartes indisponibles : {catalog.error}</p>
-              {:else if catalog.charts.length === 0}
-                <p class="hint" data-testid="no-charts">
-                  Aucune carte. Déposez des fichiers <code>.mbtiles</code> dans :
-                  <code class="path">{catalog.chartsDir}</code>
-                  ou choisissez un autre dossier dans Paramètres → Cartes.
-                </p>
-              {:else}
-                <ul>
-                  {#each [...catalog.charts].reverse() as chart (chart.id)}
-                    <li title={chart.description ?? chart.fileName}>
-                      {chart.name} <span class="muted">z{chart.minZoom}–{chart.maxZoom}</span>
-                      {#if chart.warnings.length > 0}
-                        <span class="warn" title={chart.warnings.join('\n')}>⚠</span>
-                      {/if}
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-              {#each catalog.failures as failure (failure.fileName)}
-                <p class="error" role="alert">
-                  Carte ignorée {failure.fileName} : {failure.reason}
-                </p>
-              {/each}
-            {:else}
-              <p class="muted">Chargement des cartes…</p>
-            {/if}
-          </section>
-        </aside>
-      </FloatingPanel>
-    </div>
   </div>
+  {#if placementMenu?.kind === 'nav'}
+    <PlacementMenu
+      title="Position de la barre Navigation"
+      x={placementMenu.x}
+      y={placementMenu.y}
+      options={NAV_DOCK_OPTIONS}
+      current={navDock}
+      onselect={setNavDock}
+      onclose={() => (placementMenu = null)}
+    />
+  {:else if placementMenu?.kind === 'route'}
+    <PlacementMenu
+      title="Côté de la barre de route"
+      x={placementMenu.x}
+      y={placementMenu.y}
+      options={ROUTE_SIDE_OPTIONS}
+      current={routeBarSide}
+      onselect={setRouteBarSide}
+      onclose={() => (placementMenu = null)}
+    />
+  {/if}
 </div>
 
 <style>
@@ -1248,16 +1370,73 @@
     background: var(--bg);
   }
 
+  /* Carte et barre Navigation : en colonne (barre en bas) ou en ligne
+     (barre à gauche ou à droite). */
+  .workspace {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .workspace.nav-right {
+    flex-direction: row;
+  }
+
+  .workspace.nav-left {
+    flex-direction: row-reverse;
+  }
+
   .stage {
     position: relative;
     flex: 1;
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
+    /* Largeur de la barre de route latérale (0 sans route active), et
+       décalage de la carte du côté où elle se trouve. */
+    --route-side: 0px;
+    --route-left: var(--route-side);
+    --route-right: 0px;
+  }
+
+  .stage.route-right {
+    --route-left: 0px;
+    --route-right: var(--route-side);
+  }
+
+  .stage.route-side {
+    --route-side: min(12.5rem, 45vw);
+  }
+
+  .stage.route-side-collapsed {
+    --route-side: 3.4rem;
+  }
+
+  .route-side-bar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 2;
+    width: var(--route-side);
+    border-right: 1px solid var(--border);
+    background: var(--panel-bg);
+    color: var(--fg);
+  }
+
+  .route-side-bar.right {
+    right: 0;
+    left: auto;
+    border-right: 0;
+    border-left: 1px solid var(--border);
   }
 
   .maps {
     position: absolute;
     inset: 0;
+    left: var(--route-left);
+    right: var(--route-right);
     display: flex;
   }
 
@@ -1361,7 +1540,7 @@
   .map-side {
     position: absolute;
     top: 0.75rem;
-    right: 3.2rem;
+    right: calc(var(--route-right) + 3.2rem);
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -1388,8 +1567,8 @@
      transform : un panneau déplacé est positionné dans la fenêtre. */
   .bottom-bars {
     position: absolute;
-    left: 0;
-    right: 0;
+    left: var(--route-left);
+    right: var(--route-right);
     bottom: 0.6rem;
     z-index: 2;
     display: flex;
@@ -1423,7 +1602,7 @@
   .side-slot {
     position: absolute;
     top: 0.75rem;
-    left: 0.75rem;
+    left: calc(var(--route-left) + 0.75rem);
     display: flex;
     flex-direction: column;
     max-height: calc(100% - 6.5rem);
@@ -1444,6 +1623,12 @@
     flex-shrink: 0;
   }
 
+  /* Liste des cibles : défile au-delà de la hauteur disponible. */
+  .ais-panel {
+    max-height: 60vh;
+    overflow: auto;
+  }
+
   .route-slot {
     display: flex;
     flex-direction: column;
@@ -1457,25 +1642,6 @@
   }
 
   /* Barre de route affichée en bas : colonnes raccourcies d'autant. */
-  .map-side.short,
-  .side-slot.short {
-    max-height: calc(100% - 10rem);
-  }
-
-  .show-bar {
-    position: absolute;
-    left: 0.75rem;
-    bottom: 0.4rem;
-    z-index: 2;
-    padding: 0.15rem 0.5rem;
-    font-size: 0.75rem;
-    opacity: 0.8;
-  }
-
-  .show-bar:hover,
-  .show-bar:focus-visible {
-    opacity: 1;
-  }
 
   header {
     display: flex;
@@ -1488,22 +1654,6 @@
   .muted {
     color: var(--muted);
     font-size: 0.75rem;
-  }
-
-  button {
-    padding: 0.3rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 0.3rem;
-    background: var(--button-bg);
-    color: var(--fg);
-    font: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-  }
-
-  button:disabled {
-    opacity: 0.5;
-    cursor: default;
   }
 
   .charts ul {

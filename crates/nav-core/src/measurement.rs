@@ -5,7 +5,7 @@
 //! normalisées à la construction : une valeur hors domaine est rejetée,
 //! jamais corrigée en silence.
 
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -38,6 +38,8 @@ pub enum Quantity {
     WindSpeedTrue,
     /// Direction d'où vient le vent réel, vraie (rad, [0, 2π)).
     WindDirectionTrue,
+    /// Angle de barre (rad, [−π/2, π/2], positif à tribord).
+    RudderAngle,
     /// Température de l'eau (K).
     WaterTemperature,
     /// Température de l'air extérieur (K).
@@ -66,7 +68,7 @@ pub enum Quantity {
 
 impl Quantity {
     /// Toutes les grandeurs, dans l'ordre d'affichage.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::SpeedOverGround,
         Self::CourseOverGroundTrue,
         Self::HeadingTrue,
@@ -77,6 +79,7 @@ impl Quantity {
         Self::WindAngleApparent,
         Self::WindSpeedTrue,
         Self::WindDirectionTrue,
+        Self::RudderAngle,
         Self::WaterTemperature,
         Self::AirTemperature,
         Self::AtmosphericPressure,
@@ -126,6 +129,7 @@ impl Quantity {
             Self::WindAngleApparent => "angle du vent apparent",
             Self::WindSpeedTrue => "vitesse du vent réel",
             Self::WindDirectionTrue => "direction du vent réel",
+            Self::RudderAngle => "angle de barre",
             Self::WaterTemperature => "température de l'eau",
             Self::AirTemperature => "température de l'air",
             Self::AtmosphericPressure => "pression atmosphérique",
@@ -164,7 +168,8 @@ impl Quantity {
             | Self::HeadingTrue
             | Self::HeadingMagnetic
             | Self::WindDirectionTrue
-            | Self::WindAngleApparent => return None,
+            | Self::WindAngleApparent
+            | Self::RudderAngle => return None,
         })
     }
 
@@ -201,6 +206,13 @@ impl Quantity {
                 }
                 let wrapped = value.rem_euclid(TAU);
                 Ok(if wrapped > PI { wrapped - TAU } else { wrapped })
+            }
+            // Au-delà de 90° d'un bord : aberrant, rejeté (jamais replié).
+            Self::RudderAngle => {
+                if value.abs() > FRAC_PI_2 {
+                    return Err(MeasurementError::OutOfRange(self, value));
+                }
+                Ok(value)
             }
             // Grandeurs scalaires : traitées par `range` ci-dessus.
             _ => Err(MeasurementError::OutOfRange(self, value)),
@@ -283,6 +295,18 @@ mod tests {
         assert!((awa.normalize(3.0 * PI / 2.0).expect("ok") + PI / 2.0).abs() < 1e-12);
         assert!((awa.normalize(-PI / 4.0).expect("ok") + PI / 4.0).abs() < 1e-12);
         assert!((awa.normalize(PI).expect("ok") - PI).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rudder_angle_is_signed_and_bounded() {
+        let rudder = Quantity::RudderAngle;
+        assert_eq!(rudder.normalize(0.2), Ok(0.2));
+        assert_eq!(rudder.normalize(-0.2), Ok(-0.2), "bâbord négatif");
+        assert_eq!(rudder.normalize(PI / 2.0), Ok(PI / 2.0));
+        // Hors butée ou degrés envoyés pour des radians : rejeté, pas replié.
+        assert!(rudder.normalize(PI / 2.0 + 0.01).is_err());
+        assert!(rudder.normalize(-2.0).is_err());
+        assert!(rudder.normalize(35.0).is_err());
     }
 
     const FRAC: f64 = 0.25;

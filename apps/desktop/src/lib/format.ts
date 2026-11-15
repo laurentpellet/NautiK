@@ -144,10 +144,35 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(hours / 24)} j ${String(hours % 24).padStart(2, '0')} h`;
 }
 
-/** Heure UTC `HH:MM` et durée restante : `14:32 UTC (dans 1 h 05)`. */
-export function formatEta(eta: number | null, now: number): string {
+/** Heure locale `HH:MM`, fuseau et durée restante : `14:32 UTC−10 (dans 1 h 05)`. */
+export function formatEta(eta: number | null, now: number, timeZone?: string): string {
   if (eta === null) return '—';
-  return `${formatUtcClock(eta)} UTC (dans ${formatDuration(eta - now)})`;
+  return `${formatLocalClock(eta, timeZone)} ${localZoneLabel(eta, timeZone)} (dans ${formatDuration(eta - now)})`;
+}
+
+/**
+ * Heure locale `HH:MM` (fuseau de l'appareil, ou `timeZone`). Les
+ * instants restent en UTC ; seul l'affichage est local.
+ */
+export function formatLocalClock(time: number, timeZone?: string): string {
+  return new Intl.DateTimeFormat('fr-FR', {
+    ...(timeZone ? { timeZone } : {}),
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(time));
+}
+
+/** Décalage du fuseau local à cet instant : `UTC−10`, `UTC+1`, `UTC`. */
+export function localZoneLabel(time: number, timeZone?: string): string {
+  return (
+    new Intl.DateTimeFormat('fr-FR', {
+      ...(timeZone ? { timeZone } : {}),
+      timeZoneName: 'shortOffset',
+    })
+      .formatToParts(new Date(time))
+      .find((p) => p.type === 'timeZoneName')?.value ?? 'local'
+  );
 }
 
 /** Gravité d'un état de connexion, pour l'affichage. */

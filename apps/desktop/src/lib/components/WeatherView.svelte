@@ -25,11 +25,14 @@
     active: string | null;
     onshow: (file: WeatherFile | null) => void;
     now: number;
-    status: Snippet;
+    /** Alertes de sûreté ; absentes une fois intégrée aux Paramètres. */
+    status?: Snippet;
     listen?: ListenFn;
+    /** Intégrée à une section des Paramètres (pas en surimpression). */
+    embedded?: boolean;
   }
 
-  let { api, view, active, onshow, now, status, listen }: Props = $props();
+  let { api, view, active, onshow, now, status, listen, embedded = false }: Props = $props();
 
   let files = $state.raw<WeatherFile[]>([]);
   let loading = $state(true);
@@ -112,8 +115,8 @@
     bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} Mo` : `${Math.ceil(bytes / 1024)} ko`;
 </script>
 
-<section class="weather" aria-label="Météo">
-  <div class="status">{@render status()}</div>
+<section class="weather" class:embedded aria-label="Météo">
+  {#if status}<div class="status">{@render status()}</div>{/if}
 
   <p class="safety" role="note">
     Prévisions de modèle numérique : une aide à la décision, qui ne remplace pas les bulletins
@@ -370,5 +373,15 @@
 
   .notice {
     color: var(--ok-fg);
+  }
+
+  /* Section des Paramètres : dans le flux, sans fond propre. */
+  .weather.embedded {
+    position: static;
+    inset: auto;
+    z-index: auto;
+    overflow: visible;
+    padding: 0;
+    background: none;
   }
 </style>

@@ -1,8 +1,10 @@
 //! Instruments simulés (développement et démonstrations).
 //!
 //! Complète la position simulée par des mesures cohérentes entre elles :
-//! cap, vitesse surface, sonde, vent réel et apparent (calculé à partir
-//! du déplacement du bateau), environnement, moteur, réservoirs et
+//! vitesse et route fond (celles du relevé), cap, vitesse surface, sonde,
+//! angle de barre (suivant la giration), vent réel et apparent (calculé
+//! à partir du déplacement du bateau),
+//! environnement, moteur, réservoirs et
 //! énergie. Les variations sont déterministes (fonctions du temps), sans
 //! générateur aléatoire. Chaque mesure est marquée
 //! [`SourceKind::Simulator`] et ne doit jamais être présentée comme réelle.
@@ -28,6 +30,11 @@ const BATTERY_AH: f64 = 400.0;
 /// Vitesse fond au-delà de laquelle le moteur tourne (m/s).
 const UNDERWAY_MPS: f64 = 0.2;
 const KNOTS_PER_MPS: f64 = 3600.0 / 1852.0;
+/// Angle de barre par vitesse de giration (s) : 0,06°/s de giration
+/// donnent environ 6° de barre.
+const RUDDER_GAIN_S: f64 = 100.0;
+/// Butée de barre simulée (35°).
+const RUDDER_LIMIT_RAD: f64 = 35.0 * PI / 180.0;
 
 /// Simulateur d'instruments.
 #[derive(Debug, Clone)]
@@ -104,12 +111,23 @@ impl InstrumentSimulator {
         let underway = sog > UNDERWAY_MPS;
 
         // Cap : route fond + dérive en route ; léger évitage au mouillage.
+        let previous_heading = self.heading_rad;
         self.heading_rad = match fix.cog_rad {
             Some(cog) if underway => (cog + 0.05 * (s / 50.0).sin()).rem_euclid(TAU),
             _ => (self.heading_rad + 0.002 * (s / 20.0).sin()).rem_euclid(TAU),
         };
         let heading = self.heading_rad;
         let cog = fix.cog_rad.unwrap_or(heading);
+
+        // Barre : suit la giration (bâbord négatif), petites corrections du
+        // barreur, en butée dans les virages francs ; droite à l'arrêt.
+        let rudder = if underway && dt > 0.0 {
+            let turn_rate = signed_angle(heading - previous_heading) / dt;
+            (turn_rate * RUDDER_GAIN_S + 1.5_f64.to_radians() * (s / 7.0).sin())
+                .clamp(-RUDDER_LIMIT_RAD, RUDDER_LIMIT_RAD)
+        } else {
+            0.0
+        };
 
         // Vent réel : alizé d'est-sud-est, rafales.
         let tws = (7.5 + 1.5 * (s / 600.0).sin() + 0.8 * (s / 17.0).sin()).max(0.5);
@@ -170,6 +188,7 @@ impl InstrumentSimulator {
             (Quantity::WindAngleApparent, awa),
             (Quantity::WindSpeedTrue, tws),
             (Quantity::WindDirectionTrue, twd),
+            (Quantity::RudderAngle, rudder),
             (
                 Quantity::WaterTemperature,
                 KELVIN + 27.2 + 0.3 * (s / 1800.0).sin(),
@@ -192,8 +211,16 @@ impl InstrumentSimulator {
             (Quantity::BatteryStateOfCharge, self.soc),
             (Quantity::SolarPower, solar_w),
         ];
+        // Vitesse et route fond du relevé, publiées comme celles d'un GPS
+        // (RMC/VTG) : sans elles, SOG et COG resteraient « — » dans les
+        // instruments. Route fond absente à l'arrêt : aucune valeur inventée.
+        let motion = [
+            Some((Quantity::SpeedOverGround, sog)),
+            fix.cog_rad.map(|c| (Quantity::CourseOverGroundTrue, c)),
+        ];
         values
             .into_iter()
+            .chain(motion.into_iter().flatten())
             .filter_map(|(quantity, value)| {
                 Measurement::new(
                     quantity,
@@ -236,11 +263,40 @@ mod tests {
     #[test]
     fn produces_every_instrument_quantity_marked_simulated() {
         let ms = InstrumentSimulator::new().step(&fix(0, 4.0, Some(1.0)));
-        assert_eq!(ms.len(), 20, "toutes les mesures sont valides");
+        assert_eq!(ms.len(), 23, "toutes les mesures sont valides");
         assert!(ms.iter().all(|m| m.source.is_simulated()));
-        // La position, la vitesse et la route fond viennent du relevé.
-        assert!(ms.iter().all(|m| m.quantity != Quantity::SpeedOverGround
-            && m.quantity != Quantity::CourseOverGroundTrue));
+        // Vitesse et route fond : celles du relevé.
+        assert_eq!(value(&ms, Quantity::SpeedOverGround), 4.0);
+        assert_eq!(value(&ms, Quantity::CourseOverGroundTrue), 1.0);
+    }
+
+    #[test]
+    fn rudder_follows_turns_within_limits_and_is_centered_when_stopped() {
+        let mut sim = InstrumentSimulator::new();
+        sim.step(&fix(0, 4.0, Some(0.0)));
+        // Virage franc de 90° tribord en 1 s : barre en butée tribord.
+        let hard = sim.step(&fix(1, 4.0, Some(PI / 2.0)));
+        assert_eq!(value(&hard, Quantity::RudderAngle), RUDDER_LIMIT_RAD);
+        // Virage à bâbord : barre négative, en butée.
+        let port = sim.step(&fix(2, 4.0, Some(0.0)));
+        assert_eq!(value(&port, Quantity::RudderAngle), -RUDDER_LIMIT_RAD);
+        // Route stable : petites corrections seulement.
+        for t in 3..60 {
+            let ms = sim.step(&fix(t, 4.0, Some(0.0)));
+            assert!(value(&ms, Quantity::RudderAngle).abs() < 10_f64.to_radians());
+        }
+        // À l'arrêt : barre droite.
+        let stopped = sim.step(&fix(61, 0.0, None));
+        assert_eq!(value(&stopped, Quantity::RudderAngle), 0.0);
+    }
+
+    #[test]
+    fn no_course_over_ground_when_stopped() {
+        let ms = InstrumentSimulator::new().step(&fix(0, 0.0, None));
+        assert_eq!(value(&ms, Quantity::SpeedOverGround), 0.0);
+        assert!(ms
+            .iter()
+            .all(|m| m.quantity != Quantity::CourseOverGroundTrue));
     }
 
     #[test]

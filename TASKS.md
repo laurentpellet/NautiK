@@ -713,6 +713,66 @@ Critères (TEST_PLAN.md §7) :
   rien d'affiché en cas d'échec) ; tests.
 - [x] Éditeur de route : recherche du départ et de l'arrivée (lieu choisi
   remplaçant le départ ou l'arrivée) ; tests.
+- [x] Barre de route latérale : collée à gauche de la carte pendant la
+  navigation (carte et panneaux décalés), réductible à une colonne
+  DTW/BTW, choix mémorisé ; vérifiée dans le navigateur ; tests.
+- [x] Navigation : Météo et Journal deviennent des sections des
+  Paramètres (plus d'onglets dédiés), ouvertes aussi par deux icônes de la
+  barre d'outils ; barre d'outils fixe en haut de la carte (ni déplaçable
+  ni masquable) ; rappel « Masqué : … » retiré de la carte (liste dans
+  l'infobulle du bouton Calques) ; vérifié dans le navigateur ; tests.
+- [x] Barre unique en haut : onglets | outils de la carte | état, heure,
+  thème et plein écran (icônes) ; fenêtre maximisée au lancement ; ETA WP
+  et ETA fin (barre de route, tuiles, panneau Navigation) en heure locale
+  avec le décalage (instants toujours en UTC) ; tests.
+- [x] Onglets en icônes (nom en infobulle et pour l'accessibilité) ;
+  position et fond retirés de la barre d'outils ; tests.
+- [x] Logo et nom retirés de la barre ; pastilles d'état en icônes
+  colorées selon l'état (libellé et état en infobulle et pour les lecteurs
+  d'écran) ; barre sur une seule ligne à 1920 px ; tests.
+- [x] SOG, COG et CAP retirés de la barre d'outils (valeurs de navigation
+  dans le panneau Navigation et l'onglet Instruments) ; tests.
+- [x] SOG, COG et vent réel (force et direction) remis dans la barre
+  d'outils ; tests.
+- [x] Bouton lecture / arrêt de l'enregistrement de la trace dans la barre
+  d'outils (rouge pendant l'enregistrement) ; tests.
+- [x] Pastilles d'état (position, liaison, AIS, alarmes, moteur) dans un
+  panneau ouvert par l'icône État des données, colorée selon l'état le
+  plus grave ; alertes toujours visibles panneau fermé ; choix mémorisé ;
+  tests.
+- [x] Barre d'outils : direction du vent retirée (force seule) ; icône
+  « Disposition par défaut » retirée.
+- [x] Simulateur : SOG et COG du relevé publiés aussi comme mesures (comme
+  un GPS), pour la barre, Instruments et l'historique ; COG absente à
+  l'arrêt ; tests Rust.
+- [x] Panneau Navigation en bandeau fixe en bas de la carte, très grands
+  caractères, toujours affiché au lancement ; tests.
+- [x] Barre Navigation fixe sous la carte (comme la barre du haut, la
+  carte se réduit d'autant), sans VMG ni autre amure ; tests.
+- [x] Barre Navigation : toutes les valeurs à la même taille.
+- [x] Angle de barre : grandeur `RudderAngle` (rad, tribord positif, rejet
+  au-delà de 90°), phrase NMEA 0183 RSA, chemin Signal K
+  `steering.rudderAngle`, simulateur (suit la giration, butée 35°),
+  affiché dans la barre Navigation et l'onglet Instruments ; tests Rust
+  (dont données malformées) et frontend.
+- [x] COG retirée de la barre d'outils principale.
+- [x] Clic droit (ou appui long) : barre Navigation à gauche, en bas ou à
+  droite de la carte ; barre de route à gauche ou à droite ; choix
+  mémorisés ; tests.
+- [x] Icône Cibles AIS dans la barre d'outils (entre Navigation et Routes
+  et traces) : panneau flottant des cibles, fermé par défaut ; tests.
+- [x] Barre Navigation : croix de fermeture remplacée par le bouton
+  Réduire / Déplier de la barre de route ; réduite, SOG, cap, COG et vent
+  apparent restent lisibles ; choix mémorisé ; tests.
+- [x] Barre Navigation réduite : présentée comme la barre de route
+  réduite (nom en haut 0.6rem, valeur 0.8rem, unité dessous).
+- [x] Barre Navigation réduite : toutes les valeurs (fond, surface, angle
+  du vent, barre comprises), sans compas.
+- [x] Paramètres → Instruments : valeurs de la barre Navigation à cocher
+  et à ordonner (au moins une affichée, choix mémorisé et validé) ; tests.
+- [x] Bouton Réduire de la barre Navigation en haut (sur le côté : seul sur
+  la première ligne, comme la barre de route) ; bouton MOB en fin de barre
+  de la carte, juste à gauche de l'état des données ; tests.
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).

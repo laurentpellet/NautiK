@@ -24,6 +24,7 @@
     windAngleApparent: 'Angle app.',
     windSpeedTrue: 'Vent réel',
     windDirectionTrue: 'Dir. vent réel',
+    rudderAngle: 'Barre',
     waterTemperature: 'Temp. eau',
     airTemperature: 'Temp. air',
     atmosphericPressure: 'Pression',

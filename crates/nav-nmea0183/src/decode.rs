@@ -3,7 +3,8 @@
 //!
 //! Phrases prises en charge : RMC, GGA, GLL (position), VTG (route et
 //! vitesse fond), HDT, HDG, HDM (cap), VHW (vitesse surface), DPT, DBT
-//! (profondeur), MWV (vent apparent). Les phrases AIS encapsulées
+//! (profondeur), MWV (vent apparent), RSA (angle de barre). Les phrases
+//! AIS encapsulées
 //! (`!AIVDM`, `!AIVDO`) sont transmises à `nav-ais` sous forme de
 //! fragments. Les autres sont ignorées.
 //!
@@ -464,6 +465,20 @@ impl Decoder<'_> {
         self.measurement(Quantity::WindAngleApparent, angle, at)?;
         self.measurement(Quantity::WindSpeedApparent, speed, at)
     }
+
+    /// RSA : angle de barre du capteur tribord (ou unique), en degrés,
+    /// négatif à bâbord ; seulement si le capteur le déclare valide (`A`).
+    /// Au-delà de 90° : rejeté.
+    fn rsa(&mut self) -> Result<()> {
+        if self.fields.get(1) != Some("A") {
+            return Ok(());
+        }
+        let angle = self
+            .fields
+            .number(0, "angle de barre")?
+            .map(f64::to_radians);
+        self.measurement(Quantity::RudderAngle, angle, self.ctx.received_at)
+    }
 }
 
 fn quantity_field(quantity: Quantity) -> &'static str {
@@ -507,6 +522,7 @@ pub fn decode_sentence(sentence: &Sentence<'_>, ctx: DecodeContext<'_>) -> Resul
         (false, "DPT") => decoder.dpt()?,
         (false, "DBT") => decoder.dbt()?,
         (false, "MWV") => decoder.mwv()?,
+        (false, "RSA") => decoder.rsa()?,
         (true, kind @ ("VDM" | "VDO")) => {
             return Ok(Decoded::Ais(Fragment::parse(kind, &sentence.fields)?));
         }

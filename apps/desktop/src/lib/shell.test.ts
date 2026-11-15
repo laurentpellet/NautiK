@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { AlarmView } from './services/alarms';
 import type { PositionStatus } from './services/instruments';
-import { activeAlerts, localClock, statusPills, utcClock, type ShellInputs } from './shell';
+import {
+  activeAlerts,
+  localClock,
+  statusPills,
+  utcClock,
+  worstLevel,
+  type ShellInputs,
+  type StatusPill,
+} from './shell';
 
 const position = (over: Partial<PositionStatus> = {}, source = 'nmea0183'): PositionStatus => ({
   fix: {
@@ -138,5 +146,26 @@ describe('horloge', () => {
     expect(paris.zone).toMatch(/UTC.1/);
     // Fuseau du système par défaut : toujours une heure lisible.
     expect(localClock(t).time).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+  });
+});
+
+describe('gravité du panneau d’état', () => {
+  const pill = (level: StatusPill['level']): StatusPill => ({
+    id: 'ais',
+    label: 'AIS',
+    state: '',
+    level,
+    title: '',
+  });
+
+  it('retient l’alerte, puis l’avertissement, puis le bon état', () => {
+    expect(worstLevel([pill('ok'), pill('alert'), pill('warn')])).toBe('alert');
+    expect(worstLevel([pill('ok'), pill('off'), pill('warn')])).toBe('warn');
+    expect(worstLevel([pill('off'), pill('ok')])).toBe('ok');
+  });
+
+  it('reste neutre sans information', () => {
+    expect(worstLevel([pill('off')])).toBe('off');
+    expect(worstLevel([])).toBe('off');
   });
 });

@@ -4,7 +4,7 @@
 //! des checksums et conversion vers le modèle interne.
 //!
 //! - [`sentence`] : délimiteurs, adresse, somme de contrôle ;
-//! - [`decode`] : RMC, GGA, GLL, VTG, HDT, HDG, HDM, VHW, DPT, DBT, MWV
+//! - [`decode`] : RMC, GGA, GLL, VTG, HDT, HDG, HDM, VHW, DPT, DBT, MWV, RSA
 //!   vers [`nav_core::Sample`] (WGS84, SI, UTC), fragments AIS VDM/VDO
 //!   vers `nav-ais` ;
 //! - [`framer`] : découpage borné d'un flux en lignes ;

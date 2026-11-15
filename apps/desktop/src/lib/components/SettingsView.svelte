@@ -2,9 +2,12 @@
   /** Sections de l'onglet Paramètres, dans l'ordre de la navigation. */
   export const SETTINGS_SECTIONS = [
     { id: 'general', label: 'Général', hint: 'Unités, carte, simulateur' },
+    { id: 'instruments', label: 'Instruments', hint: 'Barre Navigation' },
     { id: 'sources', label: 'Source', hint: 'Données du bord' },
     { id: 'alarms', label: 'Alarmes', hint: 'Surveillance, historique' },
     { id: 'charts', label: 'Cartes', hint: 'MBTiles, ENC, îles et amers' },
+    { id: 'weather', label: 'Météo', hint: 'Fichiers GRIB, vent' },
+    { id: 'logbook', label: 'Journal', hint: 'Journal de bord' },
   ] as const;
 
   export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['id'];
@@ -23,7 +26,7 @@
     }
   }
 
-  function saveSection(section: SettingsSection): void {
+  export function saveSection(section: SettingsSection): void {
     try {
       globalThis.localStorage?.setItem(SECTION_KEY, section);
     } catch {
@@ -41,6 +44,13 @@
   import type { SimulatorApi } from '../services/simulator';
   import { DEFAULT_ACTIVE_ROUTE_COLOR } from '../map/overlays';
   import { routeStyle, setActiveRouteColor } from '../routeColor.svelte';
+  import {
+    moveNavField,
+    navBar,
+    navFieldLabel,
+    resetNavFields,
+    setNavFieldShown,
+  } from '../navFields.svelte';
   import {
     DEPTH_UNITS,
     DISTANCE_UNITS,
@@ -64,15 +74,36 @@
     alarms?: Snippet;
     /** Dossiers des cartes, ENC, îles et amers. */
     charts?: Snippet;
+    /** Fichiers météo (GRIB). */
+    weatherView?: Snippet;
+    /** Journal de bord. */
+    logbookView?: Snippet;
+    /** Section affichée (choisie aussi depuis la barre de la carte). */
+    section?: SettingsSection;
   }
 
-  let { simulator, status, sources, alarms, charts }: Props = $props();
+  let {
+    simulator,
+    status,
+    sources,
+    alarms,
+    charts,
+    weatherView,
+    logbookView,
+    section = $bindable(loadSection()),
+  }: Props = $props();
 
-  let section = $state<SettingsSection>(loadSection());
-
-  /** Sections disponibles (Alarmes et Cartes sont facultatives). */
+  /** Sections disponibles (Alarmes, Cartes, Météo et Journal sont facultatives). */
   const available = $derived(
-    SETTINGS_SECTIONS.filter((s) => (s.id !== 'alarms' || alarms) && (s.id !== 'charts' || charts)),
+    SETTINGS_SECTIONS.filter((s) => {
+      const snippets: Partial<Record<SettingsSection, Snippet | undefined>> = {
+        alarms,
+        charts,
+        weather: weatherView,
+        logbook: logbookView,
+      };
+      return !(s.id in snippets) || snippets[s.id] !== undefined;
+    }),
   );
 
   function select(id: SettingsSection): void {
@@ -261,6 +292,56 @@
 
       <div
         role="tabpanel"
+        id="settings-panel-instruments"
+        aria-labelledby="settings-tab-instruments"
+        hidden={section !== 'instruments'}
+      >
+        <section class="card" aria-labelledby="nav-fields-title">
+          <h2 id="nav-fields-title">Barre Navigation</h2>
+          <p class="note">
+            Cochez les valeurs à afficher ; les flèches changent leur ordre (de gauche à droite en
+            bas, de haut en bas sur le côté). Au moins une valeur reste affichée.
+          </p>
+          <ol class="nav-fields" aria-label="Valeurs de la barre Navigation">
+            {#each navBar.fields as f, i (f.id)}
+              {@const label = navFieldLabel(f.id)}
+              {@const last = f.shown && navBar.fields.filter((x) => x.shown).length === 1}
+              <li data-field={f.id}>
+                <label class="inline">
+                  <input
+                    type="checkbox"
+                    checked={f.shown}
+                    disabled={last}
+                    title={last ? 'Au moins une valeur reste affichée' : undefined}
+                    onchange={(e) => setNavFieldShown(f.id, e.currentTarget.checked)}
+                  />
+                  <span>{label}</span>
+                </label>
+                <span class="order">
+                  <button
+                    type="button"
+                    aria-label="Monter {label}"
+                    disabled={i === 0}
+                    onclick={() => moveNavField(f.id, -1)}>↑</button
+                  >
+                  <button
+                    type="button"
+                    aria-label="Descendre {label}"
+                    disabled={i === navBar.fields.length - 1}
+                    onclick={() => moveNavField(f.id, 1)}>↓</button
+                  >
+                </span>
+              </li>
+            {/each}
+          </ol>
+          <button type="button" onclick={() => resetNavFields()}
+            >Tout afficher (ordre par défaut)</button
+          >
+        </section>
+      </div>
+
+      <div
+        role="tabpanel"
         id="settings-panel-sources"
         aria-labelledby="settings-tab-sources"
         hidden={section !== 'sources'}
@@ -292,6 +373,30 @@
         >
           <section class="card">
             {@render charts()}
+          </section>
+        </div>
+      {/if}
+      {#if weatherView}
+        <div
+          role="tabpanel"
+          id="settings-panel-weather"
+          aria-labelledby="settings-tab-weather"
+          hidden={section !== 'weather'}
+        >
+          <section class="card">
+            {@render weatherView()}
+          </section>
+        </div>
+      {/if}
+      {#if logbookView}
+        <div
+          role="tabpanel"
+          id="settings-panel-logbook"
+          aria-labelledby="settings-tab-logbook"
+          hidden={section !== 'logbook'}
+        >
+          <section class="card">
+            {@render logbookView()}
           </section>
         </div>
       {/if}
@@ -371,12 +476,15 @@
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    /* Un contenu large (tableau du journal) défile dans sa carte. */
+    min-width: 0;
   }
 
   [role='tabpanel'] {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    min-width: 0;
   }
 
   [role='tabpanel'][hidden] {
@@ -385,6 +493,7 @@
 
   .card {
     padding: 0.7rem 0.9rem;
+    min-width: 0;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     background: var(--panel-bg);
@@ -465,6 +574,29 @@
     margin: 0.5rem 0 0;
     color: var(--muted);
     font-size: 0.8rem;
+  }
+
+  .nav-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin: 0.6rem 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .nav-fields li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.2rem 0.3rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .order {
+    display: flex;
+    gap: 0.2rem;
   }
 
   .error {

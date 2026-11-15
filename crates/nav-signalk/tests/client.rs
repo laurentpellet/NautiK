@@ -103,7 +103,10 @@ async fn expect_subscription(ws: &mut WebSocketStream<TcpStream>) {
     let text = msg.into_text().expect("texte");
     let json: serde_json::Value = serde_json::from_str(text.as_str()).expect("json");
     assert_eq!(json["context"], "vessels.self");
-    assert_eq!(json["subscribe"].as_array().expect("tableau").len(), 9);
+    assert_eq!(
+        json["subscribe"].as_array().expect("tableau").len(),
+        nav_signalk::delta::SUBSCRIBED_PATHS.len()
+    );
 }
 
 struct Client {

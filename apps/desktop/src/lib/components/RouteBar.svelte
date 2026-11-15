@@ -1,8 +1,9 @@
 <script lang="ts">
-  // Barre de la route active : waypoint visé et éléments de navigation
-  // (distance, relèvement, écart, temps et heures d'arrivée), comme la
-  // barre d'outils de la carte. Valeurs du moteur ; une valeur obsolète
-  // est estompée et signalée, une valeur absente reste « — ».
+  // Barre latérale de la route active, collée à gauche de la carte :
+  // waypoint visé et éléments de navigation (distance, relèvement, écart,
+  // temps et heures d'arrivée). Réductible à une colonne étroite qui garde
+  // DTW et BTW. Valeurs du moteur ; une valeur obsolète est estompée et
+  // signalée, une valeur absente reste « — ».
   import Icon from './Icon.svelte';
   import { routeBarTiles } from '../instrumentTiles';
   import type { NavigationStatus } from '../services/routing';
@@ -14,17 +15,49 @@
     stale: boolean;
     /** Panneau Route affiché. */
     routePanel: boolean;
+    /** Barre réduite à une colonne étroite. */
+    collapsed?: boolean;
     ontoggleroute: () => void;
     ondeactivate: () => void;
+    oncollapse?: (collapsed: boolean) => void;
+    /** Côté de la carte (sens des flèches de réduction). */
+    side?: 'left' | 'right';
   }
 
-  let { status, now, stale, routePanel, ontoggleroute, ondeactivate }: Props = $props();
+  let {
+    status,
+    now,
+    stale,
+    routePanel,
+    collapsed = false,
+    ontoggleroute,
+    ondeactivate,
+    oncollapse,
+    side = 'left',
+  }: Props = $props();
+
+  // Réduire pousse la barre vers son bord de la carte.
+  const arrows = $derived(
+    side === 'left' ? { fold: '«', unfold: '»' } : { fold: '»', unfold: '«' },
+  );
 
   const tiles = $derived(routeBarTiles(status, now, stale));
+  /** Réduite : seuls la distance et le relèvement du waypoint restent. */
+  const shown = $derived(collapsed ? tiles.filter((t) => t.id === 'dtw' || t.id === 'btw') : tiles);
 </script>
 
-<div class="bar" data-testid="route-bar">
+<div class="bar" class:collapsed data-testid="route-bar">
   <div class="group" role="toolbar" aria-label="Route">
+    {#if oncollapse}
+      <button
+        type="button"
+        class="fold"
+        aria-label={collapsed ? 'Déplier la barre de route' : 'Réduire la barre de route'}
+        aria-expanded={!collapsed}
+        title={collapsed ? 'Déplier la barre de route' : 'Réduire la barre de route'}
+        onclick={() => oncollapse(!collapsed)}>{collapsed ? arrows.unfold : arrows.fold}</button
+      >
+    {/if}
     <button
       type="button"
       aria-label="Panneau Route"
@@ -45,15 +78,17 @@
     </button>
   </div>
 
-  <span class="sep" aria-hidden="true"></span>
-
-  <div class="target" title={status.routeName}>
-    <span class="name">
-      {status.routeName}
-      {#if status.simulated}<span class="badge">SIMULATION</span>{/if}
-    </span>
+  <div class="target" title={`${status.routeName} → ${status.targetName}`}>
+    {#if !collapsed}
+      <span class="name route-name">
+        {status.routeName}
+      </span>
+    {/if}
+    {#if status.simulated}<span class="badge">{collapsed ? 'SIM' : 'SIMULATION'}</span>{/if}
     {#if status.finished}
       <span class="value" role="status">Arrivée</span>
+    {:else if collapsed}
+      <span class="value small" class:stale>{status.targetIndex + 1}/{status.waypointCount}</span>
     {:else}
       <span class="value" class:stale
         >→ {status.targetName}
@@ -63,9 +98,8 @@
   </div>
 
   {#if !status.finished}
-    <span class="sep" aria-hidden="true"></span>
     <div class="metrics" aria-label="Éléments de route">
-      {#each tiles as t (t.id)}
+      {#each shown as t (t.id)}
         <div
           class="metric"
           class:stale={t.stale}
@@ -89,11 +123,17 @@
 <style>
   .bar {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.25rem 0.35rem;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 0.6rem;
+    height: 100%;
+    padding: 0.5rem 0.6rem;
+    overflow-y: auto;
     border-left: 3px solid #d81b60;
+  }
+
+  .bar.collapsed {
+    align-items: center;
+    padding: 0.5rem 0.2rem;
   }
 
   .group {
@@ -101,19 +141,24 @@
     gap: 0.15rem;
   }
 
-  .sep {
-    align-self: stretch;
-    width: 1px;
-    margin: 0.2rem 0;
-    background: var(--border);
+  .collapsed .group {
+    flex-direction: column;
   }
 
   .target {
     display: flex;
     flex-direction: column;
-    max-width: 12rem;
+    gap: 0.15rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    min-width: 0;
   }
 
+  .collapsed .target {
+    align-items: center;
+  }
+
+  .route-name,
   .target .value {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -121,18 +166,17 @@
 
   .metrics {
     display: flex;
-    gap: 0.9rem;
-    flex: 1;
-    justify-content: center;
-    flex-wrap: wrap;
-    padding: 0 0.3rem;
+    flex-direction: column;
+    gap: 0.45rem;
   }
 
   .metric {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    min-width: 3.2rem;
+  }
+
+  .collapsed .metric {
+    align-items: center;
   }
 
   .name {
@@ -150,11 +194,21 @@
     white-space: nowrap;
   }
 
+  .collapsed .value {
+    font-size: 0.8rem;
+  }
+
   .value small {
     margin-left: 0.15rem;
     color: var(--muted);
     font-size: 0.7rem;
     font-weight: 500;
+  }
+
+  .collapsed .value small {
+    display: block;
+    margin: 0;
+    text-align: center;
   }
 
   .stale .value,
@@ -173,12 +227,17 @@
   }
 
   .badge {
-    margin-left: 0.3rem;
+    align-self: flex-start;
     padding: 0 0.3rem;
     border-radius: 0.2rem;
     background: var(--sim-bg);
     color: var(--sim-fg);
-    letter-spacing: 0;
+    font-size: 0.65rem;
+    font-weight: 700;
+  }
+
+  .collapsed .badge {
+    align-self: center;
   }
 
   button {
@@ -209,6 +268,11 @@
   button[aria-pressed='false'] {
     color: var(--muted);
     opacity: 0.6;
+  }
+
+  .fold {
+    font-size: 1.1rem;
+    font-weight: 700;
   }
 
   .stop {

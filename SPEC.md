@@ -124,7 +124,7 @@ Transports :
 
 Messages :
 RMC, GGA, GLL, VTG, HDT, HDG,
-DPT, DBT, MWV, VHW, VDM, VDO.
+DPT, DBT, MWV, VHW, RSA, VDM, VDO.
 
 ### NMEA-002 — NMEA 2000
 

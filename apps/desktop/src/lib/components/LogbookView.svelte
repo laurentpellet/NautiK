@@ -15,10 +15,13 @@
 
   interface Props {
     logbook: LogbookController;
-    status: Snippet;
+    /** Alertes de sûreté ; absentes une fois intégrée aux Paramètres. */
+    status?: Snippet;
+    /** Intégrée à une section des Paramètres (pas en surimpression). */
+    embedded?: boolean;
   }
 
-  let { logbook, status }: Props = $props();
+  let { logbook, status, embedded = false }: Props = $props();
 
   let text = $state('');
 
@@ -45,8 +48,8 @@
   }
 </script>
 
-<section class="logbook" aria-label="Journal de bord">
-  {@render status()}
+<section class="logbook" class:embedded aria-label="Journal de bord">
+  {#if status}{@render status()}{/if}
   <div class="toolbar">
     <form class="add" onsubmit={add}>
       <input
@@ -193,6 +196,8 @@
 
   .table {
     overflow-x: auto;
+    /* Contient le libellé masqué « Actions » (sinon il élargit la page). */
+    position: relative;
   }
 
   table {
@@ -261,5 +266,15 @@
 
   .danger {
     color: var(--danger, #d32f2f);
+  }
+
+  /* Section des Paramètres : dans le flux, sans fond propre. */
+  .logbook.embedded {
+    position: static;
+    inset: auto;
+    z-index: auto;
+    overflow: visible;
+    padding: 0;
+    background: none;
   }
 </style>
