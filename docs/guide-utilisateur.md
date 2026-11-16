@@ -384,6 +384,10 @@ affiché le temps de l'édition ; le fermer (**×**) annule l'édition.
   de route. Tableau par branche : distance, relèvement, durée, cumul.
   Ces estimations supposent une vitesse constante et ne tiennent compte
   ni du vent ni du courant.
+- **Œil** (devant le nom de chaque route et de chaque trace) : ouvert,
+  l'élément est affiché sur la carte ; barré, il est masqué. Le choix des
+  routes est mémorisé. La route suivie reste toujours affichée (son œil
+  est inactif).
 - **Zoomer** : la carte se cadre sur l'emprise de la route (y compris de
   part et d'autre de l'antiméridien). Sélectionner une route ou afficher
   une trace cadre aussi la carte dessus.
@@ -408,6 +412,9 @@ affiché le temps de l'édition ; le fermer (**×**) annule l'édition.
   DTW et BTW ; l'autre flèche la déplie (choix mémorisé). Elle rappelle la route,
   le waypoint visé (rang / nombre de points) et la mention SIMULATION le
   cas échéant, puis :
+  - **CHRONO** (en premier) : temps écoulé depuis le départ, au format
+    h:mm:ss ; le départ est le premier relevé de position suivi après
+    l'activation de la route ; figé à l'arrivée au dernier point ;
   - **DTW** : distance au waypoint ; **BTW** : son relèvement vrai ;
   - **XTE** : écart de route (D : à droite, G : à gauche) ;
   - **TEMPS WP** et **ETA WP** : temps restant et heure locale d'arrivée au
@@ -428,7 +435,12 @@ affiché le temps de l'édition ; le fermer (**×**) annule l'édition.
   l'enregistrement (un point toutes les 5 s au plus, et seulement après
   10 m parcourus). Le bouton **lecture / arrêt** de la barre d'outils
   fait de même sans ouvrir le panneau : triangle pour démarrer, carré
-  rouge pendant l'enregistrement pour l'arrêter. Une trace interrompue par un arrêt brutal est clôturée
+  rouge pendant l'enregistrement pour l'arrêter ; son infobulle donne
+  alors la longueur et la durée de la trace en cours (calculées par le
+  moteur, mises à jour toutes les 5 s). Les traces, en cours comprise,
+  sont dessinées en rose ; couleur réglable dans **Paramètres → Général →
+  Carte → Couleur des traces** (bouton **Rose (défaut)** pour revenir).
+  Une trace interrompue par un arrêt brutal est clôturée
   au redémarrage, à l'heure de son dernier point. Pour une trace
   affichée : longueur, durée (du premier au dernier point), **Zoomer** et
   **Renommer**.

@@ -120,6 +120,10 @@ export interface NavigationStatus {
   finished: boolean;
   simulated: boolean;
   computedAt: number;
+  /** Départ : premier relevé suivi après l'activation (moteur). */
+  startedAt: number;
+  /** Arrivée au dernier waypoint ; `null` : route en cours. */
+  finishedAt: number | null;
 }
 
 export interface NavigationState {
@@ -259,6 +263,8 @@ export function parseNavigationStatus(value: unknown): NavigationStatus {
     finished: expectBoolean(r.finished, 'navigation.finished'),
     simulated: expectBoolean(r.simulated, 'navigation.simulated'),
     computedAt: expectTimestamp(r.computedAt, 'navigation.computedAt'),
+    startedAt: expectTimestamp(r.startedAt, 'navigation.startedAt'),
+    finishedAt: optional(r.finishedAt, time('finishedAt')),
   };
 }
 

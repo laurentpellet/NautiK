@@ -177,6 +177,8 @@ const status: NavigationStatus = {
   finished: false,
   simulated: false,
   computedAt: 0,
+  startedAt: 0,
+  finishedAt: null,
 };
 
 describe('tuiles de navigation', () => {
@@ -214,6 +216,7 @@ describe('barre de route', () => {
       'Pacific/Tahiti',
     );
     expect(tiles.map((t) => t.id)).toEqual([
+      'chrono',
       'dtw',
       'btw',
       'xte',
@@ -239,6 +242,24 @@ describe('barre de route', () => {
       'NM D',
     );
     expect(routeBarTiles(null, now, false)).toEqual([]);
+  });
+
+  it('chronomètre depuis le départ, figé à l’arrivée et jamais estompé', () => {
+    const start = Date.UTC(2026, 10, 12, 9, 0, 0);
+    const now = start + (65 * 60 + 7) * 1000;
+    const running = byId(routeBarTiles({ ...status, startedAt: start }, now, true), 'chrono');
+    expect(running).toMatchObject({ value: '1:05:07', label: 'CHRONO', stale: false });
+    expect(running?.detail).toContain('depuis le départ');
+    const done = byId(
+      routeBarTiles({ ...status, startedAt: start, finishedAt: start + 3_600_000 }, now, false),
+      'chrono',
+    );
+    expect(done).toMatchObject({ value: '1:00:00' });
+    expect(done?.detail).toContain('arrivée');
+    // Horloge en retard sur le moteur : jamais de durée négative.
+    expect(
+      byId(routeBarTiles({ ...status, startedAt: now + 5000 }, now, false), 'chrono')?.value,
+    ).toBe('0:00:00');
   });
 
   it('ETA inconnue : « — » et raison, jamais une durée inventée', () => {

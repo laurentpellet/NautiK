@@ -238,6 +238,19 @@ const routeColor = (active: string): ExpressionSpecification => [
   ROUTE_COLOR,
 ];
 
+/**
+ * Couleur par défaut des traces, enregistrées ou en cours (rose, réglable
+ * dans les Paramètres).
+ */
+export const DEFAULT_TRACK_COLOR = '#e91e63';
+
+/** Propriété de peinture à changer quand la couleur des traces change. */
+export function trackColorChanges(
+  color: string,
+): [layer: string, property: 'line-color', value: string][] {
+  return [['nautik-tracks-line', 'line-color', color]];
+}
+
 /** Propriétés de peinture à changer quand la couleur de la route active change. */
 export function activeRouteColorChanges(
   color: string,
@@ -256,6 +269,7 @@ export function activeRouteColorChanges(
 export function overlayLayers(
   theme: Theme = 'day',
   activeRouteColor: string = DEFAULT_ACTIVE_ROUTE_COLOR,
+  trackColor: string = DEFAULT_TRACK_COLOR,
 ): LayerSpecification[] {
   return [
     {
@@ -264,7 +278,7 @@ export function overlayLayers(
       source: TRACKS_SOURCE,
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': ['case', ['get', 'recording'], '#2e7d32', '#1565c0'],
+        'line-color': trackColor,
         'line-width': 2.5,
         'line-opacity': 0.85,
       },

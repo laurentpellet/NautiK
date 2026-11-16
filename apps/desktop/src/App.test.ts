@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import App from './App.svelte';
+import { formatDistance } from './lib/format';
 import { resetNavFields } from './lib/navFields.svelte';
 import { setFollowBoat } from './lib/followBoat.svelte';
 import { cm93Name, setChartSort, setCm93Name } from './lib/chartNames.svelte';
@@ -145,6 +146,8 @@ const navigationStatus = {
   finished: false,
   simulated: true,
   computedAt: new Date().toISOString(),
+  startedAt: new Date(Date.now() - 65 * 60_000).toISOString(),
+  finishedAt: null,
 };
 
 describe('App', () => {
@@ -2037,16 +2040,34 @@ describe('App', () => {
           state.recordingTrackId = null;
           return Promise.resolve(null);
         },
-        get_track: () => Promise.reject(new Error('trace absente')),
+        get_track: () =>
+          state.recordingTrackId === null
+            ? Promise.reject(new Error('trace absente'))
+            : Promise.resolve({
+                id: 't1',
+                name: 'Trace',
+                points: [],
+                lengthM: 3704,
+                durationS: 3900,
+                bounds: null,
+              }),
       }),
       listen: fakeListen().listen,
     });
     const bar = await screen.findByTestId('map-bar');
-    await fireEvent.click(within(bar).getByRole('button', { name: 'Enregistrer la trace' }));
+    const start = within(bar).getByRole('button', { name: 'Enregistrer la trace' });
+    expect(start.title).toBe('Commencer à enregistrer la trace du bateau');
+    await fireEvent.click(start);
     const stop = await within(bar).findByRole('button', {
       name: "Arrêter l'enregistrement de la trace",
     });
     expect(stop.classList.contains('on')).toBe(true);
+    // Infobulle : longueur et durée de la trace en cours (moteur).
+    await vi.waitFor(() =>
+      expect(stop.title).toBe(
+        `Trace en cours : ${formatDistance(3704)}, durée 1 h 05 (cliquer pour l'arrêter)`,
+      ),
+    );
     await fireEvent.click(stop);
     await within(bar).findByRole('button', { name: 'Enregistrer la trace' });
     expect(calls).toEqual(['start', 'stop']);

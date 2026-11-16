@@ -43,8 +43,8 @@
   // section. Les alertes de sûreté restent visibles au-dessus.
   import type { Snippet } from 'svelte';
   import type { SimulatorApi } from '../services/simulator';
-  import { DEFAULT_ACTIVE_ROUTE_COLOR } from '../map/overlays';
-  import { routeStyle, setActiveRouteColor } from '../routeColor.svelte';
+  import { DEFAULT_ACTIVE_ROUTE_COLOR, DEFAULT_TRACK_COLOR } from '../map/overlays';
+  import { routeStyle, setActiveRouteColor, setTrackColor } from '../routeColor.svelte';
   import { followBoat, setFollowBoat } from '../followBoat.svelte';
   import {
     MAX_DRIFT_MINUTES,
@@ -273,6 +273,22 @@
           <p class="note">
             Bordée d'un liseré sombre et toujours affichée ; les autres routes restent violettes.
           </p>
+          <div class="row">
+            <label class="inline">
+              <input
+                type="color"
+                value={routeStyle.trackColor}
+                oninput={(e) => setTrackColor(e.currentTarget.value)}
+              />
+              <span>Couleur des traces</span>
+            </label>
+            <button
+              type="button"
+              disabled={routeStyle.trackColor === DEFAULT_TRACK_COLOR}
+              onclick={() => setTrackColor(DEFAULT_TRACK_COLOR)}>Rose (défaut)</button
+            >
+          </div>
+          <p class="note">Traces enregistrées et trace en cours d'enregistrement.</p>
           <label class="inline follow">
             <input
               type="checkbox"

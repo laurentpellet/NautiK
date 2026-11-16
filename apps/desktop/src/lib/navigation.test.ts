@@ -284,7 +284,9 @@ describe('NavigationController', () => {
     const c = new NavigationController(new RoutingApi(call));
     await c.startRecording();
     expect(c.recordingId).toBe('t1');
-    expect(c.displayedTracks).toEqual([{ id: 't1', points: [], recording: true }]);
+    // Trace lue dès le démarrage : points, longueur et durée (moteur).
+    expect(c.displayedTracks).toEqual([{ id: 't1', points: expect.any(Array), recording: true }]);
+    expect(c.trackInfo.t1?.lengthM).toEqual(expect.any(Number));
     await c.refreshRecording();
     expect(c.displayedTracks[0]?.points).toHaveLength(2);
     await c.stopRecording();

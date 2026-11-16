@@ -132,6 +132,15 @@ export function formatUtcClock(time: number): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
+/** Chronomètre `h:mm:ss` (`0:04:07`, `27:00:05`) ; négatif : `0:00:00`. */
+export function formatElapsed(ms: number): string {
+  const total = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0;
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 /**
  * Durée arrondie à la minute : `45 min`, `1 h 05`, `2 j 03 h` (au-delà de
  * 48 h). Négative : 0 min.

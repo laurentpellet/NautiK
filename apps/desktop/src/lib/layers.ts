@@ -159,11 +159,47 @@ export function hiddenLayers(
  * enregistrées, jamais la route suivie en navigation : la perdre de vue
  * sans s'en rendre compte serait dangereux.
  */
-export function visibleRoutes<R extends { active: boolean }>(
+export function visibleRoutes<R extends { id: string; active: boolean }>(
   routes: R[],
   layers: Pick<MapLayers, 'routes'>,
+  /** Routes masquées une à une (œil du gestionnaire) ; jamais la route suivie. */
+  hiddenRoutes: string[] = [],
 ): R[] {
-  return layers.routes ? routes : routes.filter((r) => r.active);
+  return routes.filter((r) => r.active || (layers.routes && !hiddenRoutes.includes(r.id)));
+}
+
+const HIDDEN_ROUTES_KEY = 'nautik.hiddenRoutes';
+
+/** Nombre maximal d'identifiants de routes masquées mémorisés. */
+export const MAX_HIDDEN_ROUTES = 1000;
+
+/** Routes masquées une à une ; valeurs absentes ou invalides : toutes affichées. */
+export function loadHiddenRoutes(
+  storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage,
+): string[] {
+  try {
+    const raw = storage?.getItem(HIDDEN_ROUTES_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const ids = parsed.filter(
+      (v): v is string => typeof v === 'string' && v.length > 0 && v.length <= 64,
+    );
+    return [...new Set(ids)].slice(0, MAX_HIDDEN_ROUTES);
+  } catch {
+    return [];
+  }
+}
+
+export function saveHiddenRoutes(
+  ids: string[],
+  storage: Pick<Storage, 'setItem'> | undefined = globalThis.localStorage,
+): void {
+  try {
+    storage?.setItem(HIDDEN_ROUTES_KEY, JSON.stringify(ids.slice(0, MAX_HIDDEN_ROUTES)));
+  } catch {
+    // Choix non mémorisé : sans conséquence.
+  }
 }
 
 const HIDDEN_CHARTS_KEY = 'nautik.hiddenCharts';

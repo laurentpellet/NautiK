@@ -123,7 +123,7 @@
     flex-direction: column;
     gap: 0.6rem;
     height: 100%;
-    padding: 0.5rem 0.6rem;
+    padding: 0.5rem 0.35rem 0.5rem 0.6rem;
     overflow-y: auto;
     border-left: 3px solid #d81b60;
   }

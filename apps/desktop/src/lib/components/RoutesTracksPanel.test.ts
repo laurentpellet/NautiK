@@ -81,6 +81,44 @@ function setup() {
 }
 
 describe('panneau Routes et traces', () => {
+  it('affiche ou masque traces et routes avec l’œil', async () => {
+    localStorage.removeItem('nautik.hiddenRoutes');
+    const { nav } = setup();
+    await nav.refresh();
+    render(RoutesTracksPanel, { nav });
+    // Route : œil ouvert, puis barré, mémorisé.
+    const routeEye = screen.getByRole('button', { name: 'Masquer Papeete - Moorea' });
+    expect(routeEye.getAttribute('aria-pressed')).toBe('true');
+    await fireEvent.click(routeEye);
+    expect(nav.hiddenRouteIds).toEqual(['r1']);
+    expect(JSON.parse(localStorage.getItem('nautik.hiddenRoutes') ?? '[]')).toEqual(['r1']);
+    const shown = screen.getByRole('button', { name: 'Afficher Papeete - Moorea' });
+    expect(shown.getAttribute('aria-pressed')).toBe('false');
+    await fireEvent.click(shown);
+    expect(nav.hiddenRouteIds).toEqual([]);
+
+    // Trace : masquée par défaut, l'œil l'affiche puis la masque.
+    await fireEvent.click(screen.getByRole('tab', { name: /Traces/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Afficher Tour de Moorea' }));
+    await vi.waitFor(() => expect(nav.displayedTracks.map((t) => t.id)).toEqual(['t1']));
+    await fireEvent.click(screen.getByRole('button', { name: 'Masquer Tour de Moorea' }));
+    expect(nav.displayedTracks).toEqual([]);
+    localStorage.removeItem('nautik.hiddenRoutes');
+  });
+
+  it('garde la route suivie affichée : œil désactivé', async () => {
+    localStorage.removeItem('nautik.hiddenRoutes');
+    const { nav } = setup();
+    await nav.refresh();
+    nav.routes = nav.routes.map((r) => ({ ...r, active: true }));
+    render(RoutesTracksPanel, { nav });
+    const eye = screen.getByRole('button', {
+      name: 'Masquer Papeete - Moorea',
+    }) as HTMLButtonElement;
+    expect(eye.disabled).toBe(true);
+    expect(eye.title).toBe('Route suivie : toujours affichée');
+  });
+
   it('passe des routes aux traces et garde l’onglet Routes pendant l’édition', async () => {
     const { nav } = setup();
     await nav.refresh();

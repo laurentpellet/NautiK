@@ -11,6 +11,8 @@ import {
   draftPointName,
   DEFAULT_ACTIVE_ROUTE_COLOR,
   activeRouteColorChanges,
+  trackColorChanges,
+  DEFAULT_TRACK_COLOR,
   overlayLayers,
   overlayThemeChanges,
   routesData,
@@ -135,6 +137,18 @@ describe('surimpressions', () => {
       OVERLAY_LABEL_LAYERS.map(([id]) => id).every((id) => symbols.some((l) => l.id === id)),
     ).toBe(true);
     expect(overlayLayers().some((l) => l.id === DRAFT_POINTS_LAYER)).toBe(true);
+  });
+
+  it('dessine toutes les traces, en cours comprise, dans la couleur choisie', () => {
+    const color = (layers: ReturnType<typeof overlayLayers>) => {
+      const layer = layers.find((l) => l.id === 'nautik-tracks-line');
+      return layer && 'paint' in layer
+        ? (layer.paint as Record<string, unknown>)['line-color']
+        : null;
+    };
+    expect(color(overlayLayers())).toBe(DEFAULT_TRACK_COLOR);
+    expect(color(overlayLayers('day', '#ffd600', '#1565c0'))).toBe('#1565c0');
+    expect(trackColorChanges('#1565c0')).toEqual([['nautik-tracks-line', 'line-color', '#1565c0']]);
   });
 
   it('dessine la route active dans la couleur choisie, avec un liseré', () => {

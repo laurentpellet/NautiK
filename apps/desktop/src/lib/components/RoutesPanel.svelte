@@ -3,6 +3,7 @@
   // intermédiaires, noms, déplacement), plan à la vitesse prévue
   // (longueur, durée, heures de passage, calculés par le moteur) et
   // cadrage de la carte sur la route.
+  import VisibilityToggle from './VisibilityToggle.svelte';
   import { formatBearing, formatDistance, formatDuration, formatUtcClock } from '../format';
   import { draftPointName } from '../map/overlays';
   import type { InsertMode, NavigationController } from '../navigation.svelte';
@@ -233,18 +234,28 @@
       <ul>
         {#each nav.routes as route (route.id)}
           <li class:active={route.active} class:selected={route.id === nav.selectedRouteId}>
-            <button
-              type="button"
-              class="title"
-              aria-expanded={route.id === nav.selectedRouteId}
-              title="Afficher le plan et cadrer la carte sur la route"
-              onclick={() => nav.selectRoute(route.id === nav.selectedRouteId ? null : route.id)}
-            >
-              <span class="name">{route.name}</span>
-              <span class="muted">
-                {formatDistance(route.totalDistanceM)} — {route.waypoints.length} WP
-              </span>
-            </button>
+            <div class="name-row">
+              <VisibilityToggle
+                visible={route.active || !nav.hiddenRouteIds.includes(route.id)}
+                name={route.name}
+                disabled={route.active}
+                title={route.active ? 'Route suivie : toujours affichée' : undefined}
+                ontoggle={() =>
+                  nav.setRouteVisible(route.id, nav.hiddenRouteIds.includes(route.id))}
+              />
+              <button
+                type="button"
+                class="title"
+                aria-expanded={route.id === nav.selectedRouteId}
+                title="Afficher le plan et cadrer la carte sur la route"
+                onclick={() => nav.selectRoute(route.id === nav.selectedRouteId ? null : route.id)}
+              >
+                <span class="name">{route.name}</span>
+                <span class="muted">
+                  {formatDistance(route.totalDistanceM)} — {route.waypoints.length} WP
+                </span>
+              </button>
+            </div>
             <div class="actions">
               {#if route.active}
                 <button type="button" onclick={() => nav.deactivate()}>Arrêter</button>
@@ -373,6 +384,17 @@
     margin: 0.25rem 0;
     padding: 0;
     list-style: none;
+  }
+
+  .name-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.3rem;
+  }
+
+  .name-row .title {
+    flex: 1;
+    min-width: 0;
   }
 
   li {

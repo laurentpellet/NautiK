@@ -49,6 +49,8 @@ const rawStatus = {
   finished: false,
   simulated: true,
   computedAt: '2026-11-12T10:00:30.123456789Z',
+  startedAt: '2026-11-12T09:30:00Z',
+  finishedAt: null,
 };
 
 describe('validation des données de routage', () => {
@@ -71,6 +73,13 @@ describe('validation des données de routage', () => {
     expect(status.etaTarget).toBe(Date.parse('2026-11-12T10:01:00Z'));
     expect(status.crossTrackM).toBeNull();
     expect(status.simulated).toBe(true);
+    expect(status.startedAt).toBe(Date.parse('2026-11-12T09:30:00Z'));
+    expect(status.finishedAt).toBeNull();
+    expect(
+      parseNavigationStatus({ ...rawStatus, finishedAt: '2026-11-12T11:00:00Z' }).finishedAt,
+    ).toBe(Date.parse('2026-11-12T11:00:00Z'));
+    expect(() => parseNavigationStatus({ ...rawStatus, startedAt: undefined })).toThrow();
+    expect(() => parseNavigationStatus({ ...rawStatus, finishedAt: 'hier' })).toThrow();
     expect(() => parseNavigationStatus({ ...rawStatus, distanceToTargetM: NaN })).toThrow();
     expect(() => parseNavigationStatus({ ...rawStatus, etaTarget: 'demain' })).toThrow(
       /horodatage/,

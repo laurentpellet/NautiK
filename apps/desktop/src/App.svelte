@@ -670,7 +670,7 @@
   const mobMarker = $derived(mob ? { position: mob.position, approximate: mob.approximate } : null);
 
   /** Routes de la carte : la route active reste affichée même calque masqué. */
-  const shownRoutes = $derived(visibleRoutes(nav.routes, layers));
+  const shownRoutes = $derived(visibleRoutes(nav.routes, layers, nav.hiddenRouteIds));
   let navEventError = $state<string | null>(null);
 
   /** Période de rafraîchissement de la trace en cours d'enregistrement. */
@@ -973,6 +973,7 @@
       }}
       ontoggle={(id) => updatePanel(id, { visible: !layout[id].visible })}
       recording={nav.recordingId !== null}
+      recordingInfo={nav.recordingId ? (nav.trackInfo[nav.recordingId] ?? null) : null}
       recordBusy={nav.busy}
       onrecord={() => void (nav.recordingId ? nav.stopRecording() : nav.startRecording())}
       onroutes={() => openSettings('routes')}
@@ -1066,6 +1067,7 @@
                   enc={leftEnc}
                   pois={shownPois}
                   activeRouteColor={routeStyle.activeColor}
+                  trackColor={routeStyle.trackColor}
                   anchor={alarms?.anchor ?? null}
                   {anchorAlerting}
                   {aids}
@@ -1110,6 +1112,7 @@
                     enc={rightEnc}
                     pois={shownPois}
                     activeRouteColor={routeStyle.activeColor}
+                    trackColor={routeStyle.trackColor}
                     anchor={alarms?.anchor ?? null}
                     {anchorAlerting}
                     {aids}
@@ -1533,7 +1536,7 @@
   }
 
   .stage.route-side {
-    --route-side: min(12.5rem, 45vw);
+    --route-side: min(11.25rem, 45vw);
   }
 
   .stage.route-side-collapsed {

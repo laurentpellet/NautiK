@@ -834,6 +834,17 @@ Critères (TEST_PLAN.md §7) :
   choisie parmi les cartes non affichées à gauche (MBTiles masquées,
   ENC ou CM93 décochées) ; première carte proposée par défaut ; même
   cartes qu'à gauche si rien n'est proposé ; choix mémorisé ; tests.
+- [x] Couleur des traces réglable (Paramètres → Général → Carte), rose
+  par défaut, trace en cours comprise ; tests.
+- [x] Bouton d'enregistrement : longueur et durée de la trace en cours
+  dans l'infobulle (moteur, lues dès le démarrage puis toutes les 5 s) ;
+  tests.
+- [x] Gestionnaire Routes et traces : œil ouvert/barré de visibilité par
+  trace et par route ; routes masquées mémorisées ; route suivie
+  toujours affichée ; tests.
+- [x] Barre de route : chronomètre CHRONO en tête (h:mm:ss depuis le
+  premier relevé suivi après l'activation, figé à l'arrivée ; moteur) ;
+  barre latérale un peu plus étroite ; tests.
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).

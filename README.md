@@ -104,7 +104,7 @@ vos cartes dans **Paramètres** : tout est expliqué dans le
 
 ## État du projet
 
-NautiK est en développement actif (version 0.2). Le calcul de
+NautiK est en développement actif (version 0.3). Le calcul de
 rapprochement AIS (CPA/TCPA) et l'interface web à distance sont prévus ;
 voir le [plan de développement](TASKS.md).
 

@@ -11,6 +11,7 @@ import {
   distanceParts,
   formatAge,
   formatDuration,
+  formatElapsed,
   formatLatitude,
   formatLongitude,
   formatLocalClock,
@@ -372,7 +373,22 @@ export function routeBarTiles(
   const zone = (time: number | null) => (time === null ? 'local' : localZoneLabel(time, timeZone));
   const togo = (time: number | null) => (time === null ? MISSING : formatDuration(time - now));
   const noSpeed = 'vitesse fond nulle ou inconnue';
+  // Chronomètre : temps depuis le départ (moteur), figé à l'arrivée. Une
+  // durée, pas une mesure de position : jamais estompé.
+  const chrono: Tile = {
+    id: 'chrono',
+    label: 'CHRONO',
+    value: formatElapsed((status.finishedAt ?? now) - status.startedAt),
+    unit: '',
+    stale: false,
+    missing: false,
+    detail:
+      status.finishedAt === null
+        ? 'Temps écoulé depuis le départ de la route'
+        : 'Route terminée : temps du départ à l’arrivée',
+  };
   return [
+    chrono,
     tile('dtw', 'DTW', distance(status.distanceToTargetM), dist, 'Distance au waypoint'),
     tile(
       'btw',

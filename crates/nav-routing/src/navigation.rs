@@ -62,6 +62,11 @@ pub struct NavigationStatus {
     pub simulated: bool,
     /// Horodatage du relevé utilisé (UTC).
     pub computed_at: DateTime<Utc>,
+    /// Départ : horodatage du premier relevé suivi après l'activation (UTC).
+    pub started_at: DateTime<Utc>,
+    /// Arrivée au dernier waypoint (UTC) ; `None` tant que la route n'est
+    /// pas terminée.
+    pub finished_at: Option<DateTime<Utc>>,
 }
 
 /// Suivi d'une route active.
@@ -72,6 +77,8 @@ pub struct ActiveNavigation {
     leg_origin: Option<GeoPosition>,
     arrival_radius_m: f64,
     finished: bool,
+    started_at: Option<DateTime<Utc>>,
+    finished_at: Option<DateTime<Utc>>,
 }
 
 impl ActiveNavigation {
@@ -90,6 +97,8 @@ impl ActiveNavigation {
             leg_origin: None,
             arrival_radius_m,
             finished: false,
+            started_at: None,
+            finished_at: None,
         })
     }
 
@@ -109,8 +118,10 @@ impl ActiveNavigation {
     pub fn update(&mut self, fix: &PositionFix) -> NavigationStatus {
         let position = fix.position;
         if self.leg_origin.is_none() {
-            // Le premier segment part de la position à l'activation.
+            // Le premier segment part de la position à l'activation ; le
+            // chronomètre démarre avec ce premier relevé.
             self.leg_origin = Some(position);
+            self.started_at = Some(fix.measured_at);
         }
         let mut reached = None;
         if !self.finished {
@@ -121,6 +132,7 @@ impl ActiveNavigation {
                     self.target_index += 1;
                 } else {
                     self.finished = true;
+                    self.finished_at = Some(fix.measured_at);
                 }
             }
         }
@@ -189,6 +201,8 @@ impl ActiveNavigation {
             finished: self.finished,
             simulated: fix.source.is_simulated(),
             computed_at: fix.measured_at,
+            started_at: self.started_at.unwrap_or(fix.measured_at),
+            finished_at: self.finished_at,
         }
     }
 }
@@ -309,6 +323,37 @@ mod tests {
         let again = n.update(&fix(0.2, 0.2, Some(3.0)));
         assert!(again.finished);
         assert!(again.reached_waypoint.is_none());
+    }
+
+    fn fix_at(lat: f64, lon: f64, at: DateTime<Utc>) -> PositionFix {
+        PositionFix {
+            measured_at: at,
+            received_at: at,
+            ..fix(lat, lon, Some(3.0))
+        }
+    }
+
+    #[test]
+    fn chronometer_runs_from_first_fix_and_stops_on_arrival() {
+        let t0 = DateTime::<Utc>::from_timestamp(1_800_000_000, 0).expect("t0");
+        let mut n = nav();
+        let first = n.update(&fix_at(0.0, 0.0, t0));
+        assert_eq!(first.started_at, t0, "départ au premier relevé suivi");
+        assert_eq!(first.finished_at, None);
+        let later = n.update(&fix_at(0.0, 0.05, t0 + Duration::minutes(10)));
+        assert_eq!(later.started_at, t0, "le départ ne bouge plus");
+        n.update(&fix_at(0.0, 0.1, t0 + Duration::minutes(20)));
+        n.update(&fix_at(0.0, 0.2, t0 + Duration::minutes(40)));
+        let end = n.update(&fix_at(0.1, 0.2, t0 + Duration::minutes(75)));
+        assert!(end.finished);
+        assert_eq!(end.finished_at, Some(t0 + Duration::minutes(75)));
+        let after = n.update(&fix_at(0.2, 0.2, t0 + Duration::minutes(90)));
+        assert_eq!(
+            after.finished_at,
+            Some(t0 + Duration::minutes(75)),
+            "arrivée figée"
+        );
+        assert_eq!(after.started_at, t0);
     }
 
     #[test]

@@ -9,6 +9,7 @@
   import type { InstrumentsSnapshot } from '../services/instruments';
   import { PANEL_LABELS, type PanelId, type PanelLayout } from '../panels';
   import type { MapTool } from '../mapTools.svelte';
+  import { formatDistance, formatDuration } from '../format';
 
   interface Props {
     snapshot: InstrumentsSnapshot | null;
@@ -42,6 +43,8 @@
     ontoggle: (id: PanelId) => void;
     /** Une trace est en cours d'enregistrement. */
     recording: boolean;
+    /** Longueur et durée de la trace en cours (moteur) ; `null` : pas encore lues. */
+    recordingInfo?: { lengthM: number; durationS: number | null } | null;
     /** Commande en cours (bouton désactivé). */
     recordBusy?: boolean;
     /** Démarre ou arrête l'enregistrement de la trace. */
@@ -80,6 +83,7 @@
     oncenter,
     ontoggle,
     recording,
+    recordingInfo = null,
     recordBusy = false,
     onrecord,
     onroutes,
@@ -92,6 +96,16 @@
     { id: 'sog', label: 'SOG' },
     { id: 'tws', label: 'VENT' },
   ];
+  /** Infobulle : longueur et durée de la trace en cours, calculées par le moteur. */
+  const recordTitle = $derived.by(() => {
+    if (!recording) return 'Commencer à enregistrer la trace du bateau';
+    const stop = "(cliquer pour l'arrêter)";
+    if (!recordingInfo) return `Enregistrement de la trace en cours ${stop}`;
+    const duration =
+      recordingInfo.durationS === null ? '—' : formatDuration(recordingInfo.durationS * 1000);
+    return `Trace en cours : ${formatDistance(recordingInfo.lengthM)}, durée ${duration} ${stop}`;
+  });
+
   const metrics = $derived.by(() => {
     // Vent réel : tuiles d'environnement (force).
     const all = [
@@ -241,9 +255,7 @@
       class="record"
       class:on={recording}
       aria-label={recording ? "Arrêter l'enregistrement de la trace" : 'Enregistrer la trace'}
-      title={recording
-        ? "Enregistrement de la trace en cours (cliquer pour l'arrêter)"
-        : 'Commencer à enregistrer la trace du bateau'}
+      title={recordTitle}
       disabled={recordBusy}
       onclick={onrecord}
     >

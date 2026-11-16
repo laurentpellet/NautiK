@@ -18,6 +18,7 @@ import type {
   WaypointEdit,
 } from './services/routing';
 import { formatUtcClock } from './format';
+import { loadHiddenRoutes, saveHiddenRoutes, toggleChart } from './layers';
 
 /** Trace affichée sur la carte. */
 export interface DisplayedTrack {
@@ -146,7 +147,16 @@ export class NavigationController {
       : (this.selectedRoute?.waypoints.map((w) => w.position) ?? []),
   );
 
+  /** Routes masquées une à une sur la carte (préférence locale). */
+  hiddenRouteIds = $state<string[]>(loadHiddenRoutes());
+
   constructor(private readonly api: RoutingApi) {}
+
+  /** Affiche ou masque une route sur la carte ; la route suivie reste affichée. */
+  setRouteVisible(id: string, visible: boolean): void {
+    this.hiddenRouteIds = toggleChart(this.hiddenRouteIds, id, visible);
+    saveHiddenRoutes(this.hiddenRouteIds);
+  }
 
   private async run<T>(action: () => Promise<T>): Promise<T | undefined> {
     this.busy = true;
@@ -497,6 +507,8 @@ export class NavigationController {
     const summary = await this.run(() => this.api.startRecording());
     if (summary) this.shownTracks = { ...this.shownTracks, [summary.id]: [] };
     await this.refresh();
+    // Longueur et durée lues tout de suite, puis à chaque rafraîchissement.
+    if (summary && this.recordingId === summary.id) await this.loadTrack(summary.id);
   }
 
   async stopRecording(): Promise<void> {

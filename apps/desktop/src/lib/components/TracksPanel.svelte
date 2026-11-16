@@ -1,6 +1,7 @@
 <script lang="ts">
   // Traces : enregistrement, affichage sur la carte (cadrée sur la trace),
   // longueur et durée (moteur), renommage, export et suppression.
+  import VisibilityToggle from './VisibilityToggle.svelte';
   import { formatDistance, formatDuration } from '../format';
   import type { NavigationController } from '../navigation.svelte';
 
@@ -71,14 +72,14 @@
               <button type="button" onclick={() => (renaming = null)}>Annuler</button>
             </form>
           {:else}
-            <label>
-              <input
-                type="checkbox"
-                checked={track.id in nav.shownTracks}
-                onchange={() => nav.toggleTrack(track.id)}
+            <div class="name-row">
+              <VisibilityToggle
+                visible={track.id in nav.shownTracks}
+                name={track.name}
+                ontoggle={() => nav.toggleTrack(track.id)}
               />
               <span class:rec={track.isRecording}>{track.name}</span>
-            </label>
+            </div>
           {/if}
           <div class="meta">
             <span class="muted">
@@ -142,6 +143,12 @@
     margin: 0.25rem 0;
     padding: 0;
     list-style: none;
+  }
+
+  .name-row {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
   }
 
   li {

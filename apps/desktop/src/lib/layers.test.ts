@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   visibleRoutes,
+  loadHiddenRoutes,
+  saveHiddenRoutes,
+  MAX_HIDDEN_ROUTES,
   DEFAULT_LAYERS,
   MAX_HIDDEN_CHARTS,
   hiddenChartNames,
@@ -123,6 +126,38 @@ describe('routes affichées', () => {
     expect(visibleRoutes(routes, { routes: false }).map((r) => r.id)).toEqual(['b']);
     expect(visibleRoutes([{ id: 'a', active: false }], { routes: false })).toEqual([]);
     expect(visibleRoutes([], { routes: false })).toEqual([]);
+  });
+
+  it('masque une route à la fois, jamais la route suivie', () => {
+    expect(visibleRoutes(routes, { routes: true }, ['a', 'b']).map((r) => r.id)).toEqual([
+      'b',
+      'c',
+    ]);
+    expect(visibleRoutes(routes, { routes: false }, ['b']).map((r) => r.id)).toEqual(['b']);
+  });
+
+  it('mémorise les routes masquées et ignore une valeur invalide', () => {
+    let saved = '';
+    saveHiddenRoutes(['a', 'c'], { setItem: (_k, v) => (saved = v) });
+    expect(loadHiddenRoutes({ getItem: () => saved })).toEqual(['a', 'c']);
+    expect(loadHiddenRoutes({ getItem: () => '["a","a",3,"","' + 'x'.repeat(65) + '"]' })).toEqual([
+      'a',
+    ]);
+    for (const bad of [null, '{oups', '42', '{"a":1}']) {
+      expect(loadHiddenRoutes({ getItem: () => bad })).toEqual([]);
+    }
+    const many = JSON.stringify(Array.from({ length: 2000 }, (_, i) => `r${i}`));
+    expect(loadHiddenRoutes({ getItem: () => many })).toHaveLength(MAX_HIDDEN_ROUTES);
+    const throwing = {
+      getItem: () => {
+        throw new Error('bloqué');
+      },
+      setItem: () => {
+        throw new Error('plein');
+      },
+    };
+    expect(loadHiddenRoutes(throwing)).toEqual([]);
+    expect(() => saveHiddenRoutes(['a'], throwing)).not.toThrow();
   });
 });
 

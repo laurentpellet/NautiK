@@ -8,6 +8,7 @@ import {
   formatDepth,
   formatDistance,
   formatDuration,
+  formatElapsed,
   formatEta,
   formatUtcClock,
   formatLatitude,
@@ -165,5 +166,19 @@ describe('heure locale', () => {
     expect(text).toContain(String(local.getDate()).padStart(2, '0'));
     // Le fuseau est indiqué.
     expect(text).toMatch(/(UTC|GMT|[A-Z]{3,})/);
+  });
+});
+
+describe('chronomètre', () => {
+  it('affiche h:mm:ss sans borne d’heures', () => {
+    expect(formatElapsed(0)).toBe('0:00:00');
+    expect(formatElapsed(247_900)).toBe('0:04:07');
+    expect(formatElapsed((27 * 3600 + 5) * 1000)).toBe('27:00:05');
+  });
+
+  it('ramène le négatif et le non-fini à zéro', () => {
+    expect(formatElapsed(-5000)).toBe('0:00:00');
+    expect(formatElapsed(Number.NaN)).toBe('0:00:00');
+    expect(formatElapsed(Number.POSITIVE_INFINITY)).toBe('0:00:00');
   });
 });

@@ -50,6 +50,8 @@
     DRAFT_SOURCE,
     ROUTES_SOURCE,
     activeRouteColorChanges,
+    trackColorChanges,
+    DEFAULT_TRACK_COLOR,
     TRACKS_SOURCE,
     draftData,
     emptyCollection,
@@ -138,6 +140,8 @@
     pois?: PoiFeatures;
     /** Couleur de la route active (`#rrggbb`). */
     activeRouteColor?: string;
+    /** Couleur des traces, en cours comprise (Paramètres → Général). */
+    trackColor?: string;
     /** Points de l'outil de mesure. */
     measure?: LatLon[];
     /** Longueurs formatées des segments de la mesure (moteur). */
@@ -186,6 +190,7 @@
     enc = emptyEncCollection(),
     pois = emptyPoiCollection(),
     activeRouteColor = DEFAULT_ACTIVE_ROUTE_COLOR,
+    trackColor = DEFAULT_TRACK_COLOR,
     measure = [],
     measureLegs = null,
     oncontextmenu,
@@ -328,6 +333,7 @@
       const overlays = overlayLayers(
         untrack(() => theme),
         untrack(() => activeRouteColor),
+        untrack(() => trackColor),
       );
       for (const layer of overlays) {
         m.addLayer(layer);
@@ -534,6 +540,13 @@
   // Couleur de la route active, changée dans les Paramètres.
   $effect(() => {
     const changes = activeRouteColorChanges(activeRouteColor);
+    if (!map || !loaded) return;
+    for (const [layer, property, value] of changes) map.setPaintProperty(layer, property, value);
+  });
+
+  // Couleur des traces, changée dans les Paramètres.
+  $effect(() => {
+    const changes = trackColorChanges(trackColor);
     if (!map || !loaded) return;
     for (const [layer, property, value] of changes) map.setPaintProperty(layer, property, value);
   });
