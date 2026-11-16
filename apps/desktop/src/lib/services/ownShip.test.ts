@@ -21,6 +21,7 @@ const full = {
     upwind: true,
     windAngleRad: 0.785,
   },
+  drift: { cogRad: 0.1, headingRad: 6.2, sogMps: 3, angleRad: 0.183 },
 };
 
 describe('parseOwnShip', () => {
@@ -30,6 +31,7 @@ describe('parseOwnShip', () => {
     expect(o.vectorEnd).toEqual(p(-17.48, -149.6));
     expect(o.laylines?.upwind).toBe(true);
     expect(o.vmgWindMps).toBe(-2.1);
+    expect(o.drift).toEqual({ cogRad: 0.1, headingRad: 6.2, sogMps: 3, angleRad: 0.183 });
   });
 
   it('accepte les valeurs absentes (données obsolètes)', () => {
@@ -48,6 +50,8 @@ describe('parseOwnShip', () => {
     });
     expect(o.position).toBeNull();
     expect(o.laylines).toBeNull();
+    // Champ absent (moteur plus ancien) : pas de dérive.
+    expect(o.drift).toBeNull();
   });
 
   it('rejette les données malformées', () => {
@@ -56,6 +60,9 @@ describe('parseOwnShip', () => {
     expect(() => parseOwnShip({ ...full, vectorEnd: p(95, 0) })).toThrow();
     expect(() => parseOwnShip({ ...full, vmgWindMps: 'x' })).toThrow();
     expect(() => parseOwnShip({ ...full, laylines: { ...full.laylines, upwind: 1 } })).toThrow();
+    expect(() => parseOwnShip({ ...full, drift: { ...full.drift, sogMps: 'x' } })).toThrow();
+    expect(() => parseOwnShip({ ...full, drift: { cogRad: 0 } })).toThrow();
+    expect(() => parseOwnShip({ ...full, drift: 3 })).toThrow();
   });
 });
 

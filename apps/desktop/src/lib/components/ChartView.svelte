@@ -72,7 +72,7 @@
   } from '../map/poi';
   import { POI_ATTRIBUTION } from '../services/poi';
   import { MEASURE_SOURCE, measureData, measureLayers, measureThemeChanges } from '../map/measure';
-  import { AIDS_SOURCE, aidsLayers, type aidsData } from '../map/aids';
+  import { AIDS_SOURCE, aidsIcons, aidsLayers, type aidsData } from '../map/aids';
   import { MARKS_SOURCE, marksLayers, marksThemeChanges, type MarkFeatures } from '../map/marks';
   import { REPLAY_SOURCE, replayLayers, type ReplayFeatures } from '../map/replay';
   import {
@@ -355,6 +355,9 @@
       }
       // Aides (vecteurs, laylines, MOB, VRM/EBL) sous les cibles AIS.
       m.addSource(AIDS_SOURCE, { type: 'geojson', data: emptyCollection() });
+      for (const { id, image } of aidsIcons()) {
+        m.addImage(id, image, { sdf: true });
+      }
       for (const layer of aidsLayers()) {
         m.addLayer(layer);
       }

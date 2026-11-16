@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Bouton Homme à la mer (en-tête, à droite de l'état des données) :
+  // Homme à la mer (en-tête, à droite de l'état des données) : icône de la
+  // barre, sans cadre, mise en valeur au survol ;
   // bouée rouge, clignotante tant qu'un MOB est en cours.
   interface Props {
     /** Homme à la mer en cours. */
@@ -35,15 +36,17 @@
 </button>
 
 <style>
+  /* Icône de la barre (pas un bouton encadré) : fond seulement au survol. */
   .mob {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0.1rem 0.25rem;
-    border: 2px solid #e53935;
-    border-radius: 0.35rem;
-    background: #fff;
+    padding: 0.15rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: none;
     cursor: pointer;
+    transition: background-color 0.15s;
   }
 
   .buoy {
@@ -85,7 +88,16 @@
 
   .mob:hover,
   .mob:focus-visible {
-    background: #ffebee;
+    background: rgb(229 57 53 / 22%);
+    outline: none;
+  }
+
+  .mob:hover .buoy {
+    transform: scale(1.08);
+  }
+
+  .buoy {
+    transition: transform 0.15s;
   }
 
   .mob.on {

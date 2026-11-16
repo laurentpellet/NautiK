@@ -1147,6 +1147,7 @@ describe('App', () => {
       'Cibles',
       'Îles',
       'Vecteur',
+      'Dérive',
       'Laylines',
     ]);
     expect(document.querySelector('[data-testid="layers-menu"] hr')).toBeTruthy();
@@ -1216,7 +1217,7 @@ describe('App', () => {
       await screen.findByTestId('chart-view-stub');
       await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
       // Pas de choix de carte MBTiles ni d'ENC (aucune cellule) : les objets.
-      expect(screen.getAllByRole('checkbox')).toHaveLength(7);
+      expect(screen.getAllByRole('checkbox')).toHaveLength(8);
       expect(screen.getAllByRole('checkbox')[0]?.closest('label')?.textContent).toContain('Routes');
       // Carte seule toujours affichée, même masquée auparavant.
       expect(screen.getByTestId('hidden-charts-stub').textContent).toBe('');

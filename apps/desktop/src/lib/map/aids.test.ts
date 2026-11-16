@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { OwnShip } from '../services/ownShip';
-import { AIDS_SOURCE, EBL_LENGTH_M, aidsData, aidsLayers } from './aids';
+import {
+  AIDS_SOURCE,
+  DRIFT_TICK_ICON,
+  EBL_LENGTH_M,
+  aidsData,
+  aidsIcons,
+  aidsLayers,
+} from './aids';
 
 const p = (latitudeDeg: number, longitudeDeg: number) => ({ latitudeDeg, longitudeDeg });
 
@@ -22,7 +29,11 @@ const own: OwnShip = {
     upwind: true,
     windAngleRad: 0.78,
   },
+  drift: null,
 };
+
+/** Mètres par degré de latitude (sphère de l'outil de tracé). */
+const M_PER_DEG = 111_195;
 
 const kinds = (c: ReturnType<typeof aidsData>) => c.features.map((f) => f.properties.kind);
 
@@ -78,10 +89,80 @@ describe('aidsData', () => {
   });
 });
 
+describe('lignes de dérive', () => {
+  const base = {
+    vectors: false,
+    laylines: false,
+    mob: null,
+    rangeBearing: null,
+  };
+  // Cap 0° (nord), route fond 90° (est) : 3 m/s, soit 180 m par minute.
+  const drifting: OwnShip = {
+    ...own,
+    position: p(0, 0),
+    laylines: null,
+    drift: { cogRad: Math.PI / 2, headingRad: 0, sogMps: 3, angleRad: Math.PI / 2 },
+  };
+
+  it('trace la route fond et la ligne de foi graduées chaque minute', () => {
+    const c = aidsData({ ...base, own: drifting, driftMinutes: 5 });
+    expect(kinds(c).filter((k) => k !== 'driftTick')).toEqual(['driftHeading', 'driftCog']);
+    const ticks = c.features.filter((f) => f.properties.kind === 'driftTick');
+    expect(ticks).toHaveLength(10);
+    const heading = ticks.filter((t) => t.properties.line === 'heading');
+    expect(heading.map((t) => t.properties.minute)).toEqual([1, 2, 3, 4, 5]);
+    expect(heading.map((t) => t.properties.last)).toEqual([false, false, false, false, true]);
+    expect(heading[0]?.properties.bearing).toBe(0);
+    // Graduation à 1 min sur la ligne de foi : 180 m au nord.
+    const first = heading[0]?.geometry.coordinates as number[];
+    expect((first[1] ?? 0) * M_PER_DEG).toBeCloseTo(180, 0);
+    // Bout de la route fond : 5 min, soit 900 m à l'est.
+    const cog = c.features.find((f) => f.properties.kind === 'driftCog');
+    const end = (cog?.geometry.coordinates as number[][])[1] ?? [];
+    expect((end[0] ?? 0) * M_PER_DEG).toBeCloseTo(900, 0);
+    const cogTick = ticks.find((t) => t.properties.line === 'cog');
+    expect(cogTick?.properties.bearing).toBeCloseTo(90);
+  });
+
+  it('suit la durée choisie et se masque', () => {
+    const one = aidsData({ ...base, own: drifting, driftMinutes: 1 });
+    expect(one.features.filter((f) => f.properties.kind === 'driftTick')).toHaveLength(2);
+    expect(aidsData({ ...base, own: drifting, driftMinutes: null }).features).toEqual([]);
+    expect(aidsData({ ...base, own: drifting }).features).toEqual([]);
+    expect(aidsData({ ...base, own: drifting, driftMinutes: 0 }).features).toEqual([]);
+  });
+
+  it('ne trace rien sans dérive du moteur ni position fraîche', () => {
+    expect(
+      aidsData({ ...base, own: { ...drifting, drift: null }, driftMinutes: 5 }).features,
+    ).toEqual([]);
+    expect(
+      aidsData({ ...base, own: { ...drifting, position: null }, driftMinutes: 5 }).features,
+    ).toEqual([]);
+  });
+
+  it('déroule les lignes à l’antiméridien', () => {
+    const c = aidsData({
+      ...base,
+      own: { ...drifting, position: p(0, 179.999) },
+      driftMinutes: 5,
+    });
+    const cog = c.features.find((f) => f.properties.kind === 'driftCog');
+    const end = (cog?.geometry.coordinates as number[][])[1] ?? [];
+    expect(end[0]).toBeGreaterThan(180);
+  });
+
+  it('fournit l’icône de graduation', () => {
+    const [tick] = aidsIcons();
+    expect(tick?.id).toBe(DRIFT_TICK_ICON);
+    expect(tick?.image.data.length).toBe((tick?.image.width ?? 0) * (tick?.image.height ?? 0) * 4);
+  });
+});
+
 describe('aidsLayers', () => {
   it('utilise toutes la source des aides', () => {
     const layers = aidsLayers();
-    expect(layers.length).toBe(6);
+    expect(layers.length).toBe(9);
     expect(layers.every((l) => 'source' in l && l.source === AIDS_SOURCE)).toBe(true);
   });
 });

@@ -824,6 +824,12 @@ Critères (TEST_PLAN.md §7) :
 - [x] Journal de bord : événements d'alarme intercalés (lecture seule),
   dates en heure locale avec fuseau, comme l'historique des alarmes ;
   tests.
+- [x] Lignes de dérive : calque « Dérive (COG et ligne de foi) »,
+  masqué par défaut ; route fond et ligne de foi depuis le bateau,
+  graduées chaque minute sur une projection réglable (Paramètres →
+  Instruments, 1 à 30 min, 5 par défaut) ; angle et validité (cap et
+  COG frais, bateau en mouvement) calculés par le moteur ; MOB de
+  l'en-tête redevenu une icône sans cadre, surlignée au survol ; tests.
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).

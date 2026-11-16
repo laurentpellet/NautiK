@@ -42,7 +42,9 @@ describe('calques', () => {
       marks: true,
       vectors: true,
       laylines: true,
+      drift: false,
     });
+    expect(loadLayers(store('{"drift":true}')).drift).toBe(true);
     expect(loadLayers(store('{"enc":false}')).enc).toBe(false);
     expect(loadLayers(store('{"poi":false}')).poi).toBe(false);
     expect(loadLayers(store('{"cm93":false}')).cm93).toBe(false);
@@ -61,6 +63,7 @@ describe('calques', () => {
       marks: true,
       vectors: false,
       laylines: true,
+      drift: false,
     };
     saveLayers(layers, { setItem: (_k, v) => (saved = v) });
     expect(JSON.parse(saved)).toEqual(layers);

@@ -466,6 +466,18 @@ Choisir un résultat cadre la carte dessus.
 
 - **Vecteur et ligne de cap** (calque) : la route fond prévue à 6 min et
   le cap du bateau, tracés à partir de données récentes seulement.
+- **Dérive (COG et ligne de foi)** (calque, masqué par défaut) : deux
+  lignes partent de l'avant du bateau, la **route fond** (COG, en rose,
+  la direction réelle du bateau) et la **ligne de foi** (cap vrai, en
+  vert, là où pointe l'étrave). Leur longueur est le chemin parcouru à
+  la vitesse fond pendant la durée de projection, avec une graduation
+  par minute (5 minutes par défaut : graduations à 1, 2, 3, 4 et
+  5 minutes, la dernière plus grande). La durée se règle de 1 à
+  30 minutes dans **Paramètres → Instruments → Lignes de dérive**.
+  L'angle entre les deux lignes montre quand et de combien corriger le
+  cap face à un courant fort : plus il est grand, plus la dérive est
+  importante. Les lignes n'apparaissent qu'avec un cap et une route fond
+  récents, bateau en mouvement ; sinon rien n'est tracé.
 - **Laylines** : avec le vent réel, le
   calque **Laylines** trace les laylines du waypoint visé (45° au près,
   150° au portant). Ce sont des repères géométriques : ils ne tiennent

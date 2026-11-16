@@ -92,6 +92,7 @@
   import NavigationPanel from './lib/components/NavigationPanel.svelte';
   import RoutesTracksPanel from './lib/components/RoutesTracksPanel.svelte';
   import { followBoat } from './lib/followBoat.svelte';
+  import { driftProjection } from './lib/drift.svelte';
   import { chartNames, chartSort, cm93Name, withChartNames } from './lib/chartNames.svelte';
   import RouteBar from './lib/components/RouteBar.svelte';
   import SourcePanel from './lib/components/SourcePanel.svelte';
@@ -633,6 +634,7 @@
       laylines: layers.laylines,
       mob: mob?.position ?? null,
       rangeBearing: tools.tool === 'rangeBearing' ? tools.rangeBearing : null,
+      driftMinutes: layers.drift ? driftProjection.minutes : null,
     }),
   );
   const mobMarker = $derived(mob ? { position: mob.position, approximate: mob.approximate } : null);

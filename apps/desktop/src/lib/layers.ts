@@ -16,6 +16,8 @@ export interface MapLayers {
   vectors: boolean;
   /** Laylines du waypoint actif. */
   laylines: boolean;
+  /** Dérive : route fond et ligne de foi graduées à l'avant du bateau. */
+  drift: boolean;
 }
 
 export const DEFAULT_LAYERS: MapLayers = {
@@ -28,6 +30,7 @@ export const DEFAULT_LAYERS: MapLayers = {
   marks: true,
   vectors: true,
   laylines: true,
+  drift: false,
 };
 
 export const LAYER_LABELS: Record<keyof MapLayers, string> = {
@@ -40,6 +43,7 @@ export const LAYER_LABELS: Record<keyof MapLayers, string> = {
   marks: 'Marques',
   vectors: 'Vecteur et ligne de cap',
   laylines: 'Laylines',
+  drift: 'Dérive (COG et ligne de foi)',
 };
 
 /** Cartes vectorielles d'un volet : ENC officielles et base CM93. */
@@ -56,6 +60,7 @@ export const OBJECT_KEYS = [
   'ais',
   'poi',
   'vectors',
+  'drift',
   'laylines',
 ] as const;
 
@@ -112,6 +117,7 @@ export function loadLayers(
       marks: flag('marks'),
       vectors: flag('vectors'),
       laylines: flag('laylines'),
+      drift: flag('drift'),
     };
   } catch {
     return { ...DEFAULT_LAYERS };
@@ -139,9 +145,13 @@ export function hiddenLayers(
   cm93Name: string | null = null,
   encAvailable = true,
 ): string[] {
-  return (Object.keys(LAYER_LABELS) as (keyof MapLayers)[])
-    .filter((k) => !layers[k] && (k !== 'cm93' || cm93Available) && (k !== 'enc' || encAvailable))
-    .map((k) => layerLabel(k, cm93Name));
+  return (
+    (Object.keys(LAYER_LABELS) as (keyof MapLayers)[])
+      // Dérive : aide facultative, masquée par défaut, jamais rappelée.
+      .filter((k) => k !== 'drift')
+      .filter((k) => !layers[k] && (k !== 'cm93' || cm93Available) && (k !== 'enc' || encAvailable))
+      .map((k) => layerLabel(k, cm93Name))
+  );
 }
 
 /**

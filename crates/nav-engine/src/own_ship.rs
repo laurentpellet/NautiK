@@ -7,7 +7,7 @@
 use chrono::{DateTime, Utc};
 use nav_core::{GeoPosition, InstrumentsSnapshot, Quantity};
 use nav_routing::sailing::{
-    self, Laylines, DEFAULT_GYBE_ANGLE_RAD, DEFAULT_TACK_ANGLE_RAD, DEFAULT_VECTOR_HORIZON_S,
+    self, Drift, Laylines, DEFAULT_GYBE_ANGLE_RAD, DEFAULT_TACK_ANGLE_RAD, DEFAULT_VECTOR_HORIZON_S,
 };
 use serde::Serialize;
 
@@ -41,6 +41,8 @@ pub struct OwnShipSnapshot {
     pub other_tack_cog_rad: Option<f64>,
     /// Laylines du waypoint actif.
     pub laylines: Option<Laylines>,
+    /// Dérive : route fond et ligne de foi, tracées à l'avant du bateau.
+    pub drift: Option<Drift>,
 }
 
 fn fresh(snapshot: &InstrumentsSnapshot, quantity: Quantity) -> Option<f64> {
@@ -71,6 +73,7 @@ pub fn compute(
         vmg_waypoint_mps: None,
         other_tack_cog_rad: None,
         laylines: None,
+        drift: None,
     };
     let Some(status) = snapshot.position.as_ref().filter(|p| !p.stale) else {
         return out;
@@ -82,6 +85,7 @@ pub fn compute(
     out.position = Some(here);
     out.vector_end = sailing::course_vector(here, fix.cog_rad, fix.sog_mps, horizon);
     out.heading_end = sailing::heading_line(here, heading, fix.sog_mps, horizon);
+    out.drift = sailing::drift(fix.cog_rad, heading, fix.sog_mps);
     out.true_wind_direction_rad = twd;
     out.vmg_wind_mps = sailing::vmg(fix.cog_rad, fix.sog_mps, twd);
     out.other_tack_cog_rad = sailing::other_tack_course(fix.cog_rad, twd);
@@ -161,6 +165,8 @@ mod tests {
         assert!(o.simulated);
         assert!(o.vector_end.is_some());
         assert!(o.heading_end.is_some());
+        let drift = o.drift.expect("dérive");
+        assert!((drift.angle_rad - 5f64.to_radians()).abs() < 1e-9);
         let vmg = o.vmg_wind_mps.expect("vmg vent");
         assert!((vmg - 5.0 * 45f64.to_radians().cos()).abs() < 1e-9);
         assert!(o.vmg_waypoint_mps.is_some());
@@ -181,6 +187,7 @@ mod tests {
         let o = compute(&s, Some(p(0.1, 0.0)), false);
         assert!(o.vector_end.is_some(), "COG/SOG du relevé frais");
         assert_eq!(o.heading_end, None);
+        assert_eq!(o.drift, None, "sans cap frais");
         assert_eq!(o.vmg_wind_mps, None);
         assert_eq!(o.laylines, None);
         assert!(o.vmg_waypoint_mps.is_some());
@@ -192,6 +199,7 @@ mod tests {
         let o = compute(&s, Some(p(0.1, 0.0)), false);
         assert_eq!(o.position, None);
         assert_eq!(o.vector_end, None);
+        assert_eq!(o.drift, None);
         assert_eq!(o.vmg_wind_mps, None);
         assert_eq!(o.laylines, None);
         let empty = InstrumentsSnapshot {

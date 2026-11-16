@@ -26,6 +26,15 @@ export interface Laylines {
   windAngleRad: number;
 }
 
+/** Dérive : route fond et ligne de foi (moteur), données fraîches seulement. */
+export interface Drift {
+  cogRad: number;
+  headingRad: number;
+  sogMps: number;
+  /** `COG − cap` (rad, ]−π, π]) : positif quand le bateau est porté sur tribord. */
+  angleRad: number;
+}
+
 export interface OwnShip {
   computedAt: number;
   simulated: boolean;
@@ -39,6 +48,7 @@ export interface OwnShip {
   vmgWaypointMps: number | null;
   otherTackCogRad: number | null;
   laylines: Laylines | null;
+  drift: Drift | null;
 }
 
 const num = (what: string) => (v: unknown) => expectNumber(v, what);
@@ -52,6 +62,16 @@ function parseLaylines(value: unknown): Laylines {
     portEnd: expectPosition(r.portEnd, 'portEnd'),
     upwind: expectBoolean(r.upwind, 'upwind'),
     windAngleRad: expectNumber(r.windAngleRad, 'windAngleRad'),
+  };
+}
+
+function parseDrift(value: unknown): Drift {
+  const r = expectRecord(value, 'dérive');
+  return {
+    cogRad: expectNumber(r.cogRad, 'cogRad'),
+    headingRad: expectNumber(r.headingRad, 'headingRad'),
+    sogMps: expectNumber(r.sogMps, 'sogMps'),
+    angleRad: expectNumber(r.angleRad, 'angleRad'),
   };
 }
 
@@ -69,6 +89,7 @@ export function parseOwnShip(value: unknown): OwnShip {
     vmgWaypointMps: optional(r.vmgWaypointMps, num('vmgWaypointMps')),
     otherTackCogRad: optional(r.otherTackCogRad, num('otherTackCogRad')),
     laylines: optional(r.laylines, parseLaylines),
+    drift: optional(r.drift, parseDrift),
   };
 }
 

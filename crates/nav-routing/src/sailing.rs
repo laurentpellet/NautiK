@@ -68,6 +68,43 @@ pub fn heading_line(
     nav_geodesy::destination(position, heading, length)
 }
 
+/// Dérive du bateau : route fond (COG) et ligne de foi (cap vrai), tracées
+/// à l'avant du bateau sur la durée de projection choisie. L'angle entre
+/// les deux montre l'effet du courant (et du vent).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Drift {
+    /// Route fond vraie (rad).
+    pub cog_rad: f64,
+    /// Cap vrai, direction de l'étrave (rad).
+    pub heading_rad: f64,
+    /// Vitesse fond (m/s), qui donne la longueur projetée des deux lignes.
+    pub sog_mps: f64,
+    /// Angle de dérive `COG − cap` (rad, dans ]−π, π]) : positif quand le
+    /// bateau est porté sur tribord.
+    pub angle_rad: f64,
+}
+
+/// Dérive du bateau. `None` sans route fond, sans cap, ou sous
+/// [`MIN_VECTOR_SPEED_MPS`] (la route fond n'a alors pas de sens).
+#[must_use]
+pub fn drift(
+    cog_rad: Option<f64>,
+    heading_rad: Option<f64>,
+    sog_mps: Option<f64>,
+) -> Option<Drift> {
+    let (cog, heading, sog) = (cog_rad?, heading_rad?, sog_mps?);
+    if !cog.is_finite() || !heading.is_finite() || !sog.is_finite() || sog < MIN_VECTOR_SPEED_MPS {
+        return None;
+    }
+    Some(Drift {
+        cog_rad: normalize_angle_rad(cog),
+        heading_rad: normalize_angle_rad(heading),
+        sog_mps: sog,
+        angle_rad: angle_diff(cog, heading),
+    })
+}
+
 /// Vitesse utile (VMG) dans la direction `direction_rad` : projection de
 /// la vitesse fond sur cette direction (négative si l'on s'en éloigne).
 #[must_use]
@@ -164,6 +201,33 @@ mod tests {
             .initial_bearing_rad
             .expect("relèvement")
             .to_degrees()
+    }
+
+    #[test]
+    fn drift_gives_signed_angle() {
+        let d = drift(Some(deg(5.0)), Some(deg(350.0)), Some(3.0)).expect("dérive");
+        assert!((d.angle_rad - deg(15.0)).abs() < 1e-9, "portée sur tribord");
+        assert!((d.cog_rad - deg(5.0)).abs() < 1e-9);
+        assert!((d.heading_rad - deg(350.0)).abs() < 1e-9);
+        assert!((d.sog_mps - 3.0).abs() < 1e-12);
+        let port = drift(Some(deg(80.0)), Some(deg(90.0)), Some(3.0)).expect("dérive");
+        assert!(
+            (port.angle_rad + deg(10.0)).abs() < 1e-9,
+            "portée sur bâbord"
+        );
+        let wrapped = drift(Some(deg(-10.0)), Some(deg(370.0)), Some(3.0)).expect("dérive");
+        assert!((wrapped.cog_rad - deg(350.0)).abs() < 1e-9);
+        assert!((wrapped.angle_rad + deg(20.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn drift_needs_cog_heading_and_speed() {
+        assert_eq!(drift(None, Some(0.0), Some(3.0)), None);
+        assert_eq!(drift(Some(0.0), None, Some(3.0)), None);
+        assert_eq!(drift(Some(0.0), Some(0.0), None), None);
+        assert_eq!(drift(Some(0.0), Some(0.0), Some(0.05)), None, "à l'arrêt");
+        assert_eq!(drift(Some(f64::NAN), Some(0.0), Some(3.0)), None);
+        assert_eq!(drift(Some(0.0), Some(0.0), Some(f64::INFINITY)), None);
     }
 
     #[test]

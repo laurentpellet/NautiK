@@ -47,6 +47,12 @@
   import { routeStyle, setActiveRouteColor } from '../routeColor.svelte';
   import { followBoat, setFollowBoat } from '../followBoat.svelte';
   import {
+    MAX_DRIFT_MINUTES,
+    MIN_DRIFT_MINUTES,
+    driftProjection,
+    setDriftMinutes,
+  } from '../drift.svelte';
+  import {
     moveNavField,
     navBar,
     navFieldLabel,
@@ -356,6 +362,34 @@
           <button type="button" onclick={() => resetNavFields()}
             >Tout afficher (ordre par défaut)</button
           >
+        </section>
+
+        <section class="card" aria-labelledby="drift-title">
+          <h2 id="drift-title">Lignes de dérive</h2>
+          <label class="inline">
+            Projection
+            <input
+              type="number"
+              min={MIN_DRIFT_MINUTES}
+              max={MAX_DRIFT_MINUTES}
+              step="1"
+              value={driftProjection.minutes}
+              aria-label="Projection des lignes de dérive (minutes)"
+              onchange={(e) => {
+                if (!setDriftMinutes(e.currentTarget.value)) {
+                  e.currentTarget.value = String(driftProjection.minutes);
+                }
+              }}
+            />
+            min
+          </label>
+          <p class="note">
+            Route fond (COG, en rose) et ligne de foi (direction de l'étrave, en vert) partent du
+            bateau, longues du chemin parcouru à la vitesse fond pendant cette durée, avec une
+            graduation par minute. Plus l'angle entre les deux lignes est grand, plus le courant
+            vous dévie. À afficher depuis le menu Calques, « Dérive (COG et ligne de foi) » ; il
+            faut un cap et une route fond frais, bateau en mouvement.
+          </p>
         </section>
       </div>
 
