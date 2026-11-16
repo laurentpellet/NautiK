@@ -830,6 +830,10 @@ Critères (TEST_PLAN.md §7) :
   Instruments, 1 à 30 min, 5 par défaut) ; angle et validité (cap et
   COG frais, bateau en mouvement) calculés par le moteur ; MOB de
   l'en-tête redevenu une icône sans cadre, surlignée au survol ; tests.
+- [x] Vue double : volet de droite à carte unique (boutons radio),
+  choisie parmi les cartes non affichées à gauche (MBTiles masquées,
+  ENC ou CM93 décochées) ; première carte proposée par défaut ; même
+  cartes qu'à gauche si rien n'est proposé ; choix mémorisé ; tests.
 - [ ] CPA/TCPA.
 - [ ] NMEA 2000 SocketCAN.
 - [x] Météo GRIB : vent à 10 m (voir plus haut ; autres champs reportés).

@@ -41,7 +41,10 @@
   } from './lib/panels';
   import Dropdown from './lib/components/Dropdown.svelte';
   import {
+    effectiveRightChart,
     followedCamera,
+    rightChartOptions,
+    rightPaneCharts,
     loadSplit,
     saveSplit,
     type MapCamera,
@@ -62,6 +65,7 @@
     loadLayers,
     saveHiddenCharts,
     saveLayers,
+    vectorKeys,
     vectorLabel,
     visibleRoutes,
     type MapLayers,
@@ -93,7 +97,13 @@
   import RoutesTracksPanel from './lib/components/RoutesTracksPanel.svelte';
   import { followBoat } from './lib/followBoat.svelte';
   import { driftProjection } from './lib/drift.svelte';
-  import { chartNames, chartSort, cm93Name, withChartNames } from './lib/chartNames.svelte';
+  import {
+    chartNames,
+    chartSort,
+    cm93Name,
+    sortCharts,
+    withChartNames,
+  } from './lib/chartNames.svelte';
   import RouteBar from './lib/components/RouteBar.svelte';
   import SourcePanel from './lib/components/SourcePanel.svelte';
   import { describeConnection, formatAge, formatDistance, isEngineSilent } from './lib/format';
@@ -212,8 +222,6 @@
   /** Dernière vue de chaque volet, et volet manipulé en dernier. */
   let cameras = $state.raw<Record<Pane, MapCamera | null>>({ left: null, right: null });
   let leader = $state<Pane>('left');
-  // Une carte seule est toujours affichée, dans les deux volets.
-  const rightHiddenCharts = $derived((catalog?.charts.length ?? 0) > 1 ? split.hiddenCharts : []);
   const rightChartsLabel = $derived.by(() => {
     const shown = namedCharts.filter((c) => !rightHiddenCharts.includes(c.id));
     const names = [...shown].reverse().map((c) => c.name);
@@ -313,7 +321,29 @@
   const encFolderSet = $derived(Boolean(encMap.index?.dir));
   /** Cartes vectorielles de chaque volet (ENC officielles, CM93). */
   const leftVector = $derived<VectorCharts>({ enc: layers.enc, cm93: layers.cm93 });
-  const rightVector = $derived<VectorCharts>(split.vector);
+  /**
+   * Volet de droite : une seule carte, parmi celles qui ne sont pas déjà
+   * affichées à gauche ; rien à proposer : même cartes qu'à gauche.
+   */
+  const rightOptions = $derived(
+    rightChartOptions(
+      sortCharts(namedCharts, chartSort.value).map((c) => c.id),
+      shownHiddenCharts,
+      vectorKeys(cm93Available, encAvailable),
+      leftVector,
+    ),
+  );
+  const rightChoice = $derived(effectiveRightChart(split.chart, rightOptions));
+  const rightCharts = $derived(
+    rightChoice === null
+      ? { hiddenCharts: shownHiddenCharts, vector: leftVector }
+      : rightPaneCharts(
+          rightChoice,
+          namedCharts.map((c) => c.id),
+        ),
+  );
+  const rightHiddenCharts = $derived(rightCharts.hiddenCharts);
+  const rightVector = $derived<VectorCharts>(rightCharts.vector);
   /** Cartes vectorielles voulues dans au moins un volet affiché. */
   const wantedVector = $derived<VectorCharts>({
     enc: leftVector.enc || (split.enabled && rightVector.enc),
@@ -1098,9 +1128,7 @@
                         label="Cartes du volet droit"
                         title="Choisir les cartes du volet droit"
                         variant="chip"
-                        marked={rightHiddenCharts.length > 0 ||
-                          (encAvailable && !rightVector.enc) ||
-                          (cm93Available && !rightVector.cm93)}
+                        marked={rightChoice === null}
                         testid="right-charts-menu"
                       >
                         {#snippet button()}
@@ -1110,10 +1138,11 @@
                           {layers}
                           onchange={setLayers}
                           charts={namedCharts}
-                          hiddenCharts={rightHiddenCharts}
-                          onchartschange={(hidden) => setSplit({ ...split, hiddenCharts: hidden })}
-                          vector={rightVector}
-                          onvectorchange={(vector) => setSplit({ ...split, vector })}
+                          single={{
+                            value: rightChoice,
+                            options: rightOptions,
+                            onselect: (chart) => setSplit({ ...split, chart }),
+                          }}
                           cm93={cm93Available}
                           cm93Name={cm93Name.name}
                           sort={chartSort.value}

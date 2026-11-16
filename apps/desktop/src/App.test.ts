@@ -909,28 +909,49 @@ describe('App', () => {
       const counts = () => screen.getAllByTestId('enc-stub').map((e) => e.textContent);
       await vi.waitFor(() => expect(counts()).toEqual(['3 entités ENC', '3 entités ENC']));
 
-      // Volet de droite : CM93 seule, puis aucune carte vectorielle.
+      // Tout est affiché à gauche : rien à proposer à droite, qui montre
+      // les mêmes cartes.
       const pane = screen.getByTestId('split-pane');
       const menu = within(pane).getByRole('button', { name: 'Cartes du volet droit' });
+      const openMenu = async () => {
+        if (menu.getAttribute('aria-expanded') !== 'true') await fireEvent.click(menu);
+      };
+      expect(counts()).toEqual(['3 entités ENC', '3 entités ENC']);
       expect(menu.textContent).toContain('Droite : ENC, CM93');
-      await fireEvent.click(menu);
-      await fireEvent.click(within(pane).getByRole('checkbox', { name: /Cartes ENC/ }));
-      expect(counts()).toEqual(['3 entités ENC', '2 entités ENC']);
-      expect(menu.textContent).toContain('Droite : CM93');
       expect(menu.classList.contains('marked')).toBe(true);
-      await fireEvent.click(within(pane).getByRole('checkbox', { name: 'Cartes CM93' }));
-      expect(counts()).toEqual(['3 entités ENC', '0 entités ENC']);
-      expect(menu.textContent).toContain('Droite : aucune carte');
-      expect(JSON.parse(localStorage.getItem('nautik.split') ?? '{}').vector).toEqual({
-        enc: false,
-        cm93: false,
-      });
+      await openMenu();
+      expect(within(pane).getByTestId('no-right-chart')).toBeTruthy();
+      expect(within(pane).queryAllByRole('radio')).toHaveLength(0);
+      expect(within(pane).queryAllByRole('checkbox')).toHaveLength(0);
 
-      // Volet de gauche : ENC seules ; la CM93 masquée est rappelée.
+      // CM93 masquée à gauche : proposée (seule) à droite, en bouton radio.
       await fireEvent.click(screen.getByRole('button', { name: 'Calques' }));
       const layersMenu = screen.getByTestId('layers-menu');
       await fireEvent.click(within(layersMenu).getByRole('checkbox', { name: 'Cartes CM93' }));
-      await vi.waitFor(() => expect(counts()).toEqual(['1 entités ENC', '0 entités ENC']));
+      await vi.waitFor(() => expect(counts()).toEqual(['1 entités ENC', '2 entités ENC']));
+      expect(menu.textContent).toContain('Droite : CM93');
+      expect(menu.classList.contains('marked')).toBe(false);
+      await openMenu();
+      const cm93Radio = within(pane).getByRole('radio', {
+        name: 'Cartes CM93',
+      }) as HTMLInputElement;
+      expect(cm93Radio.checked).toBe(true);
+      expect(within(pane).queryByRole('radio', { name: /Cartes ENC/ })).toBeNull();
+      await fireEvent.click(cm93Radio);
+      expect(JSON.parse(localStorage.getItem('nautik.split') ?? '{}').chart).toBe('cm93');
+
+      // ENC masquées à gauche aussi : les deux proposées, le choix reste.
+      const calques = screen.getByRole('button', { name: 'Calques' });
+      if (calques.getAttribute('aria-expanded') !== 'true') await fireEvent.click(calques);
+      await fireEvent.click(
+        within(screen.getByTestId('layers-menu')).getByRole('checkbox', { name: /Cartes ENC/ }),
+      );
+      await vi.waitFor(() => expect(counts()).toEqual(['0 entités ENC', '2 entités ENC']));
+      await openMenu();
+      expect(within(pane).getAllByRole('radio')).toHaveLength(2);
+      await fireEvent.click(within(pane).getByRole('radio', { name: /Cartes ENC/ }));
+      await vi.waitFor(() => expect(counts()).toEqual(['0 entités ENC', '1 entités ENC']));
+      expect(menu.textContent).toContain('Droite : ENC');
       expect(screen.getByRole('button', { name: 'Calques' }).title).toContain('Cartes CM93');
       // Plus de CM93 nulle part : ses avertissements disparaissent.
       await vi.waitFor(() =>
@@ -1777,23 +1798,37 @@ describe('App', () => {
       expect((leftCam as HTMLElement).textContent).toContain('libre');
       expect((rightCam as HTMLElement).textContent).toContain('libre');
 
-      // Cartes propres au volet de droite, signalées sur son étiquette.
+      // Les deux cartes affichées à gauche : rien à choisir à droite.
       const pane = screen.getByTestId('split-pane');
       const menu = within(pane).getByRole('button', { name: 'Cartes du volet droit' });
+      const openMenu = async () => {
+        if (menu.getAttribute('aria-expanded') !== 'true') await fireEvent.click(menu);
+      };
       expect(menu.textContent).toContain('Droite : Tahiti, Monde');
-      await fireEvent.click(menu);
+      await openMenu();
       expect(within(pane).queryByRole('checkbox', { name: /Routes/ })).toBeNull();
-      await fireEvent.click(within(pane).getByRole('checkbox', { name: /Tahiti/ }));
+      expect(within(pane).queryAllByRole('radio')).toHaveLength(0);
+      expect(within(pane).getByTestId('no-right-chart')).toBeTruthy();
+
+      // Monde masquée à gauche : seule carte proposée à droite.
+      await fireEvent.click(within(bar).getByRole('button', { name: 'Calques' }));
+      await fireEvent.click(
+        within(screen.getByTestId('layers-menu')).getByRole('checkbox', { name: /Monde/ }),
+      );
       const [leftHidden, rightHidden] = screen.getAllByTestId('hidden-charts-stub');
+      expect((leftHidden as HTMLElement).textContent).toBe('monde');
       expect((rightHidden as HTMLElement).textContent).toBe('tahiti');
-      expect((leftHidden as HTMLElement).textContent).toBe('');
       expect(menu.textContent).toContain('Droite : Monde');
-      expect(menu.classList.contains('marked')).toBe(true);
+      await openMenu();
+      const radios = within(pane).getAllByRole('radio') as HTMLInputElement[];
+      expect(radios).toHaveLength(1);
+      expect(radios[0]?.closest('label')?.textContent).toContain('Monde');
+      expect(radios[0]?.checked).toBe(true);
+      await fireEvent.click(radios[0] as HTMLElement);
       expect(JSON.parse(localStorage.getItem('nautik.split') ?? '{}')).toEqual({
         enabled: true,
         locked: false,
-        hiddenCharts: ['tahiti'],
-        vector: { enc: true, cm93: true },
+        chart: 'chart:monde',
       });
 
       // Retour à une seule carte.
@@ -1802,6 +1837,7 @@ describe('App', () => {
       expect(screen.queryByTestId('split-pane')).toBeNull();
     } finally {
       localStorage.removeItem('nautik.split');
+      localStorage.removeItem('nautik.hiddenCharts');
     }
   });
 

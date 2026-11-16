@@ -237,12 +237,17 @@ avec infobulles ; ils ne se déplacent pas et ne se masquent pas) :
   bateau à ce point et l'active ; impossible sans position fraîche ou
   pendant le tracé d'une route), **Bateau ici** et **Mesurer depuis ici** ;
 - **Deux cartes côte à côte** : partage la carte en deux volets (l'un
-  au-dessus de l'autre dans une fenêtre étroite). Le volet de droite a son
-  propre choix de cartes, ENC et CM93 comprises (étiquette « Droite :
-  … » en haut du volet, par exemple « Droite : CM93 » pour comparer la
-  CM93 aux ENC affichées à gauche ; choix mémorisé) et
-  affiche les mêmes objets que celui de gauche (bateau, routes, traces,
-  AIS, mouillage) ;
+  au-dessus de l'autre dans une fenêtre étroite). Le volet de droite
+  sert à comparer : il affiche **une seule carte**, choisie par bouton
+  radio parmi celles qui **ne sont pas déjà affichées à gauche** (cartes
+  MBTiles masquées à gauche, ENC ou CM93 décochées dans le menu
+  Calques). Étiquette « Droite : … » en haut du volet, par exemple
+  « Droite : CM93 » pour comparer la CM93 aux ENC affichées à gauche ;
+  choix mémorisé. Sans choix, ou si la carte choisie s'affiche
+  maintenant à gauche, la première carte proposée est prise. Si tout est
+  déjà affiché à gauche, rien n'est proposé : le volet de droite montre
+  les mêmes cartes, et son étiquette est signalée. Il affiche les mêmes
+  objets que celui de gauche (bateau, routes, traces, AIS, mouillage) ;
 - cadenas **Verrouiller les deux cartes** (visible avec les deux volets,
   verrouillé par défaut) : même zoom, même position et même orientation
   dans les deux volets ; le volet que vous déplacez entraîne l'autre.

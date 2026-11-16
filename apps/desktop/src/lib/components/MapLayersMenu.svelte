@@ -2,7 +2,8 @@
   // Contenu du menu Calques (ouvert depuis la barre d'outils) : cartes
   // MBTiles (quand plusieurs sont chargées) et cartes vectorielles (ENC,
   // CM93), puis objets. Le rappel des calques masqués est affiché sur la
-  // carte par l'application.
+  // carte par l'application. Choix unique (volet de droite d'une vue
+  // double) : boutons radio, parmi les cartes proposées seulement.
   import {
     LAYER_LABELS,
     layerLabel,
@@ -14,6 +15,16 @@
   } from '../layers';
   import type { ChartInfo } from '../services/charts';
   import { sortCharts, type ChartSort } from '../chartNames.svelte';
+  import { chartChoice } from '../split';
+
+  /** Choix d'une seule carte parmi `options` (voir `rightChartOptions`). */
+  interface SingleChoice {
+    /** Carte affichée ; `null` : aucune proposée. */
+    value: string | null;
+    /** Cartes proposées (`chart:<id>`, `enc`, `cm93`). */
+    options: string[];
+    onselect: (value: string) => void;
+  }
 
   interface Props {
     layers: MapLayers;
@@ -36,6 +47,8 @@
     enc?: boolean;
     /** Afficher aussi les objets (routes, traces, AIS). */
     objects?: boolean;
+    /** Une seule carte à choisir (boutons radio) au lieu de cases. */
+    single?: SingleChoice;
   }
 
   let {
@@ -51,6 +64,7 @@
     sort = 'detail',
     enc = true,
     objects = true,
+    single,
   }: Props = $props();
 
   // Ordre choisi dans Paramètres → Cartes (par défaut : plus détaillée en tête).
@@ -67,7 +81,38 @@
 <fieldset>
   <legend class="sr">Calques affichés</legend>
   <p class="group">Cartes</p>
-  {#if chartList.length > 1}
+  {#if single}
+    {@const name = `single-chart-${single.options.length}`}
+    {#each chartList.filter((c) => single.options.includes(chartChoice(c.id))) as chart (chart.id)}
+      <label title={chart.description ?? chart.fileName}>
+        <input
+          type="radio"
+          {name}
+          checked={single.value === chartChoice(chart.id)}
+          onclick={() => single.onselect(chartChoice(chart.id))}
+        />
+        {chart.name}
+        <span class="zoom">z{chart.minZoom}–{chart.maxZoom}</span>
+      </label>
+    {/each}
+    {#each vectorKeys(cm93, enc).filter((k) => single.options.includes(k)) as key (key)}
+      <label>
+        <input
+          type="radio"
+          {name}
+          checked={single.value === key}
+          onclick={() => single.onselect(key)}
+        />
+        {layerLabel(key, cm93Name)}
+      </label>
+    {/each}
+    {#if single.options.length === 0}
+      <p class="note" data-testid="no-right-chart">
+        Toutes les cartes sont déjà affichées à gauche : masquez-en une dans le menu Calques pour la
+        comparer ici.
+      </p>
+    {/if}
+  {:else if chartList.length > 1}
     {#each chartList as chart (chart.id)}
       <label title={chart.description ?? chart.fileName}>
         <input
@@ -81,16 +126,18 @@
       </label>
     {/each}
   {/if}
-  {#each vectorKeys(cm93, enc) as key (key)}
-    <label>
-      <input
-        type="checkbox"
-        checked={shownVector[key]}
-        onchange={(e) => setVector(key, e.currentTarget.checked)}
-      />
-      {layerLabel(key, cm93Name)}
-    </label>
-  {/each}
+  {#if !single}
+    {#each vectorKeys(cm93, enc) as key (key)}
+      <label>
+        <input
+          type="checkbox"
+          checked={shownVector[key]}
+          onchange={(e) => setVector(key, e.currentTarget.checked)}
+        />
+        {layerLabel(key, cm93Name)}
+      </label>
+    {/each}
+  {/if}
   {#if objects}
     <hr />
     <p class="group">Objets</p>
@@ -132,6 +179,13 @@
     margin: 0.3rem 0;
     border: 0;
     border-top: 1px solid var(--border);
+  }
+
+  .note {
+    max-width: 16rem;
+    margin: 0.2rem 0;
+    color: var(--muted);
+    font-size: 0.75rem;
   }
 
   .zoom {

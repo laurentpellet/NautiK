@@ -2,6 +2,9 @@
  * Carte partagée en deux volets côte à côte. Verrouillées, les deux cartes
  * suivent la même vue (centre, zoom, orientation) : le volet que
  * l'utilisateur manipule mène, l'autre suit.
+ *
+ * Le volet de droite sert à comparer : il affiche une seule carte, choisie
+ * parmi celles qui ne sont pas déjà affichées à gauche.
  */
 import type { VectorCharts } from './layers';
 
@@ -17,18 +20,19 @@ export interface MapCamera {
 export interface SplitState {
   enabled: boolean;
   locked: boolean;
-  /** Cartes masquées dans le volet de droite. */
-  hiddenCharts: string[];
-  /** Cartes vectorielles du volet de droite (choix propre à ce volet). */
-  vector: VectorCharts;
+  /**
+   * Carte choisie pour le volet de droite (voir {@link rightChartOptions}) ;
+   * `null` : pas encore choisie.
+   */
+  chart: string | null;
 }
 
-/** Nombre maximal d'identifiants de cartes mémorisés. */
-const MAX_HIDDEN = 256;
+/** Longueur maximale d'un choix mémorisé. */
+const MAX_CHOICE_CHARS = 300;
 const STORAGE_KEY = 'nautik.split';
 
 export function defaultSplit(): SplitState {
-  return { enabled: false, locked: true, hiddenCharts: [], vector: { enc: true, cm93: true } };
+  return { enabled: false, locked: true, chart: null };
 }
 
 export function loadSplit(
@@ -43,15 +47,8 @@ export function loadSplit(
     const r = parsed as Record<string, unknown>;
     if (typeof r.enabled === 'boolean') state.enabled = r.enabled;
     if (typeof r.locked === 'boolean') state.locked = r.locked;
-    if (Array.isArray(r.hiddenCharts)) {
-      state.hiddenCharts = r.hiddenCharts
-        .filter((id): id is string => typeof id === 'string' && id.length > 0 && id.length <= 256)
-        .slice(0, MAX_HIDDEN);
-    }
-    if (typeof r.vector === 'object' && r.vector !== null) {
-      const v = r.vector as Record<string, unknown>;
-      if (typeof v.enc === 'boolean') state.vector.enc = v.enc;
-      if (typeof v.cm93 === 'boolean') state.vector.cm93 = v.cm93;
+    if (typeof r.chart === 'string' && r.chart.length > 0 && r.chart.length <= MAX_CHOICE_CHARS) {
+      state.chart = r.chart;
     }
     return state;
   } catch {
@@ -95,4 +92,45 @@ export function followedCamera(
   if (!state.enabled || !state.locked || leader === pane) return null;
   const camera = cameras[leader] ?? null;
   return camera && isValidCamera(camera) ? camera : null;
+}
+
+/** Choix d'une carte MBTiles pour le volet de droite. */
+export function chartChoice(id: string): string {
+  return `chart:${id}`;
+}
+
+/**
+ * Cartes proposées au volet de droite : les cartes MBTiles masquées à
+ * gauche, dans l'ordre donné, puis les cartes vectorielles disponibles
+ * non affichées à gauche. Comparer une carte à elle-même n'apprend rien.
+ */
+export function rightChartOptions(
+  chartIds: string[],
+  leftHidden: string[],
+  vectorAvailable: (keyof VectorCharts)[],
+  leftVector: VectorCharts,
+): string[] {
+  return [
+    ...chartIds.filter((id) => leftHidden.includes(id)).map(chartChoice),
+    ...vectorAvailable.filter((key) => !leftVector[key]),
+  ];
+}
+
+/**
+ * Carte affichée à droite : le choix mémorisé s'il est proposé, sinon la
+ * première carte proposée ; `null` si rien n'est proposé.
+ */
+export function effectiveRightChart(chosen: string | null, options: string[]): string | null {
+  return chosen !== null && options.includes(chosen) ? chosen : (options[0] ?? null);
+}
+
+/** Cartes MBTiles masquées et cartes vectorielles du volet de droite. */
+export function rightPaneCharts(
+  choice: string,
+  chartIds: string[],
+): { hiddenCharts: string[]; vector: VectorCharts } {
+  return {
+    hiddenCharts: chartIds.filter((id) => chartChoice(id) !== choice),
+    vector: { enc: choice === 'enc', cm93: choice === 'cm93' },
+  };
 }

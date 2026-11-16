@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  chartChoice,
   defaultSplit,
+  effectiveRightChart,
   followedCamera,
+  rightChartOptions,
+  rightPaneCharts,
   isValidCamera,
   loadSplit,
   saveSplit,
@@ -17,12 +21,7 @@ const cam = (lon: number, lat: number, zoom = 10, bearing = 0): MapCamera => ({
 
 describe('carte partagée', () => {
   it('démarre désactivée et verrouillée, et tolère un stockage invalide', () => {
-    expect(defaultSplit()).toEqual({
-      enabled: false,
-      locked: true,
-      hiddenCharts: [],
-      vector: { enc: true, cm93: true },
-    });
+    expect(defaultSplit()).toEqual({ enabled: false, locked: true, chart: null });
     expect(loadSplit(store(null))).toEqual(defaultSplit());
     expect(loadSplit(store('{oups'))).toEqual(defaultSplit());
     expect(loadSplit(store('42'))).toEqual(defaultSplit());
@@ -41,20 +40,16 @@ describe('carte partagée', () => {
         JSON.stringify({
           enabled: true,
           locked: 'oui',
-          hiddenCharts: ['tahiti', 3, '', 'x'.repeat(300), 'monde'],
-          vector: { enc: 'non', cm93: false },
+          chart: 'chart:tahiti',
+          // Ancien format (cases à cocher) : ignoré.
+          hiddenCharts: ['monde'],
         }),
       ),
     );
-    expect(state).toEqual({
-      enabled: true,
-      locked: true,
-      hiddenCharts: ['tahiti', 'monde'],
-      vector: { enc: true, cm93: false },
-    });
-    expect(loadSplit(store('{"vector":3}')).vector).toEqual({ enc: true, cm93: true });
-    const many = loadSplit(store(JSON.stringify({ hiddenCharts: Array(1000).fill('c') })));
-    expect(many.hiddenCharts).toHaveLength(256);
+    expect(state).toEqual({ enabled: true, locked: true, chart: 'chart:tahiti' });
+    for (const chart of [3, '', 'x'.repeat(301), null]) {
+      expect(loadSplit(store(JSON.stringify({ chart }))).chart).toBeNull();
+    }
   });
 
   it('mémorise le choix et tolère un stockage plein', () => {
@@ -62,8 +57,7 @@ describe('carte partagée', () => {
     const state = {
       enabled: true,
       locked: false,
-      hiddenCharts: ['tahiti'],
-      vector: { enc: false, cm93: true },
+      chart: 'cm93',
     };
     saveSplit(state, { setItem: (_k: string, v: string) => (saved = v) });
     expect(loadSplit(store(saved))).toEqual(state);
@@ -74,6 +68,38 @@ describe('carte partagée', () => {
         },
       }),
     ).not.toThrow();
+  });
+
+  it('propose à droite les cartes non affichées à gauche', () => {
+    const ids = ['tahiti', 'moorea', 'monde'];
+    expect(
+      rightChartOptions(ids, ['monde', 'tahiti'], ['enc', 'cm93'], { enc: true, cm93: false }),
+    ).toEqual([chartChoice('tahiti'), chartChoice('monde'), 'cm93']);
+    // Tout est affiché à gauche : rien à proposer.
+    expect(rightChartOptions(ids, [], ['cm93'], { enc: false, cm93: true })).toEqual([]);
+    // Carte vectorielle indisponible : jamais proposée.
+    expect(rightChartOptions([], [], [], { enc: false, cm93: false })).toEqual([]);
+  });
+
+  it('garde le choix proposé, sinon prend la première carte proposée', () => {
+    const options = [chartChoice('tahiti'), 'cm93'];
+    expect(effectiveRightChart('cm93', options)).toBe('cm93');
+    expect(effectiveRightChart(chartChoice('monde'), options)).toBe(chartChoice('tahiti'));
+    expect(effectiveRightChart(null, options)).toBe(chartChoice('tahiti'));
+    expect(effectiveRightChart('cm93', [])).toBeNull();
+  });
+
+  it('affiche à droite la seule carte choisie', () => {
+    const ids = ['tahiti', 'monde'];
+    expect(rightPaneCharts(chartChoice('monde'), ids)).toEqual({
+      hiddenCharts: ['tahiti'],
+      vector: { enc: false, cm93: false },
+    });
+    expect(rightPaneCharts('cm93', ids)).toEqual({
+      hiddenCharts: ['tahiti', 'monde'],
+      vector: { enc: false, cm93: true },
+    });
+    expect(rightPaneCharts('enc', []).vector).toEqual({ enc: true, cm93: false });
   });
 
   it('valide une vue', () => {
